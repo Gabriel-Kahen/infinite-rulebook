@@ -129,6 +129,9 @@ bound with self-reported reward or information values, or reuse a channel
 certificate across semantically different reward problems. A solver-derived
 point uses the numerically attainable `effective_target_reward` as its curve
 coordinate while retaining the ideal semantic endpoint as `requested_reward`.
+Only the final point may use this alias, the gap must be within the solver's
+floating-roundoff tolerance, and lookup treats both values as the same finite
+endpoint.
 
 `ArtifactEnvelope` has three explicit payload boundaries:
 

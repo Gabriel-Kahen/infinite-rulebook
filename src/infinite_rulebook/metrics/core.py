@@ -210,8 +210,18 @@ class FrontierCurve:
         maximum = _real("maximum_reward", self.maximum_reward)
         if zero >= maximum:
             raise ValueError("zero-information reward must be below maximum reward")
-        if rewards[0] != zero or rewards[-1] != maximum:
+        if rewards[0] != zero:
             raise ValueError("frontier points must span the declared reward range")
+        if any(point.requested_reward != point.reward for point in points[:-1]):
+            raise ValueError(
+                "only the final frontier point may alias a requested reward"
+            )
+        final = points[-1]
+        if final.requested_reward != maximum:
+            raise ValueError("final requested reward must equal maximum_reward")
+        endpoint_scale = max(abs(final.reward), abs(maximum))
+        if maximum - final.reward > 64.0 * math.ulp(endpoint_scale):
+            raise ValueError("final requested reward alias exceeds roundoff tolerance")
         if points[0].information != MetricInterval(0.0, 0.0, "nats"):
             raise ValueError("zero-information endpoint must be exactly [0, 0] nats")
         for bound in ("lower", "upper"):
@@ -250,6 +260,8 @@ def lookup_bit_equivalent(
         return MetricInterval(0.0, 0.0, "nats")
     if reward > curve.maximum_reward:
         return MetricInterval(math.inf, math.inf, "nats")
+    if reward > curve.points[-1].reward:
+        return curve.points[-1].information
     right_index = bisect_left(curve._rewards, reward)
     right = curve.points[right_index]
     left = curve.points[right_index - 1]

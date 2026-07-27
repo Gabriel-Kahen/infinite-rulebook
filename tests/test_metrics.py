@@ -280,6 +280,18 @@ def test_frontier_rejects_inconsistent_zero_information_endpoint() -> None:
         )
 
 
+def test_frontier_rejects_non_roundoff_endpoint_alias(
+    exact_curve: FrontierCurve,
+) -> None:
+    from dataclasses import replace
+
+    final = replace(exact_curve.points[-1], requested_reward=1.1)
+    with pytest.raises(ValueError, match="roundoff tolerance"):
+        replace(
+            exact_curve, points=(*exact_curve.points[:-1], final), maximum_reward=1.1
+        )
+
+
 def test_frontier_point_re_evaluates_and_binds_existing_solver_witness() -> None:
     from dataclasses import replace
 
