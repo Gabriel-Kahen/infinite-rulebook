@@ -37,6 +37,9 @@ The repository is implementing the first exact-calibration gates. It covers:
   runtime payload boundaries;
 - bounded factorized comparison agents with fixed, expanding, reward, novelty,
   total-information, and useful-information acquisition objectives;
+- typed deterministic experiment configs and named seed banks;
+- restart-safe immutable scientific artifacts and separately cached frontiers;
+- a side-effect-free checkpoint runner and bounded symbolic pilot CLI;
 - and regression tests against analytic frontiers and control semantics.
 
 ## Development
@@ -49,10 +52,13 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv build
+uv run infinite-rulebook pilot configs/pilot-foundation.json
 ```
 
 The symbolic control API and its exact identities are documented in
 [docs/symbolic-controls.md](docs/symbolic-controls.md).
+See [docs/experiments.md](docs/experiments.md) for artifact, restart, semantic
+hash, validation, and pilot-boundary contracts.
 
 ## Research scope
 

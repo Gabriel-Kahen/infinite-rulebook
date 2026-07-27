@@ -12,6 +12,9 @@ license = "MIT"
 authors = [{ name = "Gabriel Kahen" }]
 dependencies = []
 
+[project.scripts]
+infinite-rulebook = "infinite_rulebook.cli:main"
+
 [dependency-groups]
 dev = [
   "hypothesis>=6.100",
