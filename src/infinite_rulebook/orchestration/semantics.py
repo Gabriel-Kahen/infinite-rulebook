@@ -22,9 +22,21 @@ def semantic_hashes(
         "duplicates": "rejected",
         "ordering": "sorted-by-rule-index",
     }
+    if cell.environment.kind is EnvironmentKind.PUBLIC_C:
+        action_payload = {
+            **action_payload,
+            "public_contract": "bounded-public-choice.v1",
+            "public_rewards": (0.0, cell.environment.public_reward_cap),
+        }
+    feedback_payload = {
+        **asdict(cell.feedback),
+        "alphabet": cell.reward.q,
+        "semantic_observation_key": "p1-semantic-coordinate.v1",
+    }
     environment_hash = scientific_hash(environment_payload, domain="environment")
     reward_hash = scientific_hash(reward_payload, domain="reward")
     action_hash = scientific_hash(action_payload, domain="behavioral-action")
+    feedback_hash = scientific_hash(feedback_payload, domain="feedback")
     if cell.environment.kind in {EnvironmentKind.ALEA, EnvironmentKind.TRIVIA}:
         decision_kind = EnvironmentKind.IND
     else:
@@ -53,5 +65,6 @@ def semantic_hashes(
         "environment": environment_hash,
         "reward": reward_hash,
         "action": action_hash,
+        "feedback": feedback_hash,
         "frontier": scientific_hash(frontier_payload, domain="frontier"),
     }
