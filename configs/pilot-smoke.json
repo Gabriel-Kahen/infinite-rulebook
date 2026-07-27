@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "name": "symbolic-smoke-pilot",
+  "phase": "pilot",
+  "master_seed": "symbolic-smoke-pilot-v1",
+  "horizon": 4,
+  "checkpoints": {
+    "rounds": [0, 2, 4]
+  },
+  "feedback": {
+    "protocol": "P1",
+    "epsilon": 0.1,
+    "query_budget": 1
+  },
+  "reward": {
+    "q": 4,
+    "u": 1.0,
+    "c": 1.0,
+    "units": "nats"
+  },
+  "solver": {
+    "tolerance": 1e-9,
+    "bound_tolerance": 1e-7,
+    "lagrangian_tolerance": 1e-12,
+    "max_iterations": 96,
+    "lagrangian_max_iterations": 100000,
+    "contract_version": "certified-finite-frontier.v1"
+  },
+  "environments": [
+    {
+      "kind": "IND",
+      "projection_size": 2
+    },
+    {
+      "kind": "RED-C",
+      "projection_size": 2,
+      "core_dimensions": 2,
+      "max_redundant_support": 2
+    },
+    {
+      "kind": "MIX",
+      "projection_size": 2,
+      "core_dimensions": 1,
+      "max_redundant_support": 1
+    },
+    {
+      "kind": "ALEA",
+      "projection_size": 2,
+      "distractor_dimensions": 16
+    },
+    {
+      "kind": "TRIVIA",
+      "projection_size": 2,
+      "distractor_dimensions": 2
+    },
+    {
+      "kind": "PUBLIC-C",
+      "projection_size": 2,
+      "public_reward_cap": 1.0
+    }
+  ],
+  "agents": [
+    {
+      "kind": "fixed",
+      "target_size": 2
+    },
+    {
+      "kind": "reward",
+      "target_size": 2
+    },
+    {
+      "kind": "novelty",
+      "target_size": 2
+    },
+    {
+      "kind": "total-information",
+      "target_size": 2
+    }
+  ],
+  "environment_replicas": 1,
+  "algorithm_replicas": 1
+}

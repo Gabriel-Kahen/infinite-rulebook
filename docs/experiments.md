@@ -25,6 +25,18 @@ and a reward-directed symbolic control. It is deliberately not a substitute for
 the richer distractor environments or agent objectives owned by their simulator
 and agent implementations.
 
+The dependency-integrated smoke sweep is:
+
+```bash
+uv run infinite-rulebook pilot configs/pilot-smoke.json --workers 4
+```
+
+It crosses IND, RED-C, MIX, ALEA, TRIVIA, and PUBLIC-C with fixed-target,
+reward-directed, novelty-directed, and total-information agents. The projection,
+horizon, support caps, public schedule, and replica count are intentionally
+small. Its per-run population metric has `run_count = 1`; this exercises the
+scientific schema and is not a powered population estimate.
+
 ## Artifact contract
 
 Frontiers are cached under `artifacts/_frontiers/<frontier-hash>/`, separately
@@ -33,6 +45,7 @@ from agent runs. Run directories contain:
 - a fully resolved config and deterministic seed tree;
 - one immutable, hash-chained file per training event;
 - side-effect-free checkpoint artifacts from an independent evaluation stream;
+- typed run/checkpoint metric records and exact finite-closure ledgers;
 - a reference to the validated frontier bundle;
 - immutable metrics and a final manifest.
 
