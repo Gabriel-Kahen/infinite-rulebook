@@ -124,11 +124,36 @@ class CheckpointConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SolverConfig:
+    """Pilot numerical settings; these are recorded but not confirmatory-frozen."""
+
+    tolerance: float = 1e-9
+    bound_tolerance: float = 1e-7
+    lagrangian_tolerance: float = 1e-12
+    max_iterations: int = 96
+    lagrangian_max_iterations: int = 100_000
+    contract_version: str = "certified-finite-frontier.v1"
+
+    def __post_init__(self) -> None:
+        for name in ("tolerance", "bound_tolerance", "lagrangian_tolerance"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        for name in ("max_iterations", "lagrangian_max_iterations"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if not self.contract_version:
+            raise ValueError("contract_version must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class RunCell:
     environment: EnvironmentConfig
     feedback: FeedbackConfig
     reward: RewardConfig
     agent: AgentConfig
+    solver: SolverConfig
     environment_replica: int
     algorithm_replica: int
 
@@ -147,6 +172,7 @@ class ExperimentConfig:
     master_seed: int | str
     feedback: FeedbackConfig = FeedbackConfig()
     reward: RewardConfig = RewardConfig()
+    solver: SolverConfig = SolverConfig()
     environment_replicas: int = 1
     algorithm_replicas: int = 1
     phase: str = "pilot"
@@ -163,6 +189,10 @@ class ExperimentConfig:
             raise ValueError("this runner does not freeze confirmatory configurations")
         if not self.environments or not self.agents:
             raise ValueError("experiments require environments and agents")
+        if len(set(self.environments)) != len(self.environments):
+            raise ValueError("duplicate environment configs are not allowed")
+        if len(set(self.agents)) != len(self.agents):
+            raise ValueError("duplicate agent configs are not allowed")
         for name in ("horizon", "environment_replicas", "algorithm_replicas"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -198,7 +228,15 @@ class ExperimentConfig:
 
     def cells(self) -> tuple[RunCell, ...]:
         cells = (
-            RunCell(environment, self.feedback, self.reward, agent, env_rep, alg_rep)
+            RunCell(
+                environment,
+                self.feedback,
+                self.reward,
+                agent,
+                self.solver,
+                env_rep,
+                alg_rep,
+            )
             for environment in self.environments
             for agent in self.agents
             for env_rep in range(self.environment_replicas)
@@ -249,6 +287,8 @@ def experiment_config_from_dict(raw: object) -> ExperimentConfig:
         values["feedback"] = _model(FeedbackConfig, values["feedback"])
     if "reward" in values:
         values["reward"] = _model(RewardConfig, values["reward"])
+    if "solver" in values:
+        values["solver"] = _model(SolverConfig, values["solver"])
     checkpoint_values = values["checkpoints"]
     if isinstance(checkpoint_values, dict) and "rounds" in checkpoint_values:
         checkpoint_values = {

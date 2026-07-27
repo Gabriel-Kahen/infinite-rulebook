@@ -8,7 +8,11 @@ from infinite_rulebook.orchestration.config import EnvironmentKind, RunCell
 from infinite_rulebook.orchestration.hashing import scientific_hash
 
 
-def semantic_hashes(cell: RunCell) -> dict[str, str]:
+def semantic_hashes(
+    cell: RunCell,
+    *,
+    analysis_code_hash: str | None = None,
+) -> dict[str, str]:
     environment_payload = asdict(cell.environment)
     reward_payload = asdict(cell.reward)
     action_payload = {
@@ -42,7 +46,8 @@ def semantic_hashes(cell: RunCell) -> dict[str, str]:
         "environment": frontier_environment,
         "reward_hash": reward_hash,
         "action_hash": action_hash,
-        "solver_contract": "exact-symbolic.v1",
+        "solver": asdict(cell.solver),
+        "analysis_code_hash": analysis_code_hash or "unspecified",
     }
     return {
         "environment": environment_hash,

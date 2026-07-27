@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from infinite_rulebook.core.behavior import DeploymentAction
@@ -14,6 +14,7 @@ from infinite_rulebook.feedback.qary import (
     QarySymmetricChannel,
     SemanticObservationKey,
 )
+from infinite_rulebook.frontier.blahut_arimoto import solve_lagrangian
 from infinite_rulebook.frontier.inversion import solve_frontier
 from infinite_rulebook.frontier.redundancy import (
     enumerate_mixed_rulebook,
@@ -91,22 +92,11 @@ class ExactSymbolicAdapter:
         del state
         environment = self._environment(cell, seeds)
         channel = QarySymmetricChannel(cell.reward.q, cell.feedback.epsilon)
-        if cell.environment.kind is EnvironmentKind.RED_C:
-            rule_count = max(1, cell.environment.projection_size)
-            indices = tuple(
-                1 + ((round_index * cell.feedback.query_budget + ordinal) % rule_count)
-                for ordinal in range(cell.feedback.query_budget)
-            )
-        elif cell.environment.kind is EnvironmentKind.MIX:
-            indices = tuple(
-                1 + 2 * (round_index * cell.feedback.query_budget + ordinal)
-                for ordinal in range(cell.feedback.query_budget)
-            )
-        else:
-            indices = tuple(
-                1 + round_index * cell.feedback.query_budget + ordinal
-                for ordinal in range(cell.feedback.query_budget)
-            )
+        rule_count = cell.environment.projection_size
+        indices = tuple(
+            1 + ((round_index * cell.feedback.query_budget + ordinal) % rule_count)
+            for ordinal in range(cell.feedback.query_budget)
+        )
         observations = []
         for ordinal, index in enumerate(indices):
             key = SemanticObservationKey(
@@ -186,9 +176,22 @@ class ExactSymbolicAdapter:
         curve = []
         witnesses = {}
         certificates = {}
-        diagnostics = {"solver": "certified-finite-frontier", "points": []}
+        diagnostics = {
+            "solver": cell.solver.contract_version,
+            "solver_settings": asdict(cell.solver),
+            "confirmatory_frozen": False,
+            "points": [],
+        }
         for index, target in enumerate(targets):
-            solution = solve_frontier(problem, target, bound_tolerance=1e-7)
+            solution = solve_frontier(
+                problem,
+                target,
+                tolerance=cell.solver.tolerance,
+                bound_tolerance=cell.solver.bound_tolerance,
+                lagrangian_tolerance=cell.solver.lagrangian_tolerance,
+                max_iterations=cell.solver.max_iterations,
+                lagrangian_max_iterations=(cell.solver.lagrangian_max_iterations),
+            )
             if solution.witness is None:
                 raise ValueError("pilot frontier target unexpectedly infeasible")
             point_name = f"point-{index:03d}"
@@ -207,8 +210,19 @@ class ExactSymbolicAdapter:
                 "expected_reward": solution.witness.expected_reward,
                 "mutual_information": solution.witness.mutual_information,
             }
+            dual_objective = None
+            if math.isfinite(solution.dual_beta):
+                dual_solution = solve_lagrangian(
+                    problem,
+                    solution.dual_beta,
+                    tolerance=cell.solver.lagrangian_tolerance,
+                    max_iterations=cell.solver.lagrangian_max_iterations,
+                )
+                dual_objective = dual_solution.objective_lower_bound
             certificates[point_name] = {
+                "target_reward": target,
                 "dual_beta": _extended_number(solution.dual_beta),
+                "dual_objective_lower_bound": dual_objective,
                 "lower_bound": solution.lower_bound,
                 "upper_bound": solution.upper_bound,
                 "duality_gap": _extended_number(solution.duality_gap),

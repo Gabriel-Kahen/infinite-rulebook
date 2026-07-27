@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import copy
+import fcntl
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -15,10 +20,28 @@ from infinite_rulebook.orchestration.artifacts import (
 )
 from infinite_rulebook.orchestration.config import ExperimentConfig, RunCell
 from infinite_rulebook.orchestration.hashing import scientific_hash
+from infinite_rulebook.orchestration.provenance import (
+    ScientificProvenance,
+    collect_provenance,
+    collect_runtime_metadata,
+)
 from infinite_rulebook.orchestration.seeds import RunSeeds, SeedBank
 from infinite_rulebook.orchestration.semantics import semantic_hashes
 
 RUNNER_VERSION = "symbolic-runner.v1"
+
+
+@contextmanager
+def _run_lock(path: Path) -> Iterator[None]:
+    """Serialize executors that resolve to the same run directory."""
+
+    path.mkdir(parents=True, exist_ok=True)
+    with (path / ".run.lock").open("ab") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 class ExperimentAdapter(Protocol):
@@ -62,6 +85,7 @@ def run_identity(
     experiment: ExperimentConfig,
     cell: RunCell,
     seeds: RunSeeds,
+    provenance: ScientificProvenance,
 ) -> str:
     return scientific_hash(
         {
@@ -69,6 +93,7 @@ def run_identity(
             "run_settings": experiment.resolved_run_settings(),
             "cell": asdict(cell),
             "seeds": asdict(seeds),
+            "provenance": provenance.to_dict(),
         },
         domain="run-identity",
     )
@@ -77,7 +102,8 @@ def run_identity(
 @dataclass(slots=True)
 class RunExecutor:
     artifact_root: Path
-    adapter: ExperimentAdapter
+    adapter_factory: Callable[[], ExperimentAdapter]
+    provenance: ScientificProvenance = field(default_factory=collect_provenance)
 
     def _frontier_store(
         self,
@@ -98,10 +124,43 @@ class RunExecutor:
         stop_after_new_events: int | None = None,
         runtime_metadata: dict[str, Any] | None = None,
     ) -> RunResult:
+        started = time.perf_counter()
+        adapter = self.adapter_factory()
         seeds = SeedBank(experiment.master_seed).for_cell(cell)
-        run_hash = run_identity(experiment, cell, seeds)
-        hashes = semantic_hashes(cell)
+        provenance = self.provenance
+        run_hash = run_identity(experiment, cell, seeds, provenance)
+        hashes = semantic_hashes(cell, analysis_code_hash=provenance.analysis_code_hash)
         store = ArtifactStore.for_run(self.artifact_root, experiment.name, run_hash)
+        with _run_lock(store.path):
+            return self._execute_locked(
+                experiment,
+                cell,
+                adapter,
+                seeds,
+                provenance,
+                run_hash,
+                hashes,
+                store,
+                started=started,
+                stop_after_new_events=stop_after_new_events,
+                runtime_metadata=runtime_metadata,
+            )
+
+    def _execute_locked(
+        self,
+        experiment: ExperimentConfig,
+        cell: RunCell,
+        adapter: ExperimentAdapter,
+        seeds: RunSeeds,
+        provenance: ScientificProvenance,
+        run_hash: str,
+        hashes: dict[str, str],
+        store: ArtifactStore,
+        *,
+        started: float,
+        stop_after_new_events: int | None,
+        runtime_metadata: dict[str, Any] | None,
+    ) -> RunResult:
         manifest_path = store.path / "manifest.json"
         if manifest_path.exists():
             artifacts = validate_artifact_tree(
@@ -128,11 +187,12 @@ class RunExecutor:
                 "run_settings": experiment.resolved_run_settings(),
                 "cell": asdict(cell),
                 "seeds": asdict(seeds),
+                "provenance": provenance.to_dict(),
                 "run_hash": run_hash,
             },
         )
         frontier_store = self._frontier_store(experiment, cell, hashes)
-        frontier = self.adapter.frontier(cell)
+        frontier = adapter.frontier(cell)
         write_frontier_bundle(
             frontier_store,
             {"frontier": hashes["frontier"]},
@@ -141,7 +201,15 @@ class RunExecutor:
             certificates=frontier["certificates"],
             diagnostics=frontier["diagnostics"],
         )
-        frontier_manifest = frontier_store.read("frontier/manifest.json")
+        frontier_artifacts = validate_artifact_tree(
+            frontier_store.path,
+            expected_semantic_hashes={"frontier": hashes["frontier"]},
+        )
+        frontier_manifest = next(
+            artifact
+            for artifact in frontier_artifacts
+            if artifact.artifact_type == "frontier-manifest"
+        )
         store.write(
             "frontier-reference.json",
             "frontier-reference",
@@ -153,18 +221,31 @@ class RunExecutor:
         )
 
         journal = EventJournal(store, hashes)
-        state = self.adapter.initial_state(cell, seeds)
-        for event in journal.events():
-            state = self.adapter.apply_training_event(state, event.payload)
-
-        existing_event_count = len(journal.events())
+        state = adapter.initial_state(cell, seeds)
+        existing_events = journal.events()
         checkpoint_rounds = set(experiment.checkpoints.rounds)
+        for event in existing_events:
+            if event.sequence in checkpoint_rounds:
+                self._checkpoint(
+                    adapter,
+                    store,
+                    hashes,
+                    state,
+                    event.sequence,
+                    cell,
+                    seeds,
+                )
+            state = adapter.apply_training_event(state, event.payload)
+
+        existing_event_count = len(existing_events)
         for round_index in range(existing_event_count, experiment.horizon):
             if round_index in checkpoint_rounds:
-                self._checkpoint(store, hashes, state, round_index, cell, seeds)
-            payload = self.adapter.training_event(state, round_index, cell, seeds)
+                self._checkpoint(
+                    adapter, store, hashes, state, round_index, cell, seeds
+                )
+            payload = adapter.training_event(state, round_index, cell, seeds)
             journal.append(f"round:{round_index}", "training-step", payload)
-            state = self.adapter.apply_training_event(state, payload)
+            state = adapter.apply_training_event(state, payload)
             new_events = round_index - existing_event_count + 1
             if (
                 stop_after_new_events is not None
@@ -179,8 +260,16 @@ class RunExecutor:
                 )
 
         if experiment.horizon in checkpoint_rounds:
-            self._checkpoint(store, hashes, state, experiment.horizon, cell, seeds)
-        final_fingerprint = self.adapter.state_fingerprint(state)
+            self._checkpoint(
+                adapter,
+                store,
+                hashes,
+                state,
+                experiment.horizon,
+                cell,
+                seeds,
+            )
+        final_fingerprint = adapter.state_fingerprint(state)
         store.write(
             "metrics.json",
             "run-metrics",
@@ -193,7 +282,14 @@ class RunExecutor:
                 "confirmatory_frozen": False,
             },
         )
-        manifest = store.finalize(hashes, runtime_metadata=runtime_metadata)
+        recorded_runtime = collect_runtime_metadata(
+            wall_time_seconds=time.perf_counter() - started
+        )
+        recorded_runtime.update(runtime_metadata or {})
+        manifest = store.finalize(
+            hashes,
+            runtime_metadata=recorded_runtime,
+        )
         validate_artifact_tree(store.path, expected_semantic_hashes=hashes)
         return RunResult(
             run_hash,
@@ -205,6 +301,7 @@ class RunExecutor:
 
     def _checkpoint(
         self,
+        adapter: ExperimentAdapter,
         store: ArtifactStore,
         hashes: dict[str, str],
         state: Any,
@@ -214,23 +311,45 @@ class RunExecutor:
     ) -> None:
         relative_path = f"checkpoints/{round_index:08d}.json"
         path = store.path / relative_path
+        current = adapter.state_fingerprint(state)
         if path.exists():
-            store.read(relative_path, expected_semantic_hashes=hashes)
+            checkpoint = store.read(relative_path, expected_semantic_hashes=hashes)
+            payload = checkpoint.payload
+            if (
+                payload["round"] != round_index
+                or payload["training_state_before"] != current
+                or payload["training_state_after"] != current
+                or payload["evaluation_seed"] != seeds.evaluation
+                or payload["deployment_seed"] != seeds.deployment
+            ):
+                raise ScientificArtifactError(
+                    "stored checkpoint is incompatible with replayed state"
+                )
             return
-        before = self.adapter.state_fingerprint(state)
-        payload = self.adapter.checkpoint(state, round_index, cell, seeds)
-        after = self.adapter.state_fingerprint(state)
-        if before != after:
+        evaluation_adapter, evaluation_state = copy.deepcopy((adapter, state))
+        evaluation_before = evaluation_adapter.state_fingerprint(evaluation_state)
+        if evaluation_before != current:
             raise ScientificArtifactError(
-                "checkpoint evaluation mutated training state"
+                "checkpoint clone changed the scientific training state"
             )
+        payload = evaluation_adapter.checkpoint(
+            evaluation_state, round_index, cell, seeds
+        )
+        evaluation_after = evaluation_adapter.state_fingerprint(evaluation_state)
+        if evaluation_before != evaluation_after:
+            raise ScientificArtifactError(
+                "checkpoint evaluation mutated its frozen state"
+            )
+        after = adapter.state_fingerprint(state)
+        if current != after:
+            raise ScientificArtifactError("checkpoint changed training state")
         store.write(
             relative_path,
             "run-checkpoint",
             hashes,
             {
                 "round": round_index,
-                "training_state_before": before,
+                "training_state_before": current,
                 "training_state_after": after,
                 "evaluation_seed": seeds.evaluation,
                 "deployment_seed": seeds.deployment,

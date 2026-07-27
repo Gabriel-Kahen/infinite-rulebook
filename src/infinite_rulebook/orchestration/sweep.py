@@ -24,6 +24,8 @@ class SweepRunner:
         if max_workers < 1:
             raise ValueError("max_workers must be positive")
         cells = experiment.cells()
+        if len({cell.cell_hash for cell in cells}) != len(cells):
+            raise ValueError("sweep contains duplicate run cells")
         if max_workers == 1:
             results = [self.executor.execute(experiment, cell) for cell in cells]
         else:

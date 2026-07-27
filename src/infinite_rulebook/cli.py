@@ -33,7 +33,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"artifacts": len(artifacts), "valid": True}))
         return 0
     experiment = load_experiment_config(arguments.config)
-    executor = RunExecutor(arguments.artifact_root, ExactSymbolicAdapter())
+    executor = RunExecutor(arguments.artifact_root, ExactSymbolicAdapter)
     results = SweepRunner(executor).run(
         experiment,
         max_workers=arguments.workers,

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from infinite_rulebook.frontier.blahut_arimoto import solve_lagrangian
 from infinite_rulebook.frontier.finite_problem import FiniteDecisionProblem
 from infinite_rulebook.orchestration.hashing import is_sha256, scientific_hash
 
@@ -191,6 +192,14 @@ class ArtifactStore:
             raise ValueError("invalid experiment name")
         return cls(Path(artifact_root) / safe_name / run_hash)
 
+    def _artifact_path(self, relative_path: str | Path) -> Path:
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ScientificArtifactError(
+                "artifact paths must remain inside the artifact store"
+            )
+        return self.path / relative
+
     def write(
         self,
         relative_path: str | Path,
@@ -200,7 +209,7 @@ class ArtifactStore:
         *,
         runtime_metadata: dict[str, Any] | None = None,
     ) -> ArtifactEnvelope:
-        path = self.path / relative_path
+        path = self._artifact_path(relative_path)
         envelope = ArtifactEnvelope.create(
             artifact_type,
             semantic_hashes,
@@ -234,7 +243,7 @@ class ArtifactStore:
         expected_semantic_hashes: dict[str, str] | None = None,
     ) -> ArtifactEnvelope:
         return read_artifact(
-            self.path / relative_path,
+            self._artifact_path(relative_path),
             expected_semantic_hashes=expected_semantic_hashes,
         )
 
@@ -262,6 +271,19 @@ class ArtifactStore:
                     "artifact_type": artifact.artifact_type,
                     "scientific_hash": artifact.scientific_hash,
                 }
+            )
+        required = {
+            "resolved-run-config",
+            "frontier-reference",
+            "training-event",
+            "run-checkpoint",
+            "run-metrics",
+        }
+        present = {member["artifact_type"] for member in members}
+        missing = required - present
+        if missing:
+            raise ScientificArtifactError(
+                f"cannot finalize incomplete run; missing {sorted(missing)}"
             )
         payload = {
             "members": members,
@@ -298,18 +320,26 @@ class EventJournal:
     ) -> None:
         self.store = store
         self.semantic_hashes = semantic_hashes
+        self._events: list[JournalEvent] | None = None
+        self._events_by_key: dict[str, JournalEvent] = {}
 
     def events(self) -> tuple[JournalEvent, ...]:
+        return tuple(self._load())
+
+    def _load(self) -> list[JournalEvent]:
+        if self._events is not None:
+            return self._events
         directory = self.store.path / "events"
         if not directory.exists():
-            return ()
+            self._events = []
+            return self._events
         paths = []
         for path in directory.iterdir():
             match = _EVENT_NAME.match(path.name)
             if match:
                 paths.append((int(match.group(1)), path))
         paths.sort()
-        result = []
+        result: list[JournalEvent] = []
         previous_hash = None
         for expected_sequence, (sequence, path) in enumerate(paths):
             if sequence != expected_sequence:
@@ -347,15 +377,18 @@ class EventJournal:
             event = JournalEvent(**payload)
             result.append(event)
             previous_hash = event.event_hash
-        return tuple(result)
+        self._events = result
+        self._events_by_key = {event.event_key: event for event in result}
+        if len(self._events_by_key) != len(result):
+            raise ScientificArtifactError("event journal has duplicate event keys")
+        return result
 
     def append(self, event_key: str, event_kind: str, payload: Any) -> JournalEvent:
         if not event_key or not event_kind:
             raise ValueError("event key and kind must not be empty")
-        events = self.events()
-        by_key = {event.event_key: event for event in events}
-        if event_key in by_key:
-            existing = by_key[event_key]
+        events = self._load()
+        if event_key in self._events_by_key:
+            existing = self._events_by_key[event_key]
             if existing.event_kind != event_kind or existing.payload != payload:
                 raise ScientificArtifactError(
                     "duplicate event key has different content"
@@ -378,7 +411,10 @@ class EventJournal:
             self.semantic_hashes,
             event_payload,
         )
-        return JournalEvent(**event_payload)
+        event = JournalEvent(**event_payload)
+        events.append(event)
+        self._events_by_key[event_key] = event
+        return event
 
 
 def write_frontier_bundle(
@@ -451,8 +487,24 @@ def validate_artifact_tree(
     manifests = [
         artifact for artifact in artifacts if artifact.artifact_type == "run-manifest"
     ]
+    frontier_manifests = [
+        artifact
+        for artifact in artifacts
+        if artifact.artifact_type == "frontier-manifest"
+    ]
+    if len(manifests) + len(frontier_manifests) != 1:
+        raise ScientificArtifactError(
+            "artifact tree must contain exactly one recognized manifest"
+        )
     if manifests:
         manifest = manifests[0]
+        manifest_records = [
+            file
+            for file, artifact in records
+            if artifact.artifact_type == "run-manifest"
+        ]
+        if manifest_records != [path / "manifest.json"]:
+            raise ScientificArtifactError("run manifest must be at the tree root")
         expected_members = manifest.payload["members"]
         actual_members = []
         for file in sorted(path.rglob("*.json")):
@@ -468,8 +520,119 @@ def validate_artifact_tree(
             )
         if actual_members != expected_members:
             raise ScientificArtifactError("run manifest member list is invalid")
+        expected_content_hash = scientific_hash(
+            actual_members, domain="run-scientific-content"
+        )
+        if manifest.payload.get("scientific_content_hash") != expected_content_hash:
+            raise ScientificArtifactError(
+                "run manifest scientific content hash is invalid"
+            )
+        _validate_completed_run(path, records, manifest)
     _validate_frontier_records(path, records)
+    if manifests:
+        _validate_frontier_reference(path, records)
     return artifacts
+
+
+def _validate_completed_run(
+    root: Path,
+    records: tuple[tuple[Path, ArtifactEnvelope], ...],
+    manifest: ArtifactEnvelope,
+) -> None:
+    del manifest
+    by_type: dict[str, list[tuple[Path, ArtifactEnvelope]]] = {}
+    for file, artifact in records:
+        by_type.setdefault(artifact.artifact_type, []).append((file, artifact))
+    singleton_types = (
+        "resolved-run-config",
+        "frontier-reference",
+        "run-metrics",
+        "run-manifest",
+    )
+    for artifact_type in singleton_types:
+        if len(by_type.get(artifact_type, [])) != 1:
+            raise ScientificArtifactError(
+                f"completed run must contain one {artifact_type}"
+            )
+    if not by_type.get("training-event") or not by_type.get("run-checkpoint"):
+        raise ScientificArtifactError(
+            "completed run must contain events and checkpoints"
+        )
+
+    config = by_type["resolved-run-config"][0][1].payload
+    metrics = by_type["run-metrics"][0][1].payload
+    run_settings = config["run_settings"]
+    seeds = config["seeds"]
+    horizon = run_settings["horizon"]
+    journal = EventJournal(
+        ArtifactStore(root),
+        by_type["run-manifest"][0][1].semantic_hashes,
+    )
+    events = journal.events()
+    if (
+        len(events) != horizon
+        or metrics.get("event_count") != horizon
+        or metrics.get("completed_rounds") != horizon
+    ):
+        raise ScientificArtifactError(
+            "completed run event count does not match its horizon"
+        )
+    expected_rounds = list(run_settings["checkpoints"]["rounds"])
+    checkpoint_rounds = []
+    for file, checkpoint in by_type["run-checkpoint"]:
+        payload = checkpoint.payload
+        round_index = payload.get("round")
+        if (
+            isinstance(round_index, bool)
+            or not isinstance(round_index, int)
+            or file.name != f"{round_index:08d}.json"
+            or payload.get("training_state_before")
+            != payload.get("training_state_after")
+            or payload.get("evaluation_seed") != seeds["evaluation"]
+            or payload.get("deployment_seed") != seeds["deployment"]
+        ):
+            raise ScientificArtifactError(
+                "completed run checkpoint metadata is invalid"
+            )
+        checkpoint_rounds.append(round_index)
+    if sorted(checkpoint_rounds) != expected_rounds:
+        raise ScientificArtifactError("completed run checkpoint schedule is incomplete")
+
+
+def _validate_frontier_reference(
+    run_root: Path,
+    records: tuple[tuple[Path, ArtifactEnvelope], ...],
+) -> None:
+    references = [
+        artifact
+        for _, artifact in records
+        if artifact.artifact_type == "frontier-reference"
+    ]
+    if len(references) != 1:
+        raise ScientificArtifactError(
+            "run artifact must contain one frontier reference"
+        )
+    reference = references[0]
+    frontier_hash = reference.payload["frontier_hash"]
+    if reference.semantic_hashes.get("frontier") != frontier_hash:
+        raise ScientificArtifactError("frontier reference semantic hash mismatch")
+    try:
+        artifact_root = run_root.parents[1]
+    except IndexError as error:
+        raise ScientificArtifactError("run artifact path is invalid") from error
+    frontier_artifacts = validate_artifact_tree(
+        artifact_root / "_frontiers" / frontier_hash,
+        expected_semantic_hashes={"frontier": frontier_hash},
+    )
+    manifest = next(
+        artifact
+        for artifact in frontier_artifacts
+        if artifact.artifact_type == "frontier-manifest"
+    )
+    if manifest.scientific_hash != reference.payload["artifact_hash"]:
+        raise ScientificArtifactError(
+            "referenced frontier manifest hash is incompatible"
+        )
 
 
 def _validate_frontier_records(
@@ -504,30 +667,60 @@ def _validate_frontier_records(
     if len(curves) != 1:
         raise ScientificArtifactError("frontier tree must have one curve")
     problem_payload = curves[0].payload["problem"]
+    recorded_provenance = problem_payload["provenance_hash"]
+    unhashed_problem = {
+        key: value for key, value in problem_payload.items() if key != "provenance_hash"
+    }
+    if recorded_provenance != scientific_hash(
+        unhashed_problem, domain="frontier-problem"
+    ):
+        raise ScientificArtifactError("frontier problem provenance is invalid")
     problem = FiniteDecisionProblem(
         prior=tuple(problem_payload["prior"]),
         rewards=tuple(tuple(row) for row in problem_payload["reward_matrix"]),
     )
     points = curves[0].payload["points"]
-    witnesses = [
-        (file, artifact)
+    expected_names = {f"point-{index:03d}" for index in range(len(points))}
+    witnesses = {
+        file.stem: artifact
         for file, artifact in records
         if artifact.artifact_type == "frontier-witness"
-    ]
+    }
     certificates = {
         file.stem: artifact
         for file, artifact in records
         if artifact.artifact_type == "frontier-certificate"
     }
-    for file, witness_artifact in witnesses:
-        try:
-            point_index = int(file.stem.removeprefix("point-"))
-            point = points[point_index]
-            certificate = certificates[file.stem].payload
-        except (IndexError, KeyError, ValueError) as error:
-            raise ScientificArtifactError(
-                f"frontier witness has no matching point: {file.relative_to(root)}"
-            ) from error
+    raw_curve = curves[0].payload.get("raw_curve")
+    if not isinstance(raw_curve, list) or len(raw_curve) != len(points):
+        raise ScientificArtifactError(
+            "frontier raw curve must be retained for every point"
+        )
+    diagnostics = [
+        artifact.payload
+        for _, artifact in records
+        if artifact.artifact_type == "frontier-diagnostics"
+    ]
+    if len(diagnostics) != 1:
+        raise ScientificArtifactError(
+            "frontier tree must have one diagnostics artifact"
+        )
+    diagnostic_names = {
+        diagnostic["name"] for diagnostic in diagnostics[0].get("points", [])
+    }
+    if (
+        set(witnesses) != expected_names
+        or set(certificates) != expected_names
+        or diagnostic_names != expected_names
+    ):
+        raise ScientificArtifactError(
+            "frontier points, witnesses, certificates, and diagnostics differ"
+        )
+    solver_settings = diagnostics[0]["solver_settings"]
+    for point_index, point in enumerate(points):
+        name = f"point-{point_index:03d}"
+        witness_artifact = witnesses[name]
+        certificate = certificates[name].payload
         witness_payload = witness_artifact.payload
         evaluated = problem.evaluate(witness_payload["channel"])
         if not math.isclose(
@@ -542,6 +735,14 @@ def _validate_frontier_records(
             raise ScientificArtifactError("frontier witness quantities are invalid")
         if evaluated.expected_reward < point["target_reward"] - 1e-9:
             raise ScientificArtifactError("frontier witness is reward-infeasible")
+        if (
+            certificate["target_reward"] != point["target_reward"]
+            or certificate["lower_bound"] != point["lower_information"]
+            or certificate["upper_bound"] != point["upper_information"]
+        ):
+            raise ScientificArtifactError(
+                "frontier curve and certificate are inconsistent"
+            )
         if certificate["lower_bound"] > evaluated.mutual_information + 1e-8:
             raise ScientificArtifactError("frontier certificate exceeds witness")
         if not math.isclose(
@@ -550,3 +751,46 @@ def _validate_frontier_records(
             abs_tol=1e-8,
         ):
             raise ScientificArtifactError("frontier certificate upper bound is invalid")
+        beta = certificate["dual_beta"]
+        if beta == "infinity":
+            if (
+                not math.isclose(
+                    point["target_reward"],
+                    problem.maximum_reward,
+                    abs_tol=1e-12,
+                )
+                or certificate["dual_objective_lower_bound"] is not None
+            ):
+                raise ScientificArtifactError(
+                    "infinite dual beta is valid only at the reward endpoint"
+                )
+            continue
+        if (
+            isinstance(beta, bool)
+            or not isinstance(beta, (int, float))
+            or not math.isfinite(beta)
+            or beta < 0
+        ):
+            raise ScientificArtifactError("frontier dual beta is invalid")
+        dual = solve_lagrangian(
+            problem,
+            beta,
+            tolerance=solver_settings["lagrangian_tolerance"],
+            max_iterations=solver_settings["lagrangian_max_iterations"],
+        )
+        if not math.isclose(
+            dual.objective_lower_bound,
+            certificate["dual_objective_lower_bound"],
+            abs_tol=1e-9,
+        ):
+            raise ScientificArtifactError("frontier dual objective is invalid")
+        recomputed_lower = max(
+            0.0,
+            beta * point["target_reward"] + dual.objective_lower_bound,
+        )
+        if not math.isclose(
+            recomputed_lower,
+            certificate["lower_bound"],
+            abs_tol=max(1e-8, solver_settings["bound_tolerance"]),
+        ):
+            raise ScientificArtifactError("frontier dual lower bound is invalid")

@@ -10,7 +10,8 @@ environment × feedback × reward × agent × environment seed × algorithm seed
 Each cell has named seed streams for the environment, persistent distractors,
 aleatoric observations, query noise, algorithm choices, deployment, evaluation,
 and frontier computation. Random choices must use semantic coordinates rather
-than consume a shared sequential generator.
+than consume a shared sequential generator. Matched conditions and agents share
+the corresponding tapes for a replica.
 
 Run the small foundation pilot with:
 
@@ -37,8 +38,10 @@ from agent runs. Run directories contain:
 
 Frontier bundles retain the problem, raw curve, feasible channel witnesses,
 dual certificates, and solver diagnostics. Validation checks artifact hashes,
-semantic compatibility, manifest membership, witness reward/information, and
-certificate consistency.
+semantic compatibility, manifest membership, witness reward/information,
+recomputed dual bounds, and certificate consistency. A finalized run is valid
+only while its separately cached frontier is present and matches the referenced
+frontier manifest.
 
 Appending a training event is atomic. On restart, the journal is validated and
 replayed before the next missing round; an existing event key can only be reused
@@ -47,7 +50,15 @@ changed, or semantically incompatible artifacts.
 
 Scientific hashes include only canonical scientific payloads. Runtime metadata
 such as timestamps, wall time, hardware, file metadata, and output paths can be
-recorded in manifests but is excluded from scientific-content hashes.
+recorded in manifests but is excluded from scientific-content hashes. Run
+identity records the code commit, tracked and untracked scientific changes,
+dependency lock, analysis-code digest, Python/numeric environment, and explicit
+pilot solver settings, so changed scientific code cannot silently reuse a prior
+run.
+
+Every parallel cell receives a fresh adapter instance. Checkpoint evaluation
+deep-copies that adapter and its training state before evaluation, and resumed
+checkpoints must match the replayed state and independent seed streams.
 
 ## Pilot boundary
 
