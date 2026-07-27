@@ -48,6 +48,7 @@ class FrontierSolution:
     dual_beta: float
     iterations: int
     converged: bool
+    problem_semantic_hash: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,9 @@ def solve_frontier(
 
     if not isinstance(problem, FiniteDecisionProblem):
         raise TypeError("problem must be a FiniteDecisionProblem")
+    from infinite_rulebook.artifacts import semantic_hash
+
+    problem_hash = semantic_hash(problem)
     requested_target = _extended_real("target_reward", target_reward)
     target = requested_target
     search_accuracy = _finite_real("tolerance", tolerance)
@@ -165,6 +169,7 @@ def solve_frontier(
             0.0,
             0,
             True,
+            problem_hash,
         )
     if target > maximum_reward:
         return FrontierSolution(
@@ -177,6 +182,7 @@ def solve_frontier(
             math.inf,
             0,
             True,
+            problem_hash,
         )
     if target == maximum_reward:
         maximizing_supports = tuple(
@@ -208,6 +214,7 @@ def solve_frontier(
             converged=endpoint.converged
             and math.isfinite(gap)
             and _bounds_converged(lower, upper, accuracy),
+            problem_semantic_hash=problem_hash,
         )
 
     maximizing = problem.maximizing_channel()
@@ -315,6 +322,7 @@ def solve_frontier(
         dual_beta=best_beta,
         iterations=total_iterations,
         converged=converged,
+        problem_semantic_hash=problem_hash,
     )
 
 

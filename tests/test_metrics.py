@@ -300,6 +300,17 @@ def test_frontier_point_re_evaluates_and_binds_existing_solver_witness() -> None
     assert point.upper_witness.mutual_information_nats == 0.0
 
 
+def test_frontier_point_rejects_foreign_lower_bound_certificate() -> None:
+    from infinite_rulebook.frontier import solve_frontier
+
+    foreign = one_coordinate_problem(q=2, u=1.0, c=1.0)
+    target = one_coordinate_problem(q=2, u=2.0, c=1.0)
+    solution = solve_frontier(foreign, 0.75)
+
+    with pytest.raises(ValueError, match="different problem"):
+        FrontierPoint.from_frontier_solution(target, solution)
+
+
 def test_reward_support_and_novelty_records_enforce_semantics() -> None:
     reward = RewardMetrics(1.0, 10.0, 0.25, ((0.1, -0.5),))
     support = SupportMetrics(3, 2, 1, 7, 2)

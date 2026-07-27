@@ -129,6 +129,10 @@ class FrontierPoint:
             raise TypeError("solution must be a FrontierSolution")
         if solution.witness is None:
             raise ValueError("an infeasible frontier solution has no upper witness")
+        from infinite_rulebook.artifacts import semantic_hash
+
+        if solution.problem_semantic_hash != semantic_hash(problem):
+            raise ValueError("frontier solution is bound to a different problem")
         return cls(
             reward=solution.target_reward,
             information=MetricInterval(
