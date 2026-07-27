@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import unicodedata
 from dataclasses import dataclass
 
 Seed = int | str | bytes
@@ -18,7 +19,7 @@ def _seed_record(seed: Seed) -> tuple[str, str]:
     if isinstance(seed, int):
         return ("int", str(seed))
     if isinstance(seed, str):
-        return ("str", seed)
+        return ("str", unicodedata.normalize("NFC", seed))
     raise TypeError("environment_seed must be an int, str, or bytes")
 
 
@@ -49,6 +50,13 @@ class SemanticObservationKey:
         if not self.channel:
             raise ValueError("channel must not be empty")
         _seed_record(self.environment_seed)
+        if isinstance(self.environment_seed, str):
+            object.__setattr__(
+                self,
+                "environment_seed",
+                unicodedata.normalize("NFC", self.environment_seed),
+            )
+        object.__setattr__(self, "channel", unicodedata.normalize("NFC", self.channel))
 
     def canonical_bytes(self) -> bytes:
         record = [

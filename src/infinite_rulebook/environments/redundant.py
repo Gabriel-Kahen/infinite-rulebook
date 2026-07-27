@@ -52,7 +52,12 @@ class UnrestrictedRedundantRulebook:
     seed: Seed
     core_dimensions: int = 4
     reward_spec: RewardSpec = field(default_factory=RewardSpec)
-    _core_rng: CounterRNG = field(init=False, repr=False, compare=False)
+    _core_rng: CounterRNG = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         _positive_integer(self.core_dimensions, "core_dimensions")

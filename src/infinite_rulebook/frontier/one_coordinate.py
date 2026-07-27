@@ -41,10 +41,18 @@ class OneCoordinateFrontier:
     q: int = 4
     u: float = 1.0
     c: float = 1.0
-    _tau: float = field(init=False, repr=False, compare=False)
-    _p_star: float = field(init=False, repr=False, compare=False)
-    _r_star: float = field(init=False, repr=False, compare=False)
-    _kappa: float = field(init=False, repr=False, compare=False)
+    _tau: float = field(
+        init=False, repr=False, compare=False, metadata={"artifact_exclude": True}
+    )
+    _p_star: float = field(
+        init=False, repr=False, compare=False, metadata={"artifact_exclude": True}
+    )
+    _r_star: float = field(
+        init=False, repr=False, compare=False, metadata={"artifact_exclude": True}
+    )
+    _kappa: float = field(
+        init=False, repr=False, compare=False, metadata={"artifact_exclude": True}
+    )
 
     def __post_init__(self) -> None:
         if isinstance(self.q, bool) or not isinstance(self.q, int):

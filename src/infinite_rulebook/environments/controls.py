@@ -155,7 +155,12 @@ class AleaRulebook(Generic[ActionT]):
     base: RulebookRuntime[ActionT]
     cosmetic_seed: Seed
     cosmetic_alphabet: int = 256
-    _cosmetic_rng: CounterRNG = field(init=False, repr=False, compare=False)
+    _cosmetic_rng: CounterRNG = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         _runtime(self.base)
@@ -275,7 +280,12 @@ class TriviaRulebook(Generic[ActionT]):
 
     base: RulebookRuntime[ActionT]
     trivia_seed: Seed
-    _trivia_rng: CounterRNG = field(init=False, repr=False, compare=False)
+    _trivia_rng: CounterRNG = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         _runtime(self.base)

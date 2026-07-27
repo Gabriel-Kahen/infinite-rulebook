@@ -16,7 +16,12 @@ class IndependentRulebook:
 
     seed: Seed
     reward_spec: RewardSpec = field(default_factory=RewardSpec)
-    _latent_rng: CounterRNG = field(init=False, repr=False, compare=False)
+    _latent_rng: CounterRNG = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(

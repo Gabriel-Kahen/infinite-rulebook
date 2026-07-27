@@ -58,6 +58,16 @@ def test_semantic_key_fields_select_distinct_noise_draws() -> None:
     )
 
 
+def test_semantic_feedback_key_normalizes_unicode_equivalents() -> None:
+    composed = SemanticObservationKey("é", 0, 3, channel="café")
+    decomposed = SemanticObservationKey("e\u0301", 0, 3, channel="cafe\u0301")
+    channel = QarySymmetricChannel(q=4, epsilon=0.5)
+
+    assert composed == decomposed
+    assert composed.canonical_bytes() == decomposed.canonical_bytes()
+    assert channel.observe(3, composed) == channel.observe(3, decomposed)
+
+
 def test_qary_channel_distribution_and_capacity() -> None:
     channel = QarySymmetricChannel(q=4, epsilon=0.25)
 
