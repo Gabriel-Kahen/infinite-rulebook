@@ -44,6 +44,19 @@ class LagrangianSolution:
     converged: bool
 
 
+@dataclass(frozen=True, slots=True)
+class SupportedInformationSolution:
+    """A minimum-information channel constrained to row-wise action supports."""
+
+    witness: ChannelWitness
+    lower_bound: float
+    upper_bound: float
+    duality_gap: float
+    fixed_point_residual: float
+    iterations: int
+    converged: bool
+
+
 def _normalized_marginal(
     problem: FiniteDecisionProblem,
     marginal: Sequence[Real] | None,
@@ -317,6 +330,188 @@ def solve_lagrangian(
         objective=objective,
         objective_lower_bound=lower_bound,
         objective_upper_bound=objective_upper,
+        duality_gap=gap,
+        fixed_point_residual=residual,
+        iterations=iterations,
+        converged=converged,
+    )
+
+
+def solve_supported_minimum_information(
+    problem: FiniteDecisionProblem,
+    allowed_actions: Sequence[Sequence[int]],
+    *,
+    tolerance: Real = 1e-12,
+    max_iterations: int = 100_000,
+) -> SupportedInformationSolution:
+    """Minimize mutual information with a declared action support per state.
+
+    For an action marginal ``q``, the row update is ``q`` conditioned on the
+    state's allowed set. The global certificate is
+    ``-E[log q(S_theta)] - log(max_a s_a)`` with
+    ``s_a = sum_{theta: a in S_theta} p_theta / q(S_theta)``.
+    """
+
+    if not isinstance(problem, FiniteDecisionProblem):
+        raise TypeError("problem must be a FiniteDecisionProblem")
+    accuracy = _nonnegative_finite("tolerance", tolerance)
+    if accuracy == 0.0:
+        raise ValueError("tolerance must be strictly positive")
+    if isinstance(max_iterations, bool) or not isinstance(max_iterations, int):
+        raise TypeError("max_iterations must be an integer")
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be positive")
+    if len(allowed_actions) != problem.state_count:
+        raise ValueError("allowed_actions must have one support per state")
+
+    supports = []
+    for state, support in enumerate(allowed_actions):
+        try:
+            canonical = frozenset(support)
+        except TypeError as error:
+            raise TypeError(f"allowed_actions[{state}] must be iterable") from error
+        if not canonical:
+            raise ValueError(f"allowed_actions[{state}] must not be empty")
+        if any(
+            isinstance(action, bool)
+            or not isinstance(action, int)
+            or not 0 <= action < problem.action_count
+            for action in canonical
+        ):
+            raise ValueError(f"allowed_actions[{state}] contains an invalid action")
+        supports.append(canonical)
+    canonical_supports = tuple(supports)
+
+    relevant = set().union(
+        *(
+            support
+            for probability, support in zip(
+                problem.prior, canonical_supports, strict=True
+            )
+            if probability > 0.0
+        )
+    )
+    marginal = tuple(
+        1.0 / len(relevant) if action in relevant else 0.0
+        for action in range(problem.action_count)
+    )
+    iterations = 0
+    converged = False
+
+    for iteration in range(1, max_iterations + 1):
+        iterations = iteration
+        support_mass = tuple(
+            math.fsum(marginal[action] for action in support)
+            for support in canonical_supports
+        )
+        channel = tuple(
+            tuple(
+                (
+                    marginal[action] / support_mass[state]
+                    if action in canonical_supports[state] and support_mass[state] > 0.0
+                    else 0.0
+                )
+                for action in range(problem.action_count)
+            )
+            for state in range(problem.state_count)
+        )
+        # Zero-prior rows do not affect the objective but still need a valid
+        # stochastic row.
+        channel = tuple(
+            row
+            if math.fsum(row) > 0.0
+            else tuple(
+                1.0 / len(canonical_supports[state])
+                if action in canonical_supports[state]
+                else 0.0
+                for action in range(problem.action_count)
+            )
+            for state, row in enumerate(channel)
+        )
+        witness = problem.evaluate(channel)
+        objective = witness.mutual_information
+        residual = max(
+            abs(left - right)
+            for left, right in zip(marginal, witness.action_marginal, strict=True)
+        )
+        marginal_objective = -math.fsum(
+            probability * math.log(support_mass[state])
+            for state, probability in enumerate(problem.prior)
+            if probability > 0.0
+        )
+        slacks = tuple(
+            math.fsum(
+                probability / support_mass[state]
+                for state, (probability, support) in enumerate(
+                    zip(problem.prior, canonical_supports, strict=True)
+                )
+                if probability > 0.0 and action in support
+            )
+            for action in range(problem.action_count)
+        )
+        lower = marginal_objective - math.log(max(slacks))
+        upper = objective
+        gap = _certified_gap(lower, upper)
+        if gap <= accuracy and residual <= math.sqrt(accuracy):
+            marginal = witness.action_marginal
+            converged = True
+            break
+        marginal = witness.action_marginal
+
+    support_mass = tuple(
+        math.fsum(marginal[action] for action in support)
+        for support in canonical_supports
+    )
+    channel = tuple(
+        tuple(
+            (
+                marginal[action] / support_mass[state]
+                if action in canonical_supports[state] and support_mass[state] > 0.0
+                else 0.0
+            )
+            for action in range(problem.action_count)
+        )
+        for state in range(problem.state_count)
+    )
+    channel = tuple(
+        row
+        if math.fsum(row) > 0.0
+        else tuple(
+            1.0 / len(canonical_supports[state])
+            if action in canonical_supports[state]
+            else 0.0
+            for action in range(problem.action_count)
+        )
+        for state, row in enumerate(channel)
+    )
+    witness = problem.evaluate(channel)
+    residual = max(
+        abs(left - right)
+        for left, right in zip(marginal, witness.action_marginal, strict=True)
+    )
+    marginal_objective = -math.fsum(
+        probability * math.log(support_mass[state])
+        for state, probability in enumerate(problem.prior)
+        if probability > 0.0
+    )
+    slacks = tuple(
+        math.fsum(
+            probability / support_mass[state]
+            for state, (probability, support) in enumerate(
+                zip(problem.prior, canonical_supports, strict=True)
+            )
+            if probability > 0.0 and action in support
+        )
+        for action in range(problem.action_count)
+    )
+    lower = marginal_objective - math.log(max(slacks))
+    upper = witness.mutual_information
+    gap = _certified_gap(lower, upper)
+    converged = gap <= accuracy and residual <= math.sqrt(accuracy)
+    return SupportedInformationSolution(
+        witness=witness,
+        lower_bound=lower,
+        upper_bound=upper,
         duality_gap=gap,
         fixed_point_residual=residual,
         iterations=iterations,

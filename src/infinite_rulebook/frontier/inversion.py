@@ -9,6 +9,7 @@ from numbers import Real
 from infinite_rulebook.frontier.blahut_arimoto import (
     LagrangianSolution,
     solve_lagrangian,
+    solve_supported_minimum_information,
 )
 from infinite_rulebook.frontier.finite_problem import (
     ChannelWitness,
@@ -144,6 +145,36 @@ def solve_frontier(
     if target > problem.maximum_reward:
         return FrontierSolution(
             target, None, math.inf, math.inf, 0.0, math.inf, 0, True
+        )
+    if target == problem.maximum_reward:
+        maximizing_supports = tuple(
+            tuple(action for action, reward in enumerate(row) if reward == max(row))
+            for row in problem.rewards
+        )
+        endpoint = solve_supported_minimum_information(
+            problem,
+            maximizing_supports,
+            tolerance=lagrangian_accuracy,
+            max_iterations=lagrangian_max_iterations,
+        )
+        lower = max(0.0, endpoint.lower_bound)
+        upper = endpoint.witness.mutual_information
+        scale = max(1.0, abs(lower), abs(upper))
+        roundoff = 64.0 * math.ulp(scale)
+        if lower > upper and lower - upper <= roundoff:
+            lower = upper
+        gap = upper - lower if upper >= lower else math.inf
+        return FrontierSolution(
+            target_reward=target,
+            witness=endpoint.witness,
+            lower_bound=lower,
+            upper_bound=upper,
+            duality_gap=gap,
+            dual_beta=math.inf,
+            iterations=endpoint.iterations,
+            converged=endpoint.converged
+            and math.isfinite(gap)
+            and _bounds_converged(lower, upper, accuracy),
         )
 
     maximizing = problem.maximizing_channel()

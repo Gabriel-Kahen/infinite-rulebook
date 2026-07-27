@@ -77,6 +77,37 @@ def test_red_c_enforces_fixed_support_cap_and_maximum_reward() -> None:
         environment.evaluate(correct_action(environment, range(1, 5)))
 
 
+def test_zero_redundant_caps_disable_redundant_deployment() -> None:
+    redundant = CappedRedundantRulebook("red-zero", max_derived_support=0)
+    mixed = MixedRulebook("mix-zero", max_redundant_support=0)
+
+    assert redundant.maximum_reward == 0.0
+    assert redundant.evaluate(DeploymentAction()) == 0.0
+    assert mixed.maximum_redundant_reward == 0.0
+    assert mixed.evaluate(correct_action(mixed, range(1, 6, 2))) == 3.0
+    with pytest.raises(ValueError, match="max_derived_support"):
+        redundant.evaluate(correct_action(redundant, range(1, 2)))
+    with pytest.raises(ValueError, match="max_redundant_support"):
+        mixed.evaluate(correct_action(mixed, range(2, 3)))
+    assert (
+        capped_redundant_information_upper_bound(
+            0.0,
+            max_derived_support=0,
+            core_dimensions=1,
+            q=4,
+        )
+        == 0.0
+    )
+    assert math.isinf(
+        capped_redundant_information_upper_bound(
+            0.1,
+            max_derived_support=0,
+            core_dimensions=1,
+            q=4,
+        )
+    )
+
+
 def test_redundant_core_entropy_and_capped_information_bounds() -> None:
     environment = CappedRedundantRulebook(5, core_dimensions=3, max_derived_support=8)
     entropy = 3 * math.log(4)

@@ -156,6 +156,12 @@ The mixture channel is a feasible witness. Its mutual information is recomputed
 after mixing and is no greater than the mixture of the endpoint information
 values.
 
+At \(R_{\max}\), finite multipliers are unnecessary and potentially
+scale-dependent. The implementation instead restricts each state to its
+reward-maximizing actions and directly solves the resulting
+support-constrained minimum-information problem. This also minimizes
+information correctly when maximizing-action sets overlap.
+
 ## Numerical acceptance
 
 - Channel rows sum to one within \(10^{-12}\).

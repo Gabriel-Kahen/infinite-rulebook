@@ -355,7 +355,7 @@ def capped_redundant_information_upper_bound(
     """Rare-burst upper bound for RED-C, or infinity when infeasible."""
 
     target = _real_not_nan(target_reward, "target_reward")
-    support = _positive_integer(max_derived_support, "max_derived_support")
+    support = _nonnegative_integer(max_derived_support, "max_derived_support")
     dimensions = _positive_integer(core_dimensions, "core_dimensions")
     alphabet = _positive_integer(q, "q")
     if alphabet < 2:
@@ -365,6 +365,8 @@ def capped_redundant_information_upper_bound(
         raise ValueError("correct_reward must be finite and positive")
     if target <= 0.0:
         return 0.0
+    if support == 0:
+        return math.inf
     if target > support * reward:
         return math.inf
     return (target / (support * reward)) * dimensions * math.log(alphabet)

@@ -209,6 +209,20 @@ def test_maximum_reward_endpoint_handles_overlapping_ties() -> None:
     assert solution.upper_bound == pytest.approx(math.log(1.5), abs=1e-9)
 
 
+def test_maximum_reward_endpoint_is_reward_scale_invariant() -> None:
+    problem = FiniteDecisionProblem(
+        (0.5, 0.5),
+        ((1e-12, 0.0), (0.0, 1e-12)),
+    )
+    solution = solve_frontier(problem, problem.maximum_reward)
+
+    assert solution.converged
+    assert solution.witness is not None
+    assert solution.witness.expected_reward == problem.maximum_reward
+    assert solution.lower_bound == pytest.approx(math.log(2.0), abs=1e-10)
+    assert solution.upper_bound == pytest.approx(math.log(2.0), abs=1e-10)
+
+
 @pytest.mark.parametrize("q", [2, 4])
 def test_frontier_inversion_round_trip(q: int) -> None:
     u = 1.0

@@ -2,7 +2,9 @@
 
 from infinite_rulebook.frontier.blahut_arimoto import (
     LagrangianSolution,
+    SupportedInformationSolution,
     solve_lagrangian,
+    solve_supported_minimum_information,
 )
 from infinite_rulebook.frontier.finite_problem import (
     ChannelWitness,
@@ -42,6 +44,7 @@ __all__ = [
     "LagrangianSolution",
     "OneCoordinateFrontier",
     "RareBurstWitness",
+    "SupportedInformationSolution",
     "TensorizedFrontier",
     "capped_redundant_information_upper_bound",
     "enumerate_independent_rulebook",
@@ -53,5 +56,6 @@ __all__ = [
     "rare_burst_sequence",
     "solve_frontier",
     "solve_lagrangian",
+    "solve_supported_minimum_information",
     "unrestricted_redundant_bit_equivalent",
 ]

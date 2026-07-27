@@ -18,6 +18,12 @@ def _positive_integer(value: object, name: str) -> int:
     return value
 
 
+def _nonnegative_integer(value: object, name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class MixedRulebook:
     """Odd rules are IID primitives; even rules derive from a finite core.
@@ -36,7 +42,10 @@ class MixedRulebook:
 
     def __post_init__(self) -> None:
         _positive_integer(self.core_dimensions, "core_dimensions")
-        _positive_integer(self.max_redundant_support, "max_redundant_support")
+        _nonnegative_integer(
+            self.max_redundant_support,
+            "max_redundant_support",
+        )
         object.__setattr__(
             self,
             "_primitive_rng",

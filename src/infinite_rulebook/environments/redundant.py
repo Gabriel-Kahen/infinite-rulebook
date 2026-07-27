@@ -17,6 +17,12 @@ def _positive_integer(value: object, name: str) -> int:
     return value
 
 
+def _nonnegative_integer(value: object, name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return value
+
+
 def cyclic_surface_map(
     index: int,
     core_dimensions: int,
@@ -97,7 +103,7 @@ class CappedRedundantRulebook(UnrestrictedRedundantRulebook):
 
     def __post_init__(self) -> None:
         super(CappedRedundantRulebook, self).__post_init__()
-        _positive_integer(self.max_derived_support, "max_derived_support")
+        _nonnegative_integer(self.max_derived_support, "max_derived_support")
 
     @property
     def maximum_reward(self) -> float:
