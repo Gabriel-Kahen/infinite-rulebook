@@ -160,6 +160,47 @@ Therefore the unrestricted redundant frontier is zero at every finite feasible
 reward threshold. Resource-controlled redundancy is a different environment
 and must declare its support or reward cap.
 
+## Proposition 7: symbolic distractor invariance
+
+ALEA observations are independent runtime draws and are not persistent
+coordinates of \(\Theta\). They therefore contribute exactly zero persistent
+environment information and do not change the decision problem.
+
+For independent persistent trivia \(D\), with reward depending only on the
+base latent \(Z\),
+
+\[
+B_\rho^{(Z,D)}=B_\rho^Z.
+\]
+
+The upper bound ignores \(D\). For the lower bound, average any augmented
+channel over \(D\), preserve its expected reward, and apply data processing.
+
+## Proposition 8: public reward controls
+
+If a public state-independent action can attain every finite threshold, then
+PUBLIC-U has
+
+\[
+B_\rho=0
+\]
+
+at every finite threshold. This is attained by a finite constant action and is
+not a limiting rare-burst argument.
+
+For PUBLIC-C, let a fixed finite public action set attain bounded maximum
+reward \(G_{\max}\). Then
+
+\[
+B_\rho^{\mathrm{PUBLIC-C}}
+=B_{\rho-G_{\max}}^{\mathrm{base}}.
+\]
+
+This identity includes exact zero-information truncation and infeasibility
+above the shifted base maximum. See
+[Symbolic controls](symbolic-controls.md) for runtime and finite-projection
+contracts.
+
 ## Numerical contract
 
 The implementation must:
