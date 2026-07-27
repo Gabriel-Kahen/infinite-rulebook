@@ -27,12 +27,15 @@ from infinite_rulebook.agents.integration import (
     population_information_estimate,
 )
 from infinite_rulebook.agents.protocols import QueryTarget, TargetKey
+from infinite_rulebook.core.reward import RewardSpec
 from infinite_rulebook.environments import (
     AleaRulebook,
+    CappedPublicRulebook,
     IndependentRulebook,
     QueryNamespace,
     RulebookRuntime,
     TriviaRulebook,
+    UnboundedPublicRulebook,
 )
 from infinite_rulebook.feedback import QarySymmetricChannel
 from infinite_rulebook.frontier import (
@@ -399,3 +402,93 @@ def test_runner_rejects_non_control_targets_before_selection() -> None:
     valid = useful_targets(1)
     action = agent.select_train_action(agent.acquisition_context(valid))
     assert action.targets == valid
+
+
+def test_runner_rejects_model_mismatch_before_selection() -> None:
+    environment = IndependentRulebook("model-mismatch")
+    candidates = useful_targets(1)
+    noisy_agent = FactorizedQueryAgent(
+        TotalInformationDirectedPolicy(),
+        epsilon=0.2,
+    )
+
+    with pytest.raises(ValueError, match="epsilon"):
+        execute_p1_round(
+            noisy_agent,
+            environment,
+            noisy_agent.acquisition_context(candidates),
+            QarySymmetricChannel(q=4, epsilon=0.0),
+            environment_seed="model-mismatch",
+        )
+    assert noisy_agent.completed_rounds == 0
+    assert (
+        noisy_agent.select_train_action(
+            noisy_agent.acquisition_context(candidates)
+        ).targets
+        == candidates
+    )
+
+    reward_agent = FactorizedQueryAgent(
+        RewardDirectedPolicy(),
+        epsilon=0.0,
+        reward_spec=RewardSpec(q=4, u=2.0, c=1.0),
+    )
+    with pytest.raises(ValueError, match="reward specifications"):
+        execute_p1_round(
+            reward_agent,
+            environment,
+            reward_agent.acquisition_context(candidates),
+            QarySymmetricChannel(q=4, epsilon=0.0),
+            environment_seed="model-mismatch",
+        )
+    assert reward_agent.completed_rounds == 0
+
+
+def test_runner_rejects_unsupported_query_before_selection() -> None:
+    environment = IndependentRulebook("unsupported-query")
+    agent = FactorizedQueryAgent(TotalInformationDirectedPolicy(), epsilon=0.0)
+
+    with pytest.raises(ValueError, match="trivia"):
+        execute_p1_round(
+            agent,
+            environment,
+            agent.acquisition_context(distractor_targets(1)),
+            QarySymmetricChannel(q=4, epsilon=0.0),
+            environment_seed="unsupported-query",
+        )
+
+    assert agent.completed_rounds == 0
+    reward_targets = useful_targets(1)
+    action = agent.select_train_action(agent.acquisition_context(reward_targets))
+    assert action.targets == reward_targets
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    [CappedPublicRulebook, UnboundedPublicRulebook],
+    ids=["public-c", "public-u"],
+)
+def test_runner_resolves_alea_through_public_wrapper(wrapper: type[object]) -> None:
+    environment = wrapper(
+        AleaRulebook(
+            IndependentRulebook("wrapped-alea"),
+            cosmetic_seed="wrapped-cosmetics",
+            cosmetic_alphabet=8,
+        )
+    )
+    candidates = useful_targets(1)
+    agent = FactorizedQueryAgent(
+        NoveltyDirectedPolicy(cosmetic_alphabet=8),
+        epsilon=0.0,
+    )
+
+    trace = execute_p1_round(
+        agent,
+        environment,  # type: ignore[arg-type]
+        agent.acquisition_context(candidates),
+        QarySymmetricChannel(q=4, epsilon=0.0),
+        environment_seed="wrapped-alea",
+    )
+
+    assert trace.cosmetic_values[0] is not None
+    assert agent.query_count(candidates[0].key) == 1
