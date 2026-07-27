@@ -53,6 +53,8 @@ class ArtifactEnvelope:
         *,
         runtime_metadata: dict[str, Any] | None = None,
     ) -> ArtifactEnvelope:
+        if not isinstance(semantic_hashes, dict):
+            raise ScientificArtifactError("semantic_hashes must be an object")
         try:
             normalized_payload = json.loads(
                 json.dumps(payload, allow_nan=False, sort_keys=True)
@@ -67,10 +69,10 @@ class ArtifactEnvelope:
         scientific_payload = {
             "artifact_type": artifact_type,
             "schema_version": ARTIFACT_SCHEMA_VERSION,
-            "semantic_hashes": semantic_hashes,
+            "semantic_hashes": dict(semantic_hashes),
             "payload": normalized_payload,
         }
-        return cls(
+        envelope = cls(
             artifact_type=artifact_type,
             semantic_hashes=dict(semantic_hashes),
             payload=normalized_payload,
@@ -79,6 +81,8 @@ class ArtifactEnvelope:
             ),
             runtime_metadata=normalized_runtime,
         )
+        envelope.validate()
+        return envelope
 
     def validate(
         self,
@@ -86,8 +90,10 @@ class ArtifactEnvelope:
     ) -> None:
         if self.schema_version != ARTIFACT_SCHEMA_VERSION:
             raise ScientificArtifactError("unsupported artifact schema version")
-        if not self.artifact_type:
+        if not isinstance(self.artifact_type, str) or not self.artifact_type:
             raise ScientificArtifactError("artifact_type must not be empty")
+        if not isinstance(self.semantic_hashes, dict):
+            raise ScientificArtifactError("semantic_hashes must be an object")
         if any(
             not isinstance(name, str) or not name or not is_sha256(value)
             for name, value in self.semantic_hashes.items()
@@ -606,41 +612,57 @@ def write_frontier_bundle(
 ) -> ArtifactEnvelope:
     """Persist every scientific component of a frontier before its manifest."""
 
-    members = []
-    members.append(
-        store.write("frontier/curve.json", "frontier-curve", semantic_hashes, curve)
-    )
-    for name, payload in sorted(witnesses.items()):
+    members: list[dict[str, str]] = []
+
+    def write_member(
+        relative_path: str,
+        artifact_type: str,
+        payload: Any,
+    ) -> None:
+        artifact = store.write(
+            relative_path,
+            artifact_type,
+            semantic_hashes,
+            payload,
+        )
         members.append(
-            store.write(
-                f"frontier/witnesses/{name}.json",
-                "frontier-witness",
-                semantic_hashes,
-                payload,
-            )
+            {
+                "path": relative_path,
+                "artifact_type": artifact_type,
+                "scientific_hash": artifact.scientific_hash,
+            }
+        )
+
+    write_member("frontier/curve.json", "frontier-curve", curve)
+    for name, payload in sorted(witnesses.items()):
+        write_member(
+            f"frontier/witnesses/{name}.json",
+            "frontier-witness",
+            payload,
         )
     for name, payload in sorted(certificates.items()):
-        members.append(
-            store.write(
-                f"frontier/certificates/{name}.json",
-                "frontier-certificate",
-                semantic_hashes,
-                payload,
-            )
+        write_member(
+            f"frontier/certificates/{name}.json",
+            "frontier-certificate",
+            payload,
         )
-    members.append(
-        store.write(
-            "frontier/diagnostics.json",
-            "frontier-diagnostics",
-            semantic_hashes,
-            diagnostics,
-        )
+    write_member(
+        "frontier/diagnostics.json",
+        "frontier-diagnostics",
+        diagnostics,
     )
+    members.sort(key=lambda member: member["path"])
     return store.write(
         "frontier/manifest.json",
         "frontier-manifest",
         semantic_hashes,
-        {"member_hashes": [member.scientific_hash for member in members]},
+        {
+            "members": members,
+            "scientific_content_hash": scientific_hash(
+                members,
+                domain="frontier-scientific-content",
+            ),
+        },
     )
 
 
@@ -746,6 +768,42 @@ def _validate_completed_run(
     if not by_type.get("training-event") or not by_type.get("run-checkpoint"):
         raise ScientificArtifactError(
             "completed run must contain events and checkpoints"
+        )
+    allowed_types = {
+        *singleton_types,
+        "training-event",
+        "run-checkpoint",
+    }
+    unexpected_types = set(by_type) - allowed_types
+    if unexpected_types:
+        raise ScientificArtifactError(
+            f"completed run contains unexpected artifact types: "
+            f"{sorted(unexpected_types)}"
+        )
+    expected_singletons = {
+        "resolved-run-config": root / "config.resolved.json",
+        "frontier-reference": root / "frontier-reference.json",
+        "run-metrics": root / "metrics.json",
+        "run-manifest": root / "manifest.json",
+    }
+    for artifact_type, expected_path in expected_singletons.items():
+        if by_type[artifact_type][0][0] != expected_path:
+            raise ScientificArtifactError(
+                f"completed run {artifact_type} is stored at an invalid path"
+            )
+    if any(
+        file.parent != root / "events" or _EVENT_NAME.fullmatch(file.name) is None
+        for file, _ in by_type["training-event"]
+    ):
+        raise ScientificArtifactError(
+            "completed run training events must be stored under events/"
+        )
+    if any(
+        file.parent != root / "checkpoints"
+        for file, _ in by_type["run-checkpoint"]
+    ):
+        raise ScientificArtifactError(
+            "completed run checkpoints must be stored under checkpoints/"
         )
 
     config = by_type["resolved-run-config"][0][1].payload
@@ -889,16 +947,34 @@ def _validate_frontier_records(
         return
     if len(manifests) != 1:
         raise ScientificArtifactError("frontier tree must have one manifest")
-    members = [
-        artifact
-        for _, artifact in records
-        if artifact.artifact_type.startswith("frontier-")
-        and artifact.artifact_type != "frontier-manifest"
+    manifest_records = [
+        file
+        for file, artifact in records
+        if artifact.artifact_type == "frontier-manifest"
     ]
-    if sorted(manifests[0].payload["member_hashes"]) != sorted(
-        member.scientific_hash for member in members
-    ):
+    if manifest_records != [root / "frontier/manifest.json"]:
+        raise ScientificArtifactError(
+            "frontier manifest must be at frontier/manifest.json"
+        )
+    members = [
+        {
+            "path": file.relative_to(root).as_posix(),
+            "artifact_type": artifact.artifact_type,
+            "scientific_hash": artifact.scientific_hash,
+        }
+        for file, artifact in records
+        if artifact.artifact_type != "frontier-manifest"
+    ]
+    manifest_payload = manifests[0].payload
+    if manifest_payload.get("members") != members:
         raise ScientificArtifactError("frontier manifest member list is invalid")
+    if manifest_payload.get("scientific_content_hash") != scientific_hash(
+        members,
+        domain="frontier-scientific-content",
+    ):
+        raise ScientificArtifactError(
+            "frontier manifest scientific content hash is invalid"
+        )
 
     curves = [
         artifact

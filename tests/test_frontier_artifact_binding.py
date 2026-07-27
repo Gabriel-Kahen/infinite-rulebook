@@ -63,3 +63,31 @@ def test_frontier_validation_binds_typed_certificate_evidence(
     wrong_source = copy.deepcopy(source)
     wrong_source["certificates"]["point-001"]["source_solution_hash"] = "0" * 64
     _validate_tamper(tmp_path, "source", wrong_source)
+
+
+def test_frontier_manifest_rejects_undeclared_extra_artifact(
+    tmp_path: Path,
+) -> None:
+    config = load_experiment_config("configs/pilot-foundation.json")
+    cell = next(cell for cell in config.cells() if cell.environment.kind.value == "IND")
+    frontier = ExactSymbolicAdapter().frontier(cell)
+    store = ArtifactStore(tmp_path / "extra")
+    semantics = {"frontier": "f" * 64}
+    write_frontier_bundle(
+        store,
+        semantics,
+        curve=frontier["curve"],
+        witnesses=frontier["witnesses"],
+        certificates=frontier["certificates"],
+        diagnostics=frontier["diagnostics"],
+    )
+    validate_artifact_tree(store.path)
+    store.write(
+        "frontier/undeclared.json",
+        "unrelated-diagnostic",
+        semantics,
+        {"value": 1},
+    )
+
+    with pytest.raises(ScientificArtifactError, match="member list"):
+        validate_artifact_tree(store.path)
