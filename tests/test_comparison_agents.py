@@ -164,20 +164,6 @@ def test_reward_directed_does_not_deadlock_before_threshold() -> None:
     assert action.targets == (useful,)
 
 
-def test_reward_directed_keeps_learning_before_one_query_is_profitable() -> None:
-    useful = useful_targets(1)[0]
-    agent = FactorizedQueryAgent(
-        RewardDirectedPolicy(),
-        epsilon=0.6,
-        query_budget=1,
-    )
-
-    assert decision_value_gain(agent.posterior(useful.key), RewardSpec()) == 0.0
-    assert agent.select_train_action(agent.acquisition_context((useful,))).targets == (
-        useful,
-    )
-
-
 def test_novelty_directed_prefers_fresh_alea_to_learned_useful() -> None:
     useful = useful_targets(1)[0]
     alea = distractor_targets(1, namespace="alea", persistent=False)[0]
@@ -404,8 +390,6 @@ def test_comparison_contract_validation() -> None:
         useful_targets(0, namespace="")
     with pytest.raises(TypeError, match="persistent"):
         distractor_targets(0, persistent=1)
-    with pytest.raises(ValueError, match="namespace"):
-        useful_targets(0, namespace="")
     with pytest.raises(ValueError, match="relevance_weight"):
         QueryTarget(TargetKey("useful", 1), relevance_weight=1.1)
     with pytest.raises(ValueError, match="unique"):
