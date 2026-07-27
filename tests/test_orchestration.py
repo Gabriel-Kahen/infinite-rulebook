@@ -121,6 +121,12 @@ def test_scientific_hash_is_canonical_and_runtime_metadata_is_excluded() -> None
     assert first.scientific_hash == second.scientific_hash
 
 
+def test_scientific_hash_type_tags_cannot_collide_with_user_mappings() -> None:
+    assert scientific_hash(1.0) != scientific_hash({"$float": "0x1.0000000000000p+0"})
+    assert scientific_hash(b"abc") != scientific_hash({"$bytes": "616263"})
+    assert scientific_hash(Path("x")) != scientific_hash({"$path": "x"})
+
+
 def test_frontier_identity_excludes_feedback_and_irrelevant_augmentation() -> None:
     base = experiment().cells()[0]
     noisy = replace(base, feedback=FeedbackConfig(epsilon=0.2))
@@ -335,7 +341,7 @@ def test_frontier_validation_requires_complete_points_and_valid_duals(
         certificates=certificates,
         diagnostics=frontier["diagnostics"],
     )
-    with pytest.raises(ScientificArtifactError, match="dual"):
+    with pytest.raises(ScientificArtifactError, match="certificate"):
         validate_artifact_tree(invalid_dual.path)
 
 
@@ -390,7 +396,35 @@ def test_stale_checkpoint_seed_is_rejected_on_resume(tmp_path: Path) -> None:
     )
     checkpoint_path.chmod(0o644)
     checkpoint_path.write_text(json.dumps(changed.to_dict()))
-    with pytest.raises(ScientificArtifactError, match="replayed state"):
+    with pytest.raises(ScientificArtifactError, match="replayed"):
+        executor.execute(config, cell)
+
+
+def test_self_consistent_checkpoint_result_tamper_is_rejected_on_resume(
+    tmp_path: Path,
+) -> None:
+    config = experiment()
+    cell = config.cells()[0]
+    executor = RunExecutor(tmp_path, ExactSymbolicAdapter)
+    partial = executor.execute(config, cell, stop_after_new_events=1)
+    checkpoint_path = partial.path / "checkpoints/00000000.json"
+    checkpoint = read_artifact(checkpoint_path)
+    changed_payload = {
+        **checkpoint.payload,
+        "result": {
+            **checkpoint.payload["result"],
+            "expected_reward": 12345.0,
+        },
+    }
+    changed = ArtifactEnvelope.create(
+        checkpoint.artifact_type,
+        checkpoint.semantic_hashes,
+        changed_payload,
+    )
+    checkpoint_path.chmod(0o644)
+    checkpoint_path.write_text(json.dumps(changed.to_dict()))
+
+    with pytest.raises(ScientificArtifactError, match="replayed evaluation"):
         executor.execute(config, cell)
 
 
@@ -438,6 +472,55 @@ def test_self_consistent_false_manifest_content_hash_is_rejected(
         validate_artifact_tree(result.path)
 
 
+def test_self_consistent_manifest_cannot_mix_semantic_conditions(
+    tmp_path: Path,
+) -> None:
+    config = experiment()
+    result = RunExecutor(tmp_path, ExactSymbolicAdapter).execute(
+        config, config.cells()[0]
+    )
+    metric_path = result.path / "metrics.json"
+    metric = read_artifact(metric_path)
+    changed_metric = ArtifactEnvelope.create(
+        metric.artifact_type,
+        {**metric.semantic_hashes, "environment": scientific_hash("other")},
+        metric.payload,
+    )
+    metric_path.chmod(0o644)
+    metric_path.write_text(json.dumps(changed_metric.to_dict()))
+
+    manifest_path = result.path / "manifest.json"
+    manifest = read_artifact(manifest_path)
+    members = [
+        {
+            **member,
+            "scientific_hash": (
+                changed_metric.scientific_hash
+                if member["path"] == "metrics.json"
+                else member["scientific_hash"]
+            ),
+        }
+        for member in manifest.payload["members"]
+    ]
+    changed_manifest = ArtifactEnvelope.create(
+        manifest.artifact_type,
+        manifest.semantic_hashes,
+        {
+            "members": members,
+            "scientific_content_hash": scientific_hash(
+                members,
+                domain="run-scientific-content",
+            ),
+        },
+        runtime_metadata=manifest.runtime_metadata,
+    )
+    manifest_path.chmod(0o644)
+    manifest_path.write_text(json.dumps(changed_manifest.to_dict()))
+
+    with pytest.raises(ScientificArtifactError, match="semantic hashes differ"):
+        validate_artifact_tree(result.path)
+
+
 def test_immutable_artifact_cannot_be_replaced(tmp_path: Path) -> None:
     store = ArtifactStore(tmp_path / "run")
     semantics = {"environment": scientific_hash("environment")}
@@ -445,3 +528,19 @@ def test_immutable_artifact_cannot_be_replaced(tmp_path: Path) -> None:
     assert store.write("metric.json", "metric", semantics, {"value": 1}) == first
     with pytest.raises(ScientificArtifactError, match="refusing to mutate"):
         store.write("metric.json", "metric", semantics, {"value": 2})
+
+
+def test_finalize_rejects_member_from_another_semantic_condition(
+    tmp_path: Path,
+) -> None:
+    store = ArtifactStore(tmp_path / "run")
+    expected = {"environment": scientific_hash("one")}
+    other = {"environment": scientific_hash("two")}
+    store.write("config.json", "resolved-run-config", expected, {})
+    store.write("frontier.json", "frontier-reference", expected, {})
+    store.write("event.json", "training-event", expected, {})
+    store.write("checkpoint.json", "run-checkpoint", expected, {})
+    store.write("metrics.json", "run-metrics", other, {})
+
+    with pytest.raises(ScientificArtifactError, match="semantic hashes"):
+        store.finalize(expected)

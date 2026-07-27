@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from infinite_rulebook.agents import (
@@ -45,10 +45,7 @@ from infinite_rulebook.orchestration.config import (
     EnvironmentKind,
     RunCell,
 )
-from infinite_rulebook.orchestration.frontiers import (
-    PilotFrontier,
-    build_pilot_frontier,
-)
+from infinite_rulebook.orchestration.frontiers import build_pilot_frontier
 from infinite_rulebook.orchestration.hashing import scientific_hash
 from infinite_rulebook.orchestration.records import build_checkpoint_record
 from infinite_rulebook.orchestration.seeds import RunSeeds
@@ -212,10 +209,14 @@ def _trace_payload(
 
 def _execute_round(state: PilotState) -> tuple[P1RoundTrace, tuple[float, ...]]:
     context = state.agent.acquisition_context(state.candidates)
-    action = state.agent.select_train_action(context)
-    errors = tuple(
-        prediction_error_novelty(state.agent.posterior(target.key))
-        for target in action.targets
+    symbolic_errors = {
+        target.key: prediction_error_novelty(state.agent.posterior(target.key))
+        for target in context.candidates
+    }
+    cosmetic_alphabet = (
+        state.environment.cosmetic_alphabet
+        if isinstance(state.environment, AleaRulebook)
+        else 1
     )
     trace = execute_p1_round(
         state.agent,
@@ -224,6 +225,10 @@ def _execute_round(state: PilotState) -> tuple[P1RoundTrace, tuple[float, ...]]:
         state.channel,
         environment_seed=state.query_observation_seed,
         channel_name="pilot.p1",
+    )
+    errors = tuple(
+        1.0 - (1.0 - symbolic_errors[target.key]) / cosmetic_alphabet
+        for target in trace.action.targets
     )
     return trace, errors
 
@@ -393,8 +398,6 @@ def _novelty_metrics(
 class ExactSymbolicAdapter:
     """Execute all registered smoke-pilot conditions against merged APIs."""
 
-    _frontiers: dict[str, PilotFrontier] = field(default_factory=dict)
-
     def initial_state(self, cell: RunCell, seeds: RunSeeds) -> PilotState:
         environment = _environment(cell, seeds)
         return PilotState(
@@ -480,9 +483,6 @@ class ExactSymbolicAdapter:
             frontier_solver_calls=3,
             deployment_evaluations=1,
         )
-        frontier = self._frontiers.get(cell.cell_hash)
-        if frontier is None:
-            raise RuntimeError("checkpoint evaluation requires a prepared frontier")
         scientific_records = build_checkpoint_record(
             semantic_hashes=semantic_hashes,
             round_index=round_index,
@@ -493,7 +493,6 @@ class ExactSymbolicAdapter:
             novelty=novelty,
             support=support,
             compute=compute,
-            frontier=frontier.curve,
         )
         return {
             "expected_reward": reward,
@@ -509,6 +508,7 @@ class ExactSymbolicAdapter:
             "novelty": asdict(novelty),
             "information": asdict(breakdown),
             "compute": asdict(compute),
+            "agent_capabilities": asdict(state.agent.capabilities),
             "scientific_records": scientific_records,
             "round": round_index,
             "evaluation": "exact-no-feedback",
@@ -523,6 +523,4 @@ class ExactSymbolicAdapter:
         )
 
     def frontier(self, cell: RunCell) -> dict[str, Any]:
-        result = build_pilot_frontier(cell)
-        self._frontiers[cell.cell_hash] = result
-        return result.bundle
+        return build_pilot_frontier(cell).bundle

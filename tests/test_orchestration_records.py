@@ -1,44 +1,27 @@
 from __future__ import annotations
 
+import copy
 import json
 import math
 
-from infinite_rulebook.artifacts import semantic_hash
+import pytest
+
+from infinite_rulebook.artifacts import RunCheckpoint, semantic_hash
 from infinite_rulebook.core import DeploymentAction
 from infinite_rulebook.environments import PublicDeploymentAction
-from infinite_rulebook.frontier import one_coordinate_problem, solve_frontier
 from infinite_rulebook.information import InformationBreakdown
 from infinite_rulebook.metrics import (
     ComputeMetrics,
-    FrontierCurve,
-    FrontierPoint,
     NoveltyMetrics,
     SupportMetrics,
-    UpperEnvelopeCertificate,
 )
-from infinite_rulebook.orchestration.records import build_checkpoint_record
-
-
-def _curve() -> FrontierCurve:
-    problem = one_coordinate_problem(q=2)
-    points = tuple(
-        FrontierPoint.from_frontier_solution(
-            problem,
-            solve_frontier(problem, reward),
-        )
-        for reward in (0.0, 1.0)
-    )
-    return FrontierCurve(
-        points=points,
-        zero_information_reward=0.0,
-        maximum_reward=1.0,
-        semantic_hash=semantic_hash(problem),
-        upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
-    )
+from infinite_rulebook.orchestration.records import (
+    build_checkpoint_record,
+    validate_checkpoint_record,
+)
 
 
 def _inputs() -> dict[str, object]:
-    curve = _curve()
     amount = math.log(2.0)
     return {
         "semantic_hashes": {
@@ -46,9 +29,7 @@ def _inputs() -> dict[str, object]:
             "reward": semantic_hash({"reward": "exact"}),
             "action": semantic_hash({"action": "finite"}),
             "feedback": semantic_hash({"feedback": "qary", "epsilon": 0.0}),
-            "frontier": semantic_hash(
-                {"cache_identity": curve.semantic_hash, "solver": "pilot"}
-            ),
+            "frontier": semantic_hash({"cache_identity": "pilot"}),
         },
         "round_index": 2,
         "reward_sample": 1.0,
@@ -65,37 +46,72 @@ def _inputs() -> dict[str, object]:
         "novelty": NoveltyMetrics(0.1, 0.0, 1.0, 1.0, 0.2, 0.0, 0.0),
         "support": SupportMetrics(1, 1, 0, 0, 1),
         "compute": ComputeMetrics(2, 2, 2, 0, 1),
-        "frontier": curve,
     }
 
 
-def test_record_is_deterministic_and_excludes_runtime_from_scientific_hashes() -> None:
+def test_record_is_deterministic_and_defers_population_estimands() -> None:
     inputs = _inputs()
-    workstation = build_checkpoint_record(
-        **inputs,
-        runtime_metadata={"hostname": "workstation", "elapsed_seconds": 9.0},
-    )
-    cluster = build_checkpoint_record(
-        **inputs,
-        runtime_metadata={"hostname": "cluster", "elapsed_seconds": 1.0},
-    )
+    payload = build_checkpoint_record(**inputs)
 
-    assert json.loads(json.dumps(workstation)) == workstation
-    for kind in ("run_checkpoint", "checkpoint_estimate"):
-        assert workstation[kind]["semantic_hash"] == cluster[kind]["semantic_hash"]
-        assert workstation[kind]["scientific_hash"] == cluster[kind]["scientific_hash"]
-        assert workstation[kind]["envelope"] != cluster[kind]["envelope"]
-    repeated = build_checkpoint_record(
-        **inputs,
-        runtime_metadata={"hostname": "workstation", "elapsed_seconds": 9.0},
-    )
-    assert repeated == workstation
+    assert json.loads(json.dumps(payload)) == payload
+    assert build_checkpoint_record(**inputs) == payload
+    assert set(payload) == {
+        "schema_version",
+        "run_checkpoint",
+        "population_status",
+    }
     assert (
-        workstation["checkpoint_estimate"]["summary"]["population_information"][
-            "run_count"
-        ]
-        == 1
+        payload["population_status"]
+        == "Population CheckpointEstimate, efficiency, and frontier regret are not "
+        "emitted until complete histories are pooled."
     )
+    assert isinstance(validate_checkpoint_record(payload), RunCheckpoint)
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement"),
+    [
+        (("run_checkpoint", "summary", "reward_sample"), 0.25),
+        (("run_checkpoint", "semantic_hash"), "0" * 64),
+        (("run_checkpoint", "scientific_hash"), "f" * 64),
+        (("run_checkpoint", "envelope"), ["tampered"]),
+    ],
+)
+def test_record_validation_rejects_tampering(
+    path: tuple[str, ...],
+    replacement: object,
+) -> None:
+    payload = build_checkpoint_record(**_inputs())
+    tampered = copy.deepcopy(payload)
+    target = tampered
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = replacement
+
+    with pytest.raises(ValueError):
+        validate_checkpoint_record(tampered)
+
+
+def test_record_validation_rejects_nested_runtime_metadata() -> None:
+    payload = build_checkpoint_record(**_inputs())
+    tampered = copy.deepcopy(payload)
+    envelope = tampered["run_checkpoint"]["envelope"]
+    envelope[-1][2][-1][1] = ["m", [["hostname", ["s", "workstation"]]]]
+
+    with pytest.raises(ValueError, match="envelope"):
+        validate_checkpoint_record(tampered)
+
+
+def test_record_validation_rejects_noncanonical_readable_summary() -> None:
+    payload = build_checkpoint_record(**_inputs())
+    tampered = copy.deepcopy(payload)
+    tampered["run_checkpoint"]["summary"]["deployment_seed"] = {
+        "type": "bytes",
+        "hex": "6465706C6F796D656E74",
+    }
+
+    with pytest.raises(ValueError, match="canonical"):
+        validate_checkpoint_record(tampered)
 
 
 def test_public_deployment_is_preserved_in_typed_and_readable_records() -> None:
@@ -106,6 +122,7 @@ def test_public_deployment_is_preserved_in_typed_and_readable_records() -> None:
     )
 
     payload = build_checkpoint_record(**inputs)
+    run = validate_checkpoint_record(payload)
 
     summary = payload["run_checkpoint"]["summary"]["deployment"]
     assert summary == {
@@ -113,4 +130,6 @@ def test_public_deployment_is_preserved_in_typed_and_readable_records() -> None:
         "entries": [[1, 2]],
         "public_choice": 2,
     }
+    assert isinstance(run.deployment_witness, PublicDeploymentAction)
+    assert run.deployment_witness.public_choice == 2
     json.dumps(payload, allow_nan=False)

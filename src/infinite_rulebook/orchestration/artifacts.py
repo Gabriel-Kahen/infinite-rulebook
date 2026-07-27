@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
 import os
 import re
-import tempfile
-from dataclasses import dataclass
+import secrets
+import stat
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from infinite_rulebook.agents import CapabilityManifest
+from infinite_rulebook.artifacts import semantic_hash as typed_semantic_hash
 from infinite_rulebook.frontier.blahut_arimoto import solve_lagrangian
 from infinite_rulebook.frontier.finite_problem import FiniteDecisionProblem
+from infinite_rulebook.frontier.inversion import FrontierSolution
+from infinite_rulebook.metrics import FrontierPoint
 from infinite_rulebook.orchestration.hashing import is_sha256, scientific_hash
 
 ARTIFACT_SCHEMA_VERSION = 1
@@ -21,6 +29,10 @@ _EVENT_NAME = re.compile(r"^(\d{8})\.json$")
 
 class ScientificArtifactError(ValueError):
     """Raised when an artifact is invalid, incompatible, or would be mutated."""
+
+
+class _ArtifactNotFound(ScientificArtifactError):
+    """Internal signal used to distinguish an absent immutable artifact."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,20 +53,31 @@ class ArtifactEnvelope:
         *,
         runtime_metadata: dict[str, Any] | None = None,
     ) -> ArtifactEnvelope:
+        try:
+            normalized_payload = json.loads(
+                json.dumps(payload, allow_nan=False, sort_keys=True)
+            )
+            normalized_runtime = json.loads(
+                json.dumps(runtime_metadata or {}, allow_nan=False, sort_keys=True)
+            )
+        except (TypeError, ValueError) as error:
+            raise ScientificArtifactError(
+                "artifact payload and runtime metadata must be JSON-safe"
+            ) from error
         scientific_payload = {
             "artifact_type": artifact_type,
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "semantic_hashes": semantic_hashes,
-            "payload": payload,
+            "payload": normalized_payload,
         }
         return cls(
             artifact_type=artifact_type,
             semantic_hashes=dict(semantic_hashes),
-            payload=payload,
+            payload=normalized_payload,
             scientific_hash=scientific_hash(
                 scientific_payload, domain="artifact-envelope"
             ),
-            runtime_metadata=dict(runtime_metadata or {}),
+            runtime_metadata=normalized_runtime,
         )
 
     def validate(
@@ -130,12 +153,149 @@ class ArtifactEnvelope:
         return envelope
 
 
-def _read_json(path: Path) -> object:
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _open_directory(
+    path: Path,
+    *,
+    create: bool = False,
+    missing_ok: bool = False,
+) -> int | None:
+    """Open a directory through no-follow directory descriptors."""
+
+    absolute = Path(os.path.abspath(path))
+    descriptor = os.open(absolute.anchor, _DIRECTORY_FLAGS)
     try:
-        with path.open(encoding="utf-8") as stream:
+        for part in absolute.parts[1:]:
+            try:
+                child = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            except FileNotFoundError as error:
+                if not create:
+                    if missing_ok:
+                        os.close(descriptor)
+                        return None
+                    raise _ArtifactNotFound(
+                        f"artifact path does not exist: {path}"
+                    ) from error
+                with suppress(FileExistsError):
+                    os.mkdir(part, mode=0o755, dir_fd=descriptor)
+                child = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except _ArtifactNotFound:
+        os.close(descriptor)
+        raise
+    except OSError as error:
+        os.close(descriptor)
+        raise ScientificArtifactError(
+            f"artifact path contains an unsafe component: {path}"
+        ) from error
+
+
+@contextmanager
+def artifact_tree_lock(path: Path) -> Iterator[None]:
+    """Lock an artifact directory without following path or file symlinks."""
+
+    parent = _open_directory(path, create=True)
+    assert parent is not None
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            ".run.lock",
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            mode=0o600,
+            dir_fd=parent,
+        )
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ScientificArtifactError("artifact lock is not a regular file")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except ScientificArtifactError:
+        raise
+    except OSError as error:
+        raise ScientificArtifactError(f"cannot lock artifact tree: {path}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def _read_json(path: Path) -> object:
+    parent = _open_directory(path.parent)
+    assert parent is not None
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path.name,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=parent,
+        )
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ScientificArtifactError(f"artifact is not a regular file: {path}")
+        with os.fdopen(descriptor, encoding="utf-8") as stream:
+            descriptor = None
             return json.load(stream)
+    except FileNotFoundError as error:
+        raise _ArtifactNotFound(f"artifact does not exist: {path}") from error
+    except ScientificArtifactError:
+        raise
     except (OSError, json.JSONDecodeError) as error:
         raise ScientificArtifactError(f"cannot read artifact {path}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def _list_json_files(path: Path, *, missing_ok: bool = False) -> tuple[Path, ...]:
+    """List JSON files without following symlinks anywhere in the tree."""
+
+    root = _open_directory(path, missing_ok=missing_ok)
+    if root is None:
+        return ()
+    result: list[Path] = []
+
+    def walk(descriptor: int, relative: Path) -> None:
+        for name in sorted(os.listdir(descriptor)):
+            try:
+                metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except OSError as error:
+                raise ScientificArtifactError(
+                    f"cannot inspect artifact tree member: {path / relative / name}"
+                ) from error
+            member = relative / name
+            if stat.S_ISLNK(metadata.st_mode):
+                raise ScientificArtifactError(
+                    f"artifact tree contains a symbolic link: {path / member}"
+                )
+            if stat.S_ISDIR(metadata.st_mode):
+                try:
+                    child = os.open(name, _DIRECTORY_FLAGS, dir_fd=descriptor)
+                except OSError as error:
+                    raise ScientificArtifactError(
+                        f"cannot safely traverse artifact tree: {path / member}"
+                    ) from error
+                try:
+                    walk(child, member)
+                finally:
+                    os.close(child)
+            elif name.endswith(".json"):
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ScientificArtifactError(
+                        f"artifact is not a regular file: {path / member}"
+                    )
+                result.append(path / member)
+
+    try:
+        walk(root, Path())
+    finally:
+        os.close(root)
+    return tuple(result)
 
 
 def read_artifact(
@@ -149,29 +309,45 @@ def read_artifact(
 
 
 def _exclusive_json(path: Path, content: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     encoded = (
         json.dumps(content, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-    )
-    temporary = Path(temporary_name)
+    parent = _open_directory(path.parent, create=True)
+    assert parent is not None
+    temporary_name = f".{path.name}.{secrets.token_hex(12)}"
+    descriptor: int | None = None
     try:
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            mode=0o600,
+            dir_fd=parent,
+        )
         with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
-        temporary.chmod(0o444)
+            os.fchmod(stream.fileno(), 0o444)
         try:
-            os.link(temporary, path)
+            os.link(
+                temporary_name,
+                path.name,
+                src_dir_fd=parent,
+                dst_dir_fd=parent,
+                follow_symlinks=False,
+            )
+            os.fsync(parent)
         except FileExistsError as error:
             raise ScientificArtifactError(
                 f"immutable artifact already exists: {path}"
             ) from error
     finally:
-        temporary.unlink(missing_ok=True)
+        if descriptor is not None:
+            os.close(descriptor)
+        with suppress(FileNotFoundError):
+            os.unlink(temporary_name, dir_fd=parent)
+        os.close(parent)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,7 +370,7 @@ class ArtifactStore:
 
     def _artifact_path(self, relative_path: str | Path) -> Path:
         relative = Path(relative_path)
-        if relative.is_absolute() or ".." in relative.parts:
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
             raise ScientificArtifactError(
                 "artifact paths must remain inside the artifact store"
             )
@@ -216,19 +392,22 @@ class ArtifactStore:
             payload,
             runtime_metadata=runtime_metadata,
         )
-        if path.exists():
+        try:
             existing = read_artifact(path)
             if existing.scientific_hash != envelope.scientific_hash:
                 raise ScientificArtifactError(
                     f"refusing to mutate immutable artifact: {path}"
                 )
             return existing
+        except _ArtifactNotFound:
+            pass
         try:
             _exclusive_json(path, envelope.to_dict())
         except ScientificArtifactError as error:
-            if not path.exists():
+            try:
+                existing = read_artifact(path)
+            except _ArtifactNotFound:
                 raise
-            existing = read_artifact(path)
             if existing.scientific_hash != envelope.scientific_hash:
                 raise ScientificArtifactError(
                     f"refusing to mutate immutable artifact: {path}"
@@ -248,11 +427,7 @@ class ArtifactStore:
         )
 
     def list_artifacts(self) -> tuple[Path, ...]:
-        if not self.path.exists():
-            return ()
-        return tuple(
-            sorted(path for path in self.path.rglob("*.json") if path.is_file())
-        )
+        return _list_json_files(self.path, missing_ok=True)
 
     def finalize(
         self,
@@ -265,6 +440,10 @@ class ArtifactStore:
             if path.name == "manifest.json":
                 continue
             artifact = read_artifact(path)
+            if artifact.semantic_hashes != semantic_hashes:
+                raise ScientificArtifactError(
+                    "run artifact semantic hashes differ from finalization semantics"
+                )
             members.append(
                 {
                     "path": path.relative_to(self.path).as_posix(),
@@ -330,11 +509,10 @@ class EventJournal:
         if self._events is not None:
             return self._events
         directory = self.store.path / "events"
-        if not directory.exists():
-            self._events = []
-            return self._events
         paths = []
-        for path in directory.iterdir():
+        for path in _list_json_files(directory, missing_ok=True):
+            if path.parent != directory:
+                continue
             match = _EVENT_NAME.match(path.name)
             if match:
                 paths.append((int(match.group(1)), path))
@@ -472,14 +650,18 @@ def validate_artifact_tree(
     expected_semantic_hashes: dict[str, str] | None = None,
 ) -> tuple[ArtifactEnvelope, ...]:
     path = Path(root)
-    if not path.is_dir():
-        raise ScientificArtifactError(f"artifact tree does not exist: {path}")
+    try:
+        files = _list_json_files(path)
+    except _ArtifactNotFound as error:
+        raise ScientificArtifactError(
+            f"artifact tree does not exist: {path}"
+        ) from error
     records = tuple(
         (
             file,
             read_artifact(file, expected_semantic_hashes=expected_semantic_hashes),
         )
-        for file in sorted(path.rglob("*.json"))
+        for file in files
     )
     artifacts = tuple(artifact for _, artifact in records)
     if not artifacts:
@@ -496,6 +678,13 @@ def validate_artifact_tree(
         raise ScientificArtifactError(
             "artifact tree must contain exactly one recognized manifest"
         )
+    manifest = (manifests or frontier_manifests)[0]
+    if any(
+        artifact.semantic_hashes != manifest.semantic_hashes for artifact in artifacts
+    ):
+        raise ScientificArtifactError(
+            "artifact semantic hashes differ from the manifest"
+        )
     if manifests:
         manifest = manifests[0]
         manifest_records = [
@@ -507,7 +696,7 @@ def validate_artifact_tree(
             raise ScientificArtifactError("run manifest must be at the tree root")
         expected_members = manifest.payload["members"]
         actual_members = []
-        for file in sorted(path.rglob("*.json")):
+        for file in files:
             if file.name == "manifest.json" and file.parent == path:
                 continue
             artifact = read_artifact(file)
@@ -580,6 +769,11 @@ def _validate_completed_run(
     expected_rounds = list(run_settings["checkpoints"]["rounds"])
     checkpoint_rounds = []
     for file, checkpoint in by_type["run-checkpoint"]:
+        from infinite_rulebook.environments.controls import PublicDeploymentAction
+        from infinite_rulebook.orchestration.records import (
+            validate_checkpoint_record,
+        )
+
         payload = checkpoint.payload
         round_index = payload.get("round")
         if (
@@ -593,6 +787,53 @@ def _validate_completed_run(
         ):
             raise ScientificArtifactError(
                 "completed run checkpoint metadata is invalid"
+            )
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise ScientificArtifactError("completed run checkpoint result is invalid")
+        try:
+            typed = validate_checkpoint_record(result["scientific_records"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ScientificArtifactError(
+                "completed run typed checkpoint record is invalid"
+            ) from error
+        typed_semantics = {
+            name: getattr(typed.semantic_hashes, name)
+            for name in ("environment", "reward", "action", "feedback", "frontier")
+        }
+        deployment = typed.deployment_witness
+        readable_deployment: object
+        if isinstance(deployment, PublicDeploymentAction):
+            readable_deployment = {
+                "entries": [list(entry) for entry in deployment.deployment.entries],
+                "public_choice": deployment.public_choice,
+            }
+        else:
+            readable_deployment = [list(entry) for entry in deployment]
+        if (
+            typed.round_index != round_index
+            or typed_semantics != checkpoint.semantic_hashes
+            or typed.deployment_seed != payload["deployment_seed"]
+            or result.get("expected_reward") != typed.reward_samples[0]
+            or result.get("deployment") != readable_deployment
+            or result.get("information") != asdict(typed.realized_information)
+            or result.get("novelty") != asdict(typed.novelty)
+            or result.get("support") != asdict(typed.support)
+            or result.get("compute") != asdict(typed.compute)
+        ):
+            raise ScientificArtifactError(
+                "completed run checkpoint result differs from its typed record"
+            )
+        capabilities = result.get("agent_capabilities")
+        try:
+            capability_manifest = CapabilityManifest(**capabilities)
+        except (TypeError, ValueError):
+            raise ScientificArtifactError(
+                "completed run checkpoint agent capabilities are invalid"
+            ) from None
+        if capabilities != asdict(capability_manifest):
+            raise ScientificArtifactError(
+                "completed run checkpoint agent capabilities are not canonical"
             )
         checkpoint_rounds.append(round_index)
     if sorted(checkpoint_rounds) != expected_rounds:
@@ -679,6 +920,9 @@ def _validate_frontier_records(
         prior=tuple(problem_payload["prior"]),
         rewards=tuple(tuple(row) for row in problem_payload["reward_matrix"]),
     )
+    problem_semantic_hash = typed_semantic_hash(problem)
+    if curves[0].payload.get("problem_semantic_hash") != problem_semantic_hash:
+        raise ScientificArtifactError("frontier problem semantic hash is invalid")
     points = curves[0].payload["points"]
     expected_names = {f"point-{index:03d}" for index in range(len(points))}
     witnesses = {
@@ -705,9 +949,11 @@ def _validate_frontier_records(
         raise ScientificArtifactError(
             "frontier tree must have one diagnostics artifact"
         )
-    diagnostic_names = {
-        diagnostic["name"] for diagnostic in diagnostics[0].get("points", [])
+    diagnostic_by_name = {
+        diagnostic["name"]: diagnostic
+        for diagnostic in diagnostics[0].get("points", [])
     }
+    diagnostic_names = set(diagnostic_by_name)
     if (
         set(witnesses) != expected_names
         or set(certificates) != expected_names
@@ -733,6 +979,20 @@ def _validate_frontier_records(
             abs_tol=1e-10,
         ):
             raise ScientificArtifactError("frontier witness quantities are invalid")
+        recorded_marginal = witness_payload["action_marginal"]
+        if not isinstance(recorded_marginal, list) or len(recorded_marginal) != len(
+            evaluated.action_marginal
+        ):
+            raise ScientificArtifactError("frontier witness action marginal is invalid")
+        if any(
+            not math.isclose(left, right, abs_tol=1e-10)
+            for left, right in zip(
+                evaluated.action_marginal,
+                recorded_marginal,
+                strict=True,
+            )
+        ):
+            raise ScientificArtifactError("frontier witness action marginal is invalid")
         if evaluated.expected_reward < point["target_reward"] - 1e-9:
             raise ScientificArtifactError("frontier witness is reward-infeasible")
         if (
@@ -752,6 +1012,54 @@ def _validate_frontier_records(
         ):
             raise ScientificArtifactError("frontier certificate upper bound is invalid")
         beta = certificate["dual_beta"]
+        parsed_beta = math.inf if beta == "infinity" else beta
+        try:
+            solution = FrontierSolution(
+                target_reward=certificate["requested_target_reward"],
+                effective_target_reward=certificate["effective_target_reward"],
+                witness=evaluated,
+                lower_bound=certificate["lower_bound"],
+                upper_bound=certificate["upper_bound"],
+                duality_gap=(
+                    math.inf
+                    if certificate["duality_gap"] == "infinity"
+                    else certificate["duality_gap"]
+                ),
+                dual_beta=parsed_beta,
+                iterations=diagnostic_by_name[name]["iterations"],
+                converged=diagnostic_by_name[name]["converged"],
+                problem_semantic_hash=problem_semantic_hash,
+                lower_certificate_marginal=(
+                    None
+                    if certificate["dual_action_marginal"] is None
+                    else tuple(certificate["dual_action_marginal"])
+                ),
+                lower_certificate_supports=(
+                    None
+                    if certificate["supported_actions"] is None
+                    else tuple(
+                        tuple(support) for support in certificate["supported_actions"]
+                    )
+                ),
+            )
+            typed_point = FrontierPoint.from_frontier_solution(problem, solution)
+        except (TypeError, ValueError) as error:
+            raise ScientificArtifactError(
+                "frontier lower certificate evidence is invalid"
+            ) from error
+        if (
+            typed_point.upper_witness.witness_hash != witness_payload["witness_hash"]
+            or typed_point.lower_certificate.source_solution_hash
+            != certificate["source_solution_hash"]
+            or typed_point.lower_certificate.certificate_hash
+            != certificate["certificate_hash"]
+            or typed_point.lower_certificate.method.value != certificate["method"]
+            or typed_point.lower_certificate.dual_objective_lower_bound
+            != certificate["dual_objective_lower_bound"]
+        ):
+            raise ScientificArtifactError(
+                "frontier typed certificate hashes are invalid"
+            )
         if beta == "infinity":
             if (
                 not math.isclose(

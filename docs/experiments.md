@@ -33,10 +33,14 @@ uv run infinite-rulebook pilot configs/pilot-smoke.json --workers 4
 It crosses IND, RED-C, MIX, ALEA, TRIVIA, and PUBLIC-C with fixed-target,
 reward-directed, novelty-directed, and total-information agents. The projection,
 horizon, support caps, public schedule, and replica count are intentionally
-small. Its per-run population metric has `run_count = 1` and is explicitly
-stored as a diagnostic, not a confirmatory estimand. The authoritative run
-record uses realized Bayesian surprise; population-MI efficiency and regret
-diagnostics may remain invalid until complete histories are pooled.
+small. Per-run records contain realized Bayesian surprise only. Population-MI
+efficiency and frontier regret are not emitted until complete histories are
+pooled into a genuine ensemble estimate.
+
+ALEA prediction-error telemetry includes the aligned cosmetic alphabet used by
+the novelty objective. The pilot's compression-improvement field is the exact
+uniform-prior posterior entropy reduction recorded by the finite ledger; fresh
+cosmetic values do not enter that persistent-information quantity.
 
 ## Artifact contract
 
@@ -46,7 +50,7 @@ from agent runs. Run directories contain:
 - a fully resolved config and deterministic seed tree;
 - one immutable, hash-chained file per training event;
 - side-effect-free checkpoint artifacts from an independent evaluation stream;
-- typed run/checkpoint metric records and exact finite-closure ledgers;
+- typed run checkpoint records and exact finite-closure ledgers;
 - a reference to the validated frontier bundle;
 - immutable metrics and a final manifest.
 

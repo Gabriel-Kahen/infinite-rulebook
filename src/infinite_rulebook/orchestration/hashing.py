@@ -11,30 +11,50 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-SCIENTIFIC_HASH_VERSION = "infinite-rulebook.scientific.v1"
+SCIENTIFIC_HASH_VERSION = "infinite-rulebook.scientific.v2"
 
 
 def _canonical(value: Any) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _canonical(dataclasses.asdict(value))
+        return [
+            "record",
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            [
+                [field.name, _canonical(getattr(value, field.name))]
+                for field in dataclasses.fields(value)
+            ],
+        ]
     if isinstance(value, Enum):
-        return _canonical(value.value)
+        return [
+            "enum",
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            _canonical(value.value),
+        ]
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
             raise TypeError("scientific mappings must have string keys")
-        return {key: _canonical(value[key]) for key in sorted(value)}
+        return [
+            "map",
+            [[key, _canonical(value[key])] for key in sorted(value)],
+        ]
     if isinstance(value, (tuple, list)):
-        return [_canonical(item) for item in value]
+        return ["sequence", [_canonical(item) for item in value]]
     if isinstance(value, bytes):
-        return {"$bytes": value.hex()}
+        return ["bytes", value.hex()]
     if isinstance(value, Path):
-        return {"$path": value.as_posix()}
+        return ["path", value.as_posix()]
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("scientific payloads must not contain non-finite floats")
-        return {"$float": value.hex()}
-    if value is None or isinstance(value, (str, int, bool)):
-        return value
+        return ["float", value.hex()]
+    if value is None:
+        return ["none"]
+    if isinstance(value, bool):
+        return ["bool", value]
+    if isinstance(value, int):
+        return ["int", str(value)]
+    if isinstance(value, str):
+        return ["str", value]
     raise TypeError(f"unsupported scientific payload value: {type(value).__name__}")
 
 

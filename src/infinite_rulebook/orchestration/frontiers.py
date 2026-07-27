@@ -20,7 +20,6 @@ from infinite_rulebook.frontier import (
     enumerate_public_c_rulebook,
     enumerate_redundant_rulebook,
     solve_frontier,
-    solve_lagrangian,
 )
 from infinite_rulebook.metrics import (
     FrontierCurve,
@@ -61,8 +60,13 @@ def _enumerated_problem(
             spec,
         )
     if environment.kind is EnvironmentKind.MIX:
-        primitive_dimensions = max(1, environment.projection_size // 2)
-        derived_rules = max(1, environment.projection_size - primitive_dimensions)
+        primitive_dimensions = (environment.projection_size + 1) // 2
+        derived_rules = environment.projection_size // 2
+        if derived_rules == 0:
+            # A one-rule MIX projection contains only its independent odd rule.
+            # Reuse the exact IND problem so an unused redundant core does not
+            # appear as a spurious latent dimension in the finite problem.
+            return enumerate_independent_rulebook(primitive_dimensions, spec)
         return enumerate_mixed_rulebook(
             primitive_dimensions,
             environment.core_dimensions,
@@ -182,20 +186,14 @@ def build_pilot_frontier(cell: RunCell) -> PilotFrontier:
             "mutual_information": solution.witness.mutual_information,
             "witness_hash": point.upper_witness.witness_hash,
         }
-        dual_objective = None
-        if math.isfinite(solution.dual_beta):
-            dual_objective = solve_lagrangian(
-                problem,
-                solution.dual_beta,
-                tolerance=cell.solver.lagrangian_tolerance,
-                max_iterations=cell.solver.lagrangian_max_iterations,
-            ).objective_lower_bound
         certificates[name] = {
             "target_reward": solution.effective_target_reward,
             "requested_target_reward": solution.target_reward,
             "effective_target_reward": solution.effective_target_reward,
             "dual_beta": _extended_number(solution.dual_beta),
-            "dual_objective_lower_bound": dual_objective,
+            "dual_objective_lower_bound": (
+                point.lower_certificate.dual_objective_lower_bound
+            ),
             "dual_action_marginal": (
                 None
                 if solution.lower_certificate_marginal is None
@@ -210,6 +208,7 @@ def build_pilot_frontier(cell: RunCell) -> PilotFrontier:
             "upper_bound": solution.upper_bound,
             "duality_gap": _extended_number(solution.duality_gap),
             "certificate_hash": point.lower_certificate.certificate_hash,
+            "source_solution_hash": (point.lower_certificate.source_solution_hash),
             "method": point.lower_certificate.method.value,
         }
         point_diagnostics.append(
@@ -235,6 +234,10 @@ def build_pilot_frontier(cell: RunCell) -> PilotFrontier:
             "canonical-IND"
             if cell.environment.kind
             in {EnvironmentKind.IND, EnvironmentKind.ALEA, EnvironmentKind.TRIVIA}
+            or (
+                cell.environment.kind is EnvironmentKind.MIX
+                and cell.environment.projection_size == 1
+            )
             else cell.environment.kind.value
         ),
     }

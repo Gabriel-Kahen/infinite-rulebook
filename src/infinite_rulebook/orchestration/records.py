@@ -10,7 +10,6 @@ from typing import Any
 
 from infinite_rulebook.artifacts import (
     ArtifactEnvelope,
-    CheckpointEstimate,
     RunCheckpoint,
     ScientificSemantics,
     semantic_hash,
@@ -21,34 +20,19 @@ from infinite_rulebook.environments.controls import PublicDeploymentAction
 from infinite_rulebook.information import InformationBreakdown
 from infinite_rulebook.metrics import (
     ComputeMetrics,
-    FrontierCurve,
-    FrontierRegretMetrics,
     NoveltyMetrics,
-    PopulationInformationEstimate,
-    RewardMetrics,
     SupportMetrics,
-    frontier_regret,
-    lookup_bit_equivalent,
-    useful_information_efficiency,
 )
 
 _SEMANTIC_FIELDS = ("environment", "reward", "action", "feedback", "frontier")
+_POPULATION_STATUS = (
+    "Population CheckpointEstimate, efficiency, and frontier regret are not "
+    "emitted until complete histories are pooled."
+)
 
 
 def _tagged_envelope(envelope: ArtifactEnvelope) -> object:
     return json.loads(envelope.canonical_bytes())
-
-
-def _diagnostics(record: CheckpointEstimate) -> list[dict[str, object]]:
-    return [
-        {
-            "severity": diagnostic.severity.name.lower(),
-            "code": diagnostic.code,
-            "path": diagnostic.path,
-            "message": diagnostic.message,
-        }
-        for diagnostic in record.validate().diagnostics
-    ]
 
 
 def _seed_summary(seed: Seed) -> dict[str, object]:
@@ -91,6 +75,22 @@ def _record_payload(
     }
 
 
+def _checkpoint_summary(run: RunCheckpoint) -> dict[str, object]:
+    return {
+        "semantics": {
+            name: getattr(run.semantic_hashes, name) for name in _SEMANTIC_FIELDS
+        },
+        "round_index": run.round_index,
+        "reward_sample": run.reward_samples[0],
+        "information": dataclasses.asdict(run.realized_information),
+        "deployment": _deployment_summary(run.deployment_witness),
+        "deployment_seed": _seed_summary(run.deployment_seed),
+        "novelty": dataclasses.asdict(run.novelty),
+        "support": dataclasses.asdict(run.support),
+        "compute": dataclasses.asdict(run.compute),
+    }
+
+
 def build_checkpoint_record(
     *,
     semantic_hashes: Mapping[str, str],
@@ -102,10 +102,8 @@ def build_checkpoint_record(
     novelty: NoveltyMetrics,
     support: SupportMetrics,
     compute: ComputeMetrics,
-    frontier: FrontierCurve,
-    runtime_metadata: object | None = None,
 ) -> dict[str, object]:
-    """Build validated run and one-run population records as JSON-safe data."""
+    """Build a validated per-run record without inventing a population estimand."""
 
     if set(semantic_hashes) != set(_SEMANTIC_FIELDS):
         raise ValueError(
@@ -119,48 +117,13 @@ def build_checkpoint_record(
         raise TypeError("information must be an InformationBreakdown")
     if information.approximation_residual_nats != 0.0:
         raise ValueError(
-            "an exact one-run population estimate cannot include an "
-            "approximation residual"
+            "an exact per-run checkpoint cannot include an approximation residual"
         )
-    if not isinstance(frontier, FrontierCurve):
-        raise TypeError("frontier must be a FrontierCurve")
-
-    reward = RewardMetrics(
-        expected_reward=reward_sample,
-        cumulative_reward=reward_sample,
-        variance=0.0,
-    )
-    population = PopulationInformationEstimate(
-        reward_relevant_nats=information.reward_relevant_nats,
-        shared_core_nats=information.shared_core_nats,
-        persistent_distractor_nats=information.persistent_distractor_nats,
-        dynamic_state_nats=information.dynamic_state_nats,
-        total_nats=information.total_acquired_nats,
-        run_count=1,
-    )
-    bit_equivalent = lookup_bit_equivalent(frontier, reward.expected_reward)
-    efficiency = useful_information_efficiency(
-        bit_equivalent,
-        population,
-        complete_history_manifest=True,
-    )
-    regret = FrontierRegretMetrics(
-        full_information=frontier_regret(
-            frontier,
-            attained_reward=reward.expected_reward,
-            information_budget_nats=population.total_nats,
-        ),
-        relevant_information=frontier_regret(
-            frontier,
-            attained_reward=reward.expected_reward,
-            information_budget_nats=population.relevant_nats,
-        ),
-    )
     run = RunCheckpoint(
         schema_version=1,
         semantic_hashes=semantics,
         round_index=round_index,
-        reward_samples=(reward.expected_reward,),
+        reward_samples=(float(reward_sample),),
         realized_information=information,
         deployment_witness=deployment,
         deployment_semantic_hash=semantic_hash(deployment),
@@ -170,58 +133,164 @@ def build_checkpoint_record(
         compute=compute,
         target_size=support.deployment_support + support.abstentions,
     )
-    estimate = CheckpointEstimate(
-        schema_version=1,
-        semantic_hashes=semantics,
-        reward=reward,
-        bit_equivalent=bit_equivalent,
-        population_information=population,
-        efficiency=efficiency,
-        novelty=novelty,
-        support=support,
-        frontier_regret=regret,
-        uncertainty=(),
-    )
-    validation = estimate.validate()
-
-    run_envelope = run.envelope(runtime_metadata=runtime_metadata)
-    estimate_envelope = estimate.envelope(runtime_metadata=runtime_metadata)
-    common_summary: dict[str, Any] = {
-        "semantics": {name: getattr(semantics, name) for name in _SEMANTIC_FIELDS},
-        "round_index": round_index,
-        "reward_sample": reward.expected_reward,
-        "information": dataclasses.asdict(information),
-        "deployment": _deployment_summary(deployment),
-        "deployment_seed": _seed_summary(deployment_seed),
-        "novelty": dataclasses.asdict(novelty),
-        "support": dataclasses.asdict(support),
-        "compute": dataclasses.asdict(compute),
-    }
-    estimate_summary = {
-        **common_summary,
-        "reward": dataclasses.asdict(reward),
-        "bit_equivalent": dataclasses.asdict(bit_equivalent),
-        "population_information": dataclasses.asdict(population),
-        "efficiency": (
-            None
-            if efficiency.interval is None
-            else dataclasses.asdict(efficiency.interval)
-        ),
-        "frontier_regret": dataclasses.asdict(regret),
-        "pilot_population_status": "single-run-diagnostic-not-confirmatory",
-        "validation_valid": validation.valid,
-        "validation_diagnostics": _diagnostics(estimate),
-    }
+    run_envelope = run.envelope()
     payload = {
         "schema_version": 1,
         "run_checkpoint": _record_payload(
-            summary=common_summary,
+            summary=_checkpoint_summary(run),
             envelope=run_envelope,
         ),
-        "checkpoint_estimate": _record_payload(
-            summary=estimate_summary,
-            envelope=estimate_envelope,
-        ),
+        "population_status": _POPULATION_STATUS,
     }
     json.dumps(payload, allow_nan=False, sort_keys=True)
+    validate_checkpoint_record(payload)
     return payload
+
+
+def _mapping(value: object, name: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{name} must be a mapping")
+    if any(not isinstance(key, str) for key in value):
+        raise TypeError(f"{name} keys must be strings")
+    return value
+
+
+def _require_keys(
+    value: Mapping[str, object],
+    expected: set[str],
+    name: str,
+) -> None:
+    if set(value) != expected:
+        raise ValueError(f"{name} must contain exactly {sorted(expected)}")
+
+
+def _reconstruct_seed(summary: object) -> Seed:
+    tagged = _mapping(summary, "deployment_seed")
+    seed_type = tagged.get("type")
+    if seed_type == "bytes":
+        _require_keys(tagged, {"type", "hex"}, "deployment_seed")
+        encoded = tagged["hex"]
+        if not isinstance(encoded, str):
+            raise TypeError("deployment_seed.hex must be a string")
+        try:
+            return bytes.fromhex(encoded)
+        except ValueError as error:
+            raise ValueError("deployment_seed.hex must encode bytes") from error
+    _require_keys(tagged, {"type", "value"}, "deployment_seed")
+    value = tagged["value"]
+    if seed_type == "int" and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if seed_type == "str" and isinstance(value, str):
+        return value
+    raise TypeError("deployment_seed must encode bytes, an integer, or a string")
+
+
+def _reconstruct_deployment(
+    summary: object,
+) -> DeploymentAction | PublicDeploymentAction:
+    readable = _mapping(summary, "deployment")
+    deployment_type = readable.get("type")
+    if deployment_type == "deployment":
+        _require_keys(readable, {"type", "entries"}, "deployment")
+    elif deployment_type == "public_deployment":
+        _require_keys(
+            readable,
+            {"type", "entries", "public_choice"},
+            "deployment",
+        )
+    else:
+        raise ValueError("deployment.type is not recognized")
+    entries = readable["entries"]
+    if not isinstance(entries, list):
+        raise TypeError("deployment.entries must be a JSON array")
+    deployment = DeploymentAction(tuple(tuple(entry) for entry in entries))
+    if deployment_type == "public_deployment":
+        return PublicDeploymentAction(deployment, readable["public_choice"])
+    return deployment
+
+
+def _reconstruct_dataclass(
+    summary: object,
+    name: str,
+    record_type: type[Any],
+) -> Any:
+    return record_type(**dict(_mapping(summary, name)))
+
+
+def validate_checkpoint_record(payload: object) -> RunCheckpoint:
+    """Reconstruct and authenticate a readable per-run checkpoint record."""
+
+    record = _mapping(payload, "checkpoint record")
+    _require_keys(
+        record,
+        {"schema_version", "run_checkpoint", "population_status"},
+        "checkpoint record",
+    )
+    if record["schema_version"] != 1:
+        raise ValueError("checkpoint record schema_version must be 1")
+    if record["population_status"] != _POPULATION_STATUS:
+        raise ValueError("checkpoint record population_status is not recognized")
+
+    checkpoint = _mapping(record["run_checkpoint"], "run_checkpoint")
+    _require_keys(
+        checkpoint,
+        {"summary", "envelope", "semantic_hash", "scientific_hash"},
+        "run_checkpoint",
+    )
+    summary = _mapping(checkpoint["summary"], "run_checkpoint.summary")
+    _require_keys(
+        summary,
+        {
+            "semantics",
+            "round_index",
+            "reward_sample",
+            "information",
+            "deployment",
+            "deployment_seed",
+            "novelty",
+            "support",
+            "compute",
+        },
+        "run_checkpoint.summary",
+    )
+    semantic_summary = _mapping(summary["semantics"], "semantics")
+    _require_keys(semantic_summary, set(_SEMANTIC_FIELDS), "semantics")
+    semantics = ScientificSemantics(
+        **{name: semantic_summary[name] for name in _SEMANTIC_FIELDS}
+    )
+    information = _reconstruct_dataclass(
+        summary["information"],
+        "information",
+        InformationBreakdown,
+    )
+    novelty = _reconstruct_dataclass(summary["novelty"], "novelty", NoveltyMetrics)
+    support = _reconstruct_dataclass(summary["support"], "support", SupportMetrics)
+    compute = _reconstruct_dataclass(summary["compute"], "compute", ComputeMetrics)
+    deployment = _reconstruct_deployment(summary["deployment"])
+    run = RunCheckpoint(
+        schema_version=1,
+        semantic_hashes=semantics,
+        round_index=summary["round_index"],
+        reward_samples=(summary["reward_sample"],),
+        realized_information=information,
+        deployment_witness=deployment,
+        deployment_semantic_hash=semantic_hash(deployment),
+        deployment_seed=_reconstruct_seed(summary["deployment_seed"]),
+        novelty=novelty,
+        support=support,
+        compute=compute,
+        target_size=support.deployment_support + support.abstentions,
+    )
+    canonical_summary = json.loads(
+        json.dumps(_checkpoint_summary(run), allow_nan=False, sort_keys=True)
+    )
+    if checkpoint["summary"] != canonical_summary:
+        raise ValueError("run_checkpoint summary is not canonical")
+    envelope = run.envelope()
+    if checkpoint["envelope"] != _tagged_envelope(envelope):
+        raise ValueError("run_checkpoint envelope does not match its summary")
+    if checkpoint["semantic_hash"] != envelope.semantic_hash:
+        raise ValueError("run_checkpoint semantic_hash does not match its envelope")
+    if checkpoint["scientific_hash"] != envelope.scientific_payload_hash:
+        raise ValueError("run_checkpoint scientific_hash does not match its envelope")
+    return run

@@ -4,6 +4,11 @@ from dataclasses import replace
 
 import pytest
 
+from infinite_rulebook.artifacts import semantic_hash
+from infinite_rulebook.frontier import (
+    enumerate_independent_rulebook,
+    enumerate_mixed_rulebook,
+)
 from infinite_rulebook.metrics import FrontierCurve
 from infinite_rulebook.orchestration.artifacts import (
     ArtifactStore,
@@ -115,3 +120,54 @@ def test_invariance_diagnostic_does_not_change_trivia_frontier() -> None:
         == many.bundle["curve"]["problem"]["provenance_hash"]
     )
     assert one.bundle == many.bundle
+
+
+def test_one_rule_mix_reuses_exact_ind_problem_without_spurious_core() -> None:
+    mix = build_pilot_frontier(_cell(EnvironmentKind.MIX))
+    independent_problem = enumerate_independent_rulebook(1, RewardConfig().to_spec())
+
+    assert mix.curve.semantic_hash == semantic_hash(independent_problem.problem)
+    assert mix.curve.maximum_reward == 1.0
+    assert mix.bundle["curve"]["problem"]["structural_assumptions"] == "canonical-IND"
+    assert {
+        index
+        for action in mix.bundle["curve"]["problem"]["actions"]
+        for index, _prediction in action
+    } == {1}
+
+
+def test_three_rule_mix_matches_exact_odd_even_projection() -> None:
+    cell = replace(
+        _cell(EnvironmentKind.MIX),
+        environment=replace(
+            _cell(EnvironmentKind.MIX).environment,
+            projection_size=3,
+        ),
+    )
+    mix = build_pilot_frontier(cell)
+    exact_problem = enumerate_mixed_rulebook(
+        2,
+        cell.environment.core_dimensions,
+        1,
+        cell.environment.max_redundant_support,
+        cell.reward.to_spec(),
+    )
+
+    assert mix.curve.semantic_hash == semantic_hash(exact_problem.problem)
+    assert mix.curve.maximum_reward == 3.0
+    assert {
+        index
+        for action in mix.bundle["curve"]["problem"]["actions"]
+        for index, _prediction in action
+    } == {1, 2, 3}
+
+
+def test_red_c_rejects_zero_redundant_support() -> None:
+    with pytest.raises(
+        ValueError,
+        match="RED-C max_redundant_support must be positive",
+    ):
+        EnvironmentConfig(
+            kind=EnvironmentKind.RED_C,
+            max_redundant_support=0,
+        )

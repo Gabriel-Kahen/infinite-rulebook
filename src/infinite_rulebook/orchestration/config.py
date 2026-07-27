@@ -52,6 +52,8 @@ class EnvironmentConfig:
         value = self.max_redundant_support
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError("max_redundant_support must be a nonnegative integer")
+        if self.kind is EnvironmentKind.RED_C and value == 0:
+            raise ValueError("RED-C max_redundant_support must be positive")
         if not math.isfinite(self.public_reward_cap) or self.public_reward_cap < 0:
             raise ValueError("public_reward_cap must be finite and nonnegative")
 

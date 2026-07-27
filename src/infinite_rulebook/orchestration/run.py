@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import copy
-import fcntl
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -15,6 +13,7 @@ from infinite_rulebook.orchestration.artifacts import (
     ArtifactStore,
     EventJournal,
     ScientificArtifactError,
+    artifact_tree_lock,
     validate_artifact_tree,
     write_frontier_bundle,
 )
@@ -29,19 +28,6 @@ from infinite_rulebook.orchestration.seeds import RunSeeds, SeedBank
 from infinite_rulebook.orchestration.semantics import semantic_hashes
 
 RUNNER_VERSION = "symbolic-runner.v1"
-
-
-@contextmanager
-def _run_lock(path: Path) -> Iterator[None]:
-    """Serialize executors that resolve to the same run directory."""
-
-    path.mkdir(parents=True, exist_ok=True)
-    with (path / ".run.lock").open("ab") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 class ExperimentAdapter(Protocol):
@@ -130,9 +116,12 @@ class RunExecutor:
         seeds = SeedBank(experiment.master_seed).for_cell(cell)
         provenance = self.provenance
         run_hash = run_identity(experiment, cell, seeds, provenance)
-        hashes = semantic_hashes(cell, analysis_code_hash=provenance.analysis_code_hash)
+        hashes = semantic_hashes(
+            cell,
+            analysis_code_hash=provenance.analysis_code_hash,
+        )
         store = ArtifactStore.for_run(self.artifact_root, experiment.name, run_hash)
-        with _run_lock(store.path):
+        with artifact_tree_lock(store.path):
             return self._execute_locked(
                 experiment,
                 cell,
@@ -313,20 +302,6 @@ class RunExecutor:
         relative_path = f"checkpoints/{round_index:08d}.json"
         path = store.path / relative_path
         current = adapter.state_fingerprint(state)
-        if path.exists():
-            checkpoint = store.read(relative_path, expected_semantic_hashes=hashes)
-            payload = checkpoint.payload
-            if (
-                payload["round"] != round_index
-                or payload["training_state_before"] != current
-                or payload["training_state_after"] != current
-                or payload["evaluation_seed"] != seeds.evaluation
-                or payload["deployment_seed"] != seeds.deployment
-            ):
-                raise ScientificArtifactError(
-                    "stored checkpoint is incompatible with replayed state"
-                )
-            return
         evaluation_adapter, evaluation_state = copy.deepcopy((adapter, state))
         evaluation_before = evaluation_adapter.state_fingerprint(evaluation_state)
         if evaluation_before != current:
@@ -348,16 +323,24 @@ class RunExecutor:
         after = adapter.state_fingerprint(state)
         if current != after:
             raise ScientificArtifactError("checkpoint changed training state")
+        checkpoint_payload = {
+            "round": round_index,
+            "training_state_before": current,
+            "training_state_after": after,
+            "evaluation_seed": seeds.evaluation,
+            "deployment_seed": seeds.deployment,
+            "result": payload,
+        }
+        if path.exists():
+            checkpoint = store.read(relative_path, expected_semantic_hashes=hashes)
+            if checkpoint.payload != checkpoint_payload:
+                raise ScientificArtifactError(
+                    "stored checkpoint is incompatible with replayed evaluation"
+                )
+            return
         store.write(
             relative_path,
             "run-checkpoint",
             hashes,
-            {
-                "round": round_index,
-                "training_state_before": current,
-                "training_state_after": after,
-                "evaluation_seed": seeds.evaluation,
-                "deployment_seed": seeds.deployment,
-                "result": payload,
-            },
+            checkpoint_payload,
         )
