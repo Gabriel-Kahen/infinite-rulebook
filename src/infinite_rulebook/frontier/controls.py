@@ -246,6 +246,23 @@ class EnumeratedPublicProblem:
     actions: tuple[PublicDeploymentAction, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FiniteControlProblem(FiniteDecisionProblem):
+    """A finite control transform with its ideal semantic reward endpoint."""
+
+    semantic_maximum_reward: float
+
+    def __post_init__(self) -> None:
+        super(FiniteControlProblem, self).__post_init__()
+        maximum = _real_not_nan(
+            self.semantic_maximum_reward,
+            "semantic_maximum_reward",
+        )
+        if not math.isfinite(maximum):
+            raise ValueError("semantic_maximum_reward must be finite")
+        object.__setattr__(self, "semantic_maximum_reward", maximum)
+
+
 def augment_with_independent_trivia(
     base_problem: FiniteDecisionProblem,
     *,
@@ -287,7 +304,16 @@ def augment_with_independent_trivia(
         for _ in range(trivia_count)
     )
     rewards = tuple(row for row in base_problem.rewards for _ in range(trivia_count))
-    return FiniteDecisionProblem(prior=prior, rewards=rewards)
+    semantic_maximum = getattr(
+        base_problem,
+        "semantic_maximum_reward",
+        base_problem.maximum_reward,
+    )
+    return FiniteControlProblem(
+        prior=prior,
+        rewards=rewards,
+        semantic_maximum_reward=semantic_maximum,
+    )
 
 
 def augment_with_public_c(
@@ -316,7 +342,18 @@ def augment_with_public_c(
         )
         for row in base_problem.rewards
     )
-    return FiniteDecisionProblem(prior=base_problem.prior, rewards=rewards)
+    base_semantic_maximum = getattr(
+        base_problem,
+        "semantic_maximum_reward",
+        base_problem.maximum_reward,
+    )
+    return FiniteControlProblem(
+        prior=base_problem.prior,
+        rewards=rewards,
+        semantic_maximum_reward=math.fsum(
+            (base_semantic_maximum, public_schedule.maximum_reward)
+        ),
+    )
 
 
 def enumerate_trivia_rulebook(
@@ -435,6 +472,7 @@ def enumerate_public_c_rulebook(
 
 __all__ = [
     "EnumeratedPublicProblem",
+    "FiniteControlProblem",
     "PublicCFrontier",
     "PublicUWitness",
     "alea_frontier_problem",
