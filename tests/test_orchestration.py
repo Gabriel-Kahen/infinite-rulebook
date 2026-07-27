@@ -90,6 +90,12 @@ def test_seed_tree_is_stable_and_streams_are_separate() -> None:
     second = SeedBank("master").for_cell(cell)
     assert first == second
     assert len(set(astuple(first))) == len(astuple(first))
+    paired = replace(
+        cell,
+        environment=EnvironmentConfig(EnvironmentKind.TRIVIA),
+        agent=AgentConfig(AgentKind.TOTAL_INFORMATION),
+    )
+    assert SeedBank("master").for_cell(paired) == first
 
 
 def test_scientific_hash_is_canonical_and_runtime_metadata_is_excluded() -> None:

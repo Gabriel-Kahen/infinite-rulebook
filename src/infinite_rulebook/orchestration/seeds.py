@@ -35,24 +35,22 @@ class SeedBank:
         ):
             raise TypeError("master_seed must be an integer or string")
 
-    def _derive(self, cell: RunCell, stream: str, replica: int) -> int:
+    def _derive(self, stream: str, replica: int) -> int:
         rng = CounterRNG(self.master_seed, stream="experiment.seed-bank.v1")
-        return rng.uint64(cell.environment.kind.value, stream, replica)
+        return rng.uint64(stream, replica)
 
     def for_cell(self, cell: RunCell) -> RunSeeds:
         environment_replica = cell.environment_replica
         algorithm_replica = cell.algorithm_replica
         return RunSeeds(
-            environment=self._derive(cell, "environment", environment_replica),
+            environment=self._derive("environment", environment_replica),
             persistent_distractor=self._derive(
-                cell, "persistent-distractor", environment_replica
+                "persistent-distractor", environment_replica
             ),
-            aleatoric=self._derive(cell, "aleatoric", environment_replica),
-            query_observation=self._derive(
-                cell, "query-observation", environment_replica
-            ),
-            algorithm=self._derive(cell, "algorithm", algorithm_replica),
-            deployment=self._derive(cell, "deployment", algorithm_replica),
-            evaluation=self._derive(cell, "evaluation", environment_replica),
-            frontier=self._derive(cell, "frontier", 0),
+            aleatoric=self._derive("aleatoric", environment_replica),
+            query_observation=self._derive("query-observation", environment_replica),
+            algorithm=self._derive("algorithm", algorithm_replica),
+            deployment=self._derive("deployment", algorithm_replica),
+            evaluation=self._derive("evaluation", environment_replica),
+            frontier=self._derive("frontier", 0),
         )
