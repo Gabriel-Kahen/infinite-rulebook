@@ -240,6 +240,14 @@ def test_negative_approximation_total_returns_diagnostic_instead_of_raising() ->
     )
 
 
+def test_roundoff_scale_negative_total_respects_validation_tolerance() -> None:
+    ledger = InformationLedger((), approximation_residual_nats=-1e-16)
+
+    assert ledger.validate(tolerance=1e-12).valid
+    assert ledger.breakdown.total_acquired_nats == 0.0
+    assert not ledger.validate(tolerance=1e-18).valid
+
+
 def test_expected_realized_kl_equals_population_mutual_information() -> None:
     q = 3
     epsilon = 0.2

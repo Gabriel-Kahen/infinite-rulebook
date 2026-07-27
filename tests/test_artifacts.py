@@ -6,7 +6,7 @@ import math
 import os
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -22,6 +22,7 @@ from infinite_rulebook.artifacts import (
     semantic_hash,
 )
 from infinite_rulebook.core import CounterRNG, DeploymentAction
+from infinite_rulebook.environments import PublicDeploymentAction
 from infinite_rulebook.information import InformationBreakdown
 from infinite_rulebook.metrics import (
     ComputeMetrics,
@@ -32,6 +33,7 @@ from infinite_rulebook.metrics import (
     PopulationInformationEstimate,
     RewardMetrics,
     SupportMetrics,
+    useful_information_efficiency,
 )
 from infinite_rulebook.validation import ValidationReport
 
@@ -149,6 +151,7 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
         environment=semantic_hash({"environment": 1}),
         reward=semantic_hash({"reward": 1}),
         action=semantic_hash({"action": 1}),
+        feedback=semantic_hash({"feedback": 1}),
         frontier=semantic_hash({"frontier": 1}),
     )
     run = RunCheckpoint(
@@ -202,6 +205,35 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
     assert {item.code for item in mismatched.validate().diagnostics} == {
         "EFFICIENCY_VALUE_MISMATCH"
     }
+
+    zero_information = PopulationInformationEstimate(0.0, 0.0, 0.0, 0.0, 0.0, 10)
+    undefined = useful_information_efficiency(
+        MetricInterval(0.0, 0.0, "nats"),
+        zero_information,
+        complete_history_manifest=True,
+    )
+    missing_ratio = replace(estimate, efficiency=undefined)
+    assert "EFFICIENCY_VALUE_MISMATCH" in {
+        item.code for item in missing_ratio.validate().diagnostics
+    }
+    inconsistent_zero = replace(
+        estimate,
+        population_information=zero_information,
+        efficiency=undefined,
+    )
+    assert not inconsistent_zero.validate().valid
+    assert "EFFICIENCY_INCONSISTENT" in {
+        item.code for item in inconsistent_zero.validate().diagnostics
+    }
+    within_tolerance = replace(
+        estimate,
+        efficiency=EfficiencyMetric(
+            MetricInterval(0.4 + 5e-13, 0.5 - 5e-13, "ratio"),
+            ValidationReport(),
+            tolerance=1e-12,
+        ),
+    )
+    assert within_tolerance.validate().valid
 
     empty = DeploymentAction()
     with pytest.raises(ValueError, match="witness support"):
@@ -267,9 +299,35 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
         not estimate.envelope().validate_compatible(changed_estimate.envelope()).valid
     )
 
+    changed_feedback = replace(
+        semantics,
+        feedback=semantic_hash({"feedback": 2}),
+    )
+    assert (
+        not run.envelope()
+        .validate_compatible(replace(run, semantic_hashes=changed_feedback).envelope())
+        .valid
+    )
+
+    public_witness = PublicDeploymentAction(witness, public_choice=2)
+    public_run = replace(
+        run,
+        deployment_witness=public_witness,
+        deployment_semantic_hash=semantic_hash(public_witness),
+    )
+    assert public_run.support.deployment_support == len(public_witness.deployment)
+    assert public_run.envelope().semantic_hash == run.envelope().semantic_hash
+    assert public_run.envelope().scientific_payload_hash != (
+        run.envelope().scientific_payload_hash
+    )
+
     with pytest.raises(ValueError, match="SHA-256"):
         ScientificSemantics(
-            "abc", semantics.reward, semantics.action, semantics.frontier
+            "abc",
+            semantics.reward,
+            semantics.action,
+            semantics.feedback,
+            semantics.frontier,
         )
     with pytest.raises(TypeError, match="ScientificSemantics"):
         replace(estimate, semantic_hashes=())
@@ -310,6 +368,23 @@ def test_tagged_serialization_is_injective_across_payload_types() -> None:
             "$type": f"{type(witness).__module__}.{type(witness).__qualname__}",
             "entries": (),
         }
+    )
+
+
+def test_dataclass_comparison_policy_does_not_change_hash_boundaries() -> None:
+    @dataclass(frozen=True)
+    class Payload:
+        value: int
+        evidence: str = field(compare=False)
+
+    @dataclass(frozen=True)
+    class PayloadWithCache:
+        value: int
+        cache: str = field(metadata={"artifact_exclude": True})
+
+    assert semantic_hash(Payload(1, "A")) != semantic_hash(Payload(1, "B"))
+    assert semantic_hash(PayloadWithCache(1, "A")) == semantic_hash(
+        PayloadWithCache(1, "B")
     )
 
 

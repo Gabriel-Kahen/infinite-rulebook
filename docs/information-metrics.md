@@ -112,11 +112,21 @@ novelty, support, target size, and scientific operation counts. Wall/CPU/GPU
 timings remain runtime metadata.
 `CheckpointEstimate` stores pooled reward, bit-equivalent bounds, population
 information, efficiency, novelty/support, both frontier regrets, uncertainty,
-and the required environment/reward/action/frontier semantic hashes. It
+and the required environment/reward/action/feedback/frontier semantic hashes.
+The feedback hash binds the resolved observation-channel semantics independently
+of the environment and action families. `RunCheckpoint` accepts both base and
+PUBLIC deployment witnesses and derives support from the hidden deployment. It
 recomputes efficiency from its own bit-equivalent and population-information
 fields during validation. Each typed checkpoint envelope derives its semantic
 payload from those required hashes, so stored provenance cannot contradict the
 compatibility hash. They are distinct immutable schemas.
+
+Every finite-grid upper endpoint carries the full feasible channel after it has
+been re-evaluated against the exact `FiniteDecisionProblem`. Its certificate is
+domain-bound to that problem's semantic hash, and a `FrontierCurve` rejects
+endpoints from any other problem. Callers therefore cannot certify an upper
+bound with self-reported reward or information values, or reuse a channel
+certificate across semantically different reward problems.
 
 `ArtifactEnvelope` has three explicit payload boundaries:
 

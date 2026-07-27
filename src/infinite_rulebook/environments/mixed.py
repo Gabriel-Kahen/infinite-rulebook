@@ -37,8 +37,18 @@ class MixedRulebook:
     core_dimensions: int = 4
     max_redundant_support: int = 32
     reward_spec: RewardSpec = field(default_factory=RewardSpec)
-    _primitive_rng: CounterRNG = field(init=False, repr=False, compare=False)
-    _core_rng: CounterRNG = field(init=False, repr=False, compare=False)
+    _primitive_rng: CounterRNG = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
+    _core_rng: CounterRNG = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         _positive_integer(self.core_dimensions, "core_dimensions")

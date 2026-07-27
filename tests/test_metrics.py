@@ -7,6 +7,7 @@ import math
 import pytest
 
 from infinite_rulebook.artifacts import semantic_hash
+from infinite_rulebook.frontier import FiniteDecisionProblem, one_coordinate_problem
 from infinite_rulebook.metrics import (
     CheckpointInterpolation,
     FrontierCurve,
@@ -26,26 +27,41 @@ from infinite_rulebook.metrics import (
 )
 
 
-def _frontier_point(reward: float, lower: float, upper: float) -> FrontierPoint:
-    witness_payload = {"reward": reward, "information_nats": upper}
+def _binary_channel(deployment_probability: float) -> tuple[tuple[float, ...], ...]:
+    abstain = 1.0 - deployment_probability
+    return (
+        (abstain, deployment_probability, 0.0),
+        (abstain, 0.0, deployment_probability),
+    )
+
+
+def _frontier_point(
+    problem: FiniteDecisionProblem,
+    reward: float,
+    lower: float,
+    channel: tuple[tuple[float, ...], ...],
+) -> FrontierPoint:
+    witness = FrontierUpperWitness(problem, channel)
     return FrontierPoint(
         reward,
-        MetricInterval(lower, upper, "nats"),
-        FrontierUpperWitness(reward, upper, semantic_hash(witness_payload)),
+        MetricInterval(lower, witness.mutual_information_nats, "nats"),
+        witness,
     )
 
 
 @pytest.fixture
 def exact_curve() -> FrontierCurve:
+    problem = one_coordinate_problem(q=2)
+    log_two = math.log(2.0)
     return FrontierCurve(
         points=(
-            _frontier_point(0.0, 0.0, 0.0),
-            _frontier_point(1.0, 1.0, 1.0),
-            _frontier_point(2.0, 3.0, 3.0),
+            _frontier_point(problem, 0.0, 0.0, _binary_channel(0.0)),
+            _frontier_point(problem, 0.5, 0.5 * log_two, _binary_channel(0.5)),
+            _frontier_point(problem, 1.0, log_two, _binary_channel(1.0)),
         ),
         zero_information_reward=0.0,
-        maximum_reward=2.0,
-        semantic_hash=semantic_hash({"problem": "test-frontier"}),
+        maximum_reward=1.0,
+        semantic_hash=semantic_hash(problem),
         upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
     )
 
@@ -53,10 +69,15 @@ def exact_curve() -> FrontierCurve:
 def test_bit_equivalent_lookup_handles_baseline_grid_and_infeasibility(
     exact_curve: FrontierCurve,
 ) -> None:
+    log_two = math.log(2.0)
     assert lookup_bit_equivalent(exact_curve, -1.0) == MetricInterval(0.0, 0.0, "nats")
-    assert lookup_bit_equivalent(exact_curve, 0.5) == MetricInterval(0.0, 0.5, "nats")
-    assert lookup_bit_equivalent(exact_curve, 1.5) == MetricInterval(1.0, 2.0, "nats")
-    assert math.isinf(lookup_bit_equivalent(exact_curve, 2.1).lower)
+    assert lookup_bit_equivalent(exact_curve, 0.25) == MetricInterval(
+        0.0, 0.25 * log_two, "nats"
+    )
+    assert lookup_bit_equivalent(exact_curve, 0.75) == MetricInterval(
+        0.5 * log_two, 0.75 * log_two, "nats"
+    )
+    assert math.isinf(lookup_bit_equivalent(exact_curve, 1.1).lower)
 
 
 def test_sparse_bit_equivalent_integration_uses_elapsed_round_weights(
@@ -66,15 +87,18 @@ def test_sparse_bit_equivalent_integration_uses_elapsed_round_weights(
         exact_curve,
         (
             TimedReward(0, 0.0),
-            TimedReward(1, 1.0),
-            TimedReward(4, 2.0),
+            TimedReward(1, 0.5),
+            TimedReward(4, 1.0),
         ),
         horizon=4,
         interpolation=CheckpointInterpolation.LEFT_HOLD,
     )
 
-    assert series.average == MetricInterval(0.75, 0.75, "nats")
-    assert series.average.lower != pytest.approx((0.0 + 1.0 + 3.0) / 3.0)
+    expected = 0.375 * math.log(2.0)
+    assert series.average == MetricInterval(expected, expected, "nats")
+    assert series.average.lower != pytest.approx(
+        (0.0 + 0.5 * math.log(2.0) + math.log(2.0)) / 3.0
+    )
 
 
 def test_linear_integration_splits_at_frontier_knots(
@@ -82,12 +106,14 @@ def test_linear_integration_splits_at_frontier_knots(
 ) -> None:
     series = integrate_bit_equivalent(
         exact_curve,
-        (TimedReward(0, 0.0), TimedReward(2, 2.0)),
+        (TimedReward(0, 0.0), TimedReward(2, 1.0)),
         horizon=2,
         interpolation=CheckpointInterpolation.LINEAR,
     )
 
-    assert series.average == MetricInterval(0.5, 1.25, "nats")
+    assert series.average == MetricInterval(
+        0.25 * math.log(2.0), 0.5 * math.log(2.0), "nats"
+    )
 
 
 def test_integration_rejects_ambiguous_checkpoint_coverage(
@@ -96,7 +122,7 @@ def test_integration_rejects_ambiguous_checkpoint_coverage(
     with pytest.raises(ValueError, match="span exactly"):
         integrate_bit_equivalent(
             exact_curve,
-            (TimedReward(1, 0.0), TimedReward(4, 2.0)),
+            (TimedReward(1, 0.0), TimedReward(4, 1.0)),
             horizon=4,
             interpolation=CheckpointInterpolation.LEFT_HOLD,
         )
@@ -164,19 +190,19 @@ def test_frontier_regret_inverts_certified_curve(
 ) -> None:
     assert frontier_regret(
         exact_curve,
-        attained_reward=0.6,
-        information_budget_nats=1.0,
-    ) == MetricInterval(0.4, 1.4, "reward")
+        attained_reward=0.3,
+        information_budget_nats=0.5 * math.log(2.0),
+    ) == MetricInterval(0.2, 0.7, "reward")
 
     relevant = frontier_regret(
         exact_curve,
-        attained_reward=0.6,
-        information_budget_nats=1.0,
+        attained_reward=0.3,
+        information_budget_nats=0.5 * math.log(2.0),
     )
     full_with_distractor = frontier_regret(
         exact_curve,
-        attained_reward=0.6,
-        information_budget_nats=2.0,
+        attained_reward=0.3,
+        information_budget_nats=0.75 * math.log(2.0),
     )
     assert full_with_distractor.lower > relevant.lower
 
@@ -185,23 +211,38 @@ def test_certified_lookup_contains_nonlinear_exact_frontier() -> None:
     from infinite_rulebook.frontier import OneCoordinateFrontier
 
     exact = OneCoordinateFrontier()
+    problem = one_coordinate_problem(q=exact.q, u=exact.u, c=exact.c)
+    symmetric_channel = tuple(
+        (
+            0.0,
+            *(
+                exact.p_star
+                if prediction == state
+                else (1.0 - exact.p_star) / (exact.q - 1)
+                for prediction in range(exact.q)
+            ),
+        )
+        for state in range(exact.q)
+    )
     curve = FrontierCurve(
         points=(
-            _frontier_point(0.0, 0.0, 0.0),
+            _frontier_point(problem, 0.0, 0.0, problem.constant_channel(0).channel),
             _frontier_point(
+                problem,
                 exact.r_star,
                 exact.bit_equivalent(exact.r_star),
-                exact.bit_equivalent(exact.r_star),
+                symmetric_channel,
             ),
             _frontier_point(
+                problem,
                 exact.u,
                 math.log(exact.q),
-                math.log(exact.q),
+                problem.maximizing_channel().channel,
             ),
         ),
         zero_information_reward=0.0,
         maximum_reward=exact.u,
-        semantic_hash=semantic_hash({"problem": "one-coordinate"}),
+        semantic_hash=semantic_hash(problem),
         upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
     )
     target = 0.75
@@ -212,39 +253,51 @@ def test_certified_lookup_contains_nonlinear_exact_frontier() -> None:
 
 
 def test_frontier_rejects_inconsistent_zero_information_endpoint() -> None:
+    problem = one_coordinate_problem(q=2)
     with pytest.raises(ValueError, match="exactly"):
         FrontierCurve(
             points=(
-                _frontier_point(0.0, 0.1, 0.1),
-                _frontier_point(1.0, 1.0, 1.0),
+                _frontier_point(problem, 0.0, 0.1, _binary_channel(0.25)),
+                _frontier_point(problem, 1.0, math.log(2.0), _binary_channel(1.0)),
             ),
             zero_information_reward=0.0,
             maximum_reward=1.0,
-            semantic_hash=semantic_hash({"problem": "bad"}),
+            semantic_hash=semantic_hash(problem),
             upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
         )
 
-    with pytest.raises(ValueError, match="feasible witness information"):
-        FrontierPoint(
-            0.5,
-            MetricInterval(0.1, 0.2, "nats"),
-            FrontierUpperWitness(
-                0.5,
-                0.1,
-                semantic_hash({"invalid": "witness"}),
+    foreign_problem = one_coordinate_problem(q=4)
+    with pytest.raises(ValueError, match="different problem"):
+        FrontierCurve(
+            points=(
+                _frontier_point(problem, 0.0, 0.0, _binary_channel(0.0)),
+                _frontier_point(problem, 1.0, math.log(2.0), _binary_channel(1.0)),
             ),
+            zero_information_reward=0.0,
+            maximum_reward=1.0,
+            semantic_hash=semantic_hash(foreign_problem),
+            upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
         )
 
 
-def test_frontier_point_binds_existing_solver_witness() -> None:
-    from infinite_rulebook.frontier import one_coordinate_problem, solve_frontier
+def test_frontier_point_re_evaluates_and_binds_existing_solver_witness() -> None:
+    from dataclasses import replace
 
-    solution = solve_frontier(one_coordinate_problem(), 0.0)
-    point = FrontierPoint.from_frontier_solution(solution)
+    from infinite_rulebook.frontier import solve_frontier
+
+    problem = one_coordinate_problem()
+    solution = solve_frontier(problem, 0.0)
+    assert solution.witness is not None
+    forged = replace(solution.witness, expected_reward=100.0, mutual_information=100.0)
+    point = FrontierPoint.from_frontier_solution(
+        problem, replace(solution, witness=forged)
+    )
 
     assert point.reward == 0.0
     assert point.information == MetricInterval(0.0, 0.0, "nats")
-    assert point.upper_witness.witness_hash == semantic_hash(solution.witness)
+    assert point.upper_witness.problem_semantic_hash == semantic_hash(problem)
+    assert point.upper_witness.expected_reward == 0.0
+    assert point.upper_witness.mutual_information_nats == 0.0
 
 
 def test_reward_support_and_novelty_records_enforce_semantics() -> None:

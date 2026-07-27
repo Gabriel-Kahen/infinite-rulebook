@@ -14,6 +14,7 @@ from typing import TypeAlias
 
 from infinite_rulebook.core.behavior import DeploymentAction
 from infinite_rulebook.core.rng import Seed
+from infinite_rulebook.environments.controls import PublicDeploymentAction
 from infinite_rulebook.information import InformationBreakdown
 from infinite_rulebook.metrics import (
     ComputeMetrics,
@@ -186,7 +187,7 @@ def freeze_json(value: object) -> FrozenJson:
                 tuple(
                     (field.name, freeze_json(getattr(value, field.name)))
                     for field in fields(value)
-                    if field.compare
+                    if not field.metadata.get("artifact_exclude", False)
                 )
             ),
         )
@@ -280,10 +281,11 @@ class ScientificSemantics:
     environment: str
     reward: str
     action: str
+    feedback: str
     frontier: str
 
     def __post_init__(self) -> None:
-        for name in ("environment", "reward", "action", "frontier"):
+        for name in ("environment", "reward", "action", "feedback", "frontier"):
             object.__setattr__(
                 self,
                 name,
@@ -396,7 +398,7 @@ class RunCheckpoint:
     round_index: int
     reward_samples: tuple[float, ...]
     realized_information: InformationBreakdown
-    deployment_witness: DeploymentAction
+    deployment_witness: DeploymentAction | PublicDeploymentAction
     deployment_semantic_hash: str
     deployment_seed: Seed
     novelty: NoveltyMetrics
@@ -424,8 +426,13 @@ class RunCheckpoint:
             raise TypeError("realized_information must be an InformationBreakdown")
         if not self.realized_information.reconciles():
             raise ValueError("realized information buckets do not reconcile")
-        if not isinstance(self.deployment_witness, DeploymentAction):
-            raise TypeError("deployment_witness must be a DeploymentAction")
+        if not isinstance(
+            self.deployment_witness, DeploymentAction | PublicDeploymentAction
+        ):
+            raise TypeError(
+                "deployment_witness must be a DeploymentAction or "
+                "PublicDeploymentAction"
+            )
         if (
             not isinstance(self.deployment_semantic_hash, str)
             or not self.deployment_semantic_hash
@@ -443,7 +450,12 @@ class RunCheckpoint:
             raise TypeError("support must be SupportMetrics")
         if not isinstance(self.compute, ComputeMetrics):
             raise TypeError("compute must be ComputeMetrics")
-        if len(self.deployment_witness) != self.support.deployment_support:
+        deployment = (
+            self.deployment_witness.deployment
+            if isinstance(self.deployment_witness, PublicDeploymentAction)
+            else self.deployment_witness
+        )
+        if len(deployment) != self.support.deployment_support:
             raise ValueError(
                 "deployment witness support does not match support metrics"
             )
@@ -543,13 +555,27 @@ class CheckpointEstimate:
         ]
         denominator = self.population_information.total_nats
         interval = self.efficiency.interval
-        if interval is not None and denominator > 0.0 and math.isfinite(denominator):
+        denominator_is_valid = denominator > 0.0 and math.isfinite(denominator)
+        if denominator_is_valid:
             expected = MetricInterval(
                 self.bit_equivalent.lower / denominator,
                 self.bit_equivalent.upper / denominator,
                 "ratio",
             )
-            if interval != expected:
+            if interval is None or not (
+                math.isclose(
+                    interval.lower,
+                    expected.lower,
+                    rel_tol=self.efficiency.tolerance,
+                    abs_tol=self.efficiency.tolerance,
+                )
+                and math.isclose(
+                    interval.upper,
+                    expected.upper,
+                    rel_tol=self.efficiency.tolerance,
+                    abs_tol=self.efficiency.tolerance,
+                )
+            ):
                 diagnostics.append(
                     ValidationDiagnostic(
                         DiagnosticSeverity.ERROR,
@@ -565,6 +591,15 @@ class CheckpointEstimate:
                     "EFFICIENCY_VALUE_MISMATCH",
                     "efficiency.interval",
                     "efficiency must be undefined without finite positive information",
+                )
+            )
+        if denominator == 0.0 and self.bit_equivalent.upper > self.efficiency.tolerance:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    DiagnosticSeverity.ERROR,
+                    "EFFICIENCY_INCONSISTENT",
+                    "efficiency.interval",
+                    "positive bit-equivalent is inconsistent with zero information",
                 )
             )
         return ValidationReport(tuple(diagnostics))

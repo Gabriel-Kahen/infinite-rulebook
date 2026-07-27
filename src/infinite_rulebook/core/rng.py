@@ -37,7 +37,12 @@ class CounterRNG:
 
     seed: Seed
     stream: str = ""
-    _key: bytes = field(init=False, repr=False, compare=False)
+    _key: bytes = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.stream, str):

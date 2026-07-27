@@ -8,12 +8,20 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from itertools import pairwise
 from numbers import Real
+from typing import TYPE_CHECKING
 
 from infinite_rulebook.validation import (
     DiagnosticSeverity,
     ValidationDiagnostic,
     ValidationReport,
 )
+
+if TYPE_CHECKING:
+    from infinite_rulebook.frontier.finite_problem import (
+        Channel,
+        ChannelWitness,
+        FiniteDecisionProblem,
+    )
 
 
 def _real(name: str, value: Real, *, finite: bool = True) -> float:
@@ -54,37 +62,49 @@ class MetricInterval:
         object.__setattr__(self, "upper", upper)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class FrontierUpperWitness:
     """Auditable feasible witness backing one frontier upper endpoint."""
 
-    expected_reward: float
-    mutual_information_nats: float
+    problem_semantic_hash: str
+    channel_witness: ChannelWitness
     witness_hash: str
 
-    @classmethod
-    def from_channel_witness(cls, witness: object) -> FrontierUpperWitness:
-        """Bind an existing finite feasible channel to its scientific hash."""
+    def __init__(
+        self,
+        problem: FiniteDecisionProblem,
+        channel: Channel | ChannelWitness,
+    ) -> None:
+        """Re-evaluate a channel on its bound finite decision problem."""
 
         from infinite_rulebook.artifacts import semantic_hash
-        from infinite_rulebook.frontier.finite_problem import ChannelWitness
-
-        if not isinstance(witness, ChannelWitness):
-            raise TypeError("witness must be a ChannelWitness")
-        return cls(
-            expected_reward=witness.expected_reward,
-            mutual_information_nats=witness.mutual_information,
-            witness_hash=semantic_hash(witness),
+        from infinite_rulebook.frontier.finite_problem import (
+            ChannelWitness,
+            FiniteDecisionProblem,
         )
 
-    def __post_init__(self) -> None:
-        reward = _real("expected_reward", self.expected_reward)
-        information = _real("mutual_information_nats", self.mutual_information_nats)
-        if information < 0.0:
-            raise ValueError("mutual_information_nats cannot be negative")
-        _validate_sha256("witness_hash", self.witness_hash)
-        object.__setattr__(self, "expected_reward", reward)
-        object.__setattr__(self, "mutual_information_nats", information)
+        if not isinstance(problem, FiniteDecisionProblem):
+            raise TypeError("problem must be a FiniteDecisionProblem")
+        raw_channel = (
+            channel.channel if isinstance(channel, ChannelWitness) else channel
+        )
+        evaluated = problem.evaluate(raw_channel)
+        problem_hash = semantic_hash(problem)
+        object.__setattr__(self, "problem_semantic_hash", problem_hash)
+        object.__setattr__(self, "channel_witness", evaluated)
+        object.__setattr__(
+            self,
+            "witness_hash",
+            semantic_hash({"problem": problem_hash, "witness": evaluated}),
+        )
+
+    @property
+    def expected_reward(self) -> float:
+        return self.channel_witness.expected_reward
+
+    @property
+    def mutual_information_nats(self) -> float:
+        return self.channel_witness.mutual_information
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +116,11 @@ class FrontierPoint:
     upper_witness: FrontierUpperWitness
 
     @classmethod
-    def from_frontier_solution(cls, solution: object) -> FrontierPoint:
+    def from_frontier_solution(
+        cls,
+        problem: FiniteDecisionProblem,
+        solution: object,
+    ) -> FrontierPoint:
         """Construct a point directly from a certified finite solver result."""
 
         from infinite_rulebook.frontier.inversion import FrontierSolution
@@ -112,7 +136,7 @@ class FrontierPoint:
                 solution.upper_bound,
                 "nats",
             ),
-            upper_witness=FrontierUpperWitness.from_channel_witness(solution.witness),
+            upper_witness=FrontierUpperWitness(problem, solution.witness),
         )
 
     def __post_init__(self) -> None:
@@ -152,7 +176,12 @@ class FrontierCurve:
     maximum_reward: float
     semantic_hash: str
     upper_certificate: UpperEnvelopeCertificate
-    _rewards: tuple[float, ...] = field(init=False, repr=False, compare=False)
+    _rewards: tuple[float, ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"artifact_exclude": True},
+    )
 
     def __post_init__(self) -> None:
         points = tuple(self.points)
@@ -178,6 +207,9 @@ class FrontierCurve:
         _validate_sha256("semantic_hash", self.semantic_hash)
         if not isinstance(self.upper_certificate, UpperEnvelopeCertificate):
             raise TypeError("upper_certificate must be an UpperEnvelopeCertificate")
+        for point in points:
+            if point.upper_witness.problem_semantic_hash != self.semantic_hash:
+                raise ValueError("frontier witness is bound to a different problem")
         object.__setattr__(self, "points", points)
         object.__setattr__(self, "zero_information_reward", zero)
         object.__setattr__(self, "maximum_reward", maximum)

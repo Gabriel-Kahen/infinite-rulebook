@@ -400,11 +400,13 @@ class InformationLedger:
             (block, block.total_nats, block.chain_contributions)
             for block in self.blocks
         )
-        return self._breakdown_from(block_values)
+        return self._breakdown_from(block_values, zero_tolerance=1e-12)
 
     def _breakdown_from(
         self,
         block_values: tuple[tuple[PosteriorBlock, float, tuple[float, ...]], ...],
+        *,
+        zero_tolerance: float = 0.0,
     ) -> InformationBreakdown:
         totals = {category: 0.0 for category in InformationCategory}
         for block, _, contributions in block_values:
@@ -412,6 +414,8 @@ class InformationLedger:
                 totals[axis.category] += contribution
         exact_total = math.fsum(total for _, total, _ in block_values)
         total = exact_total + self.approximation_residual_nats
+        if -zero_tolerance <= total < 0.0:
+            total = 0.0
         return InformationBreakdown(
             reward_relevant_nats=totals[InformationCategory.REWARD_RELEVANT],
             shared_core_nats=totals[InformationCategory.SHARED_CORE],
@@ -468,7 +472,7 @@ class InformationLedger:
             math.fsum(total for _, total, _ in block_values)
             + self.approximation_residual_nats
         )
-        if raw_total < 0.0:
+        if raw_total < -accuracy:
             diagnostics.append(
                 ValidationDiagnostic(
                     DiagnosticSeverity.ERROR,
@@ -478,7 +482,7 @@ class InformationLedger:
                 )
             )
             return ValidationReport(tuple(diagnostics))
-        breakdown = self._breakdown_from(block_values)
+        breakdown = self._breakdown_from(block_values, zero_tolerance=accuracy)
         if not breakdown.reconciles(accuracy):
             diagnostics.append(
                 ValidationDiagnostic(
