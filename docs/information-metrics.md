@@ -78,9 +78,12 @@ efficiency calculations.
 `FrontierCurve` turns certified point bounds into a safe step-lower/chord-upper
 envelope. The lower bound holds the previous certified value until the next
 grid point; it does not incorrectly use a convex chord as a lower bound. The
-upper chord is accepted only with an explicit witness-mixture certificate. The
-record also requires an exact zero-information endpoint, a maximum-reward
-endpoint, monotone bounds, nats, and the frontier semantic hash.
+upper chord is accepted only with an explicit witness-mixture certificate.
+Every upper endpoint carries a feasible witness record whose attained reward
+meets the threshold, whose information equals the reported upper bound, and
+whose payload hash binds the independently stored evidence. The record
+also requires an exact zero-information endpoint, a maximum-reward endpoint,
+monotone bounds, nats, and a SHA-256 frontier problem semantic hash.
 
 - `lookup_bit_equivalent` returns zero through the zero-information optimum and
   positive infinity above attainable reward.
@@ -109,7 +112,11 @@ novelty, support, target size, and scientific operation counts. Wall/CPU/GPU
 timings remain runtime metadata.
 `CheckpointEstimate` stores pooled reward, bit-equivalent bounds, population
 information, efficiency, novelty/support, both frontier regrets, uncertainty,
-and named semantic hashes. They are distinct immutable schemas.
+and the required environment/reward/action/frontier semantic hashes. It
+recomputes efficiency from its own bit-equivalent and population-information
+fields during validation. Each typed checkpoint envelope derives its semantic
+payload from those required hashes, so stored provenance cannot contradict the
+compatibility hash. They are distinct immutable schemas.
 
 `ArtifactEnvelope` has three explicit payload boundaries:
 
@@ -119,10 +126,13 @@ and named semantic hashes. They are distinct immutable schemas.
 - `runtime_metadata` contains host, timing, path, or other execution metadata
   and affects neither scientific hash.
 
-Canonical JSON sorts object keys, normalizes Unicode to NFC, encodes floats by
-exact hexadecimal value, normalizes negative zero, tags infinities and byte
-seeds, and rejects NaN. SHA-256 hashes are domain-separated, so semantic and
-scientific hashes of the same bytes cannot collide by construction.
+Canonical JSON uses an injective tagged union for scalars, arrays, maps,
+dataclass records, enums, floats, and bytes. It sorts object keys, normalizes
+Unicode to NFC, encodes floats by exact hexadecimal value, normalizes negative
+zero, tags infinities, and rejects NaN. SHA-256 hashes are domain-separated, so
+semantic and scientific hashes of the same bytes cannot collide by
+construction. Counter-based RNG string seeds use the same NFC normalization,
+so hash-equivalent seeds also select the same random stream.
 
 Local constructors reject malformed shapes and overlaps. Cross-record checks
 return a deterministically ordered `ValidationReport` with stable diagnostic

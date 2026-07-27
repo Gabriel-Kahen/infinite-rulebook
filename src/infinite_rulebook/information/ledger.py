@@ -464,6 +464,20 @@ class InformationLedger:
                 )
         if support_violation:
             return ValidationReport(tuple(diagnostics))
+        raw_total = (
+            math.fsum(total for _, total, _ in block_values)
+            + self.approximation_residual_nats
+        )
+        if raw_total < 0.0:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    DiagnosticSeverity.ERROR,
+                    "NEGATIVE_TOTAL_INFORMATION",
+                    "breakdown.total_acquired_nats",
+                    f"total acquired information {raw_total!r} is negative",
+                )
+            )
+            return ValidationReport(tuple(diagnostics))
         breakdown = self._breakdown_from(block_values)
         if not breakdown.reconciles(accuracy):
             diagnostics.append(
@@ -472,15 +486,6 @@ class InformationLedger:
                     "COMPONENT_TOTAL_MISMATCH",
                     "breakdown.total_acquired_nats",
                     "information buckets and residual do not reconcile",
-                )
-            )
-        if breakdown.total_acquired_nats < -accuracy:
-            diagnostics.append(
-                ValidationDiagnostic(
-                    DiagnosticSeverity.ERROR,
-                    "NEGATIVE_TOTAL_INFORMATION",
-                    "breakdown.total_acquired_nats",
-                    "total acquired information is negative",
                 )
             )
         return ValidationReport(tuple(diagnostics))

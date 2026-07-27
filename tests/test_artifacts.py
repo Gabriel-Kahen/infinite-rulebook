@@ -6,6 +6,7 @@ import math
 import os
 import subprocess
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -15,11 +16,12 @@ from infinite_rulebook.artifacts import (
     FrozenArray,
     FrozenFloat,
     RunCheckpoint,
+    ScientificSemantics,
     canonical_json_bytes,
     scientific_payload_hash,
     semantic_hash,
 )
-from infinite_rulebook.core import DeploymentAction
+from infinite_rulebook.core import CounterRNG, DeploymentAction
 from infinite_rulebook.information import InformationBreakdown
 from infinite_rulebook.metrics import (
     ComputeMetrics,
@@ -45,7 +47,7 @@ def test_canonical_serialization_is_mapping_order_invariant() -> None:
 
 def test_float_serialization_normalizes_negative_zero_and_tags_infinity() -> None:
     assert canonical_json_bytes(-0.0) == canonical_json_bytes(0.0)
-    assert canonical_json_bytes(math.inf) == b'{"$float":"+inf"}'
+    assert canonical_json_bytes(math.inf) == b'["f","+inf"]'
 
     with pytest.raises(ValueError, match="NaN"):
         canonical_json_bytes(math.nan)
@@ -89,7 +91,7 @@ def test_runtime_metadata_does_not_change_scientific_hashes() -> None:
     assert workstation.semantic_hash == cluster.semantic_hash
     assert workstation.scientific_payload_hash == cluster.scientific_payload_hash
     assert workstation.canonical_bytes() != cluster.canonical_bytes()
-    assert b'"semantic_payload":{"environment":"IND"' in workstation.canonical_bytes()
+    assert b"semantic_payload" in workstation.canonical_bytes()
 
 
 def test_scientific_or_semantic_changes_move_the_correct_hashes() -> None:
@@ -143,8 +145,15 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
     novelty = NoveltyMetrics(0.1, 0.0, 1.0, 0.0, 0.2, 0.1, 0.0)
     support = SupportMetrics(1, 1, 0, 2)
     witness = DeploymentAction(((1, 1),))
+    semantics = ScientificSemantics(
+        environment=semantic_hash({"environment": 1}),
+        reward=semantic_hash({"reward": 1}),
+        action=semantic_hash({"action": 1}),
+        frontier=semantic_hash({"frontier": 1}),
+    )
     run = RunCheckpoint(
         schema_version=1,
+        semantic_hashes=semantics,
         round_index=4,
         reward_samples=(1.0, 0.5),
         realized_information=InformationBreakdown(
@@ -160,9 +169,9 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
     )
     population = PopulationInformationEstimate(0.5, 0.0, 0.5, 0.0, 1.0, 10)
     uncertainty_pair = ["reward", MetricInterval(0.05, 0.1, "reward")]
-    semantic_pair = ["frontier", "abc"]
     estimate = CheckpointEstimate(
         schema_version=1,
+        semantic_hashes=semantics,
         reward=RewardMetrics(0.75, 3.0, 0.1),
         bit_equivalent=MetricInterval(0.4, 0.5, "nats"),
         population_information=population,
@@ -176,37 +185,52 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
             MetricInterval(0.0, 0.1, "reward"),
         ),
         uncertainty=(uncertainty_pair,),  # type: ignore[arg-type]
-        semantic_hashes=(semantic_pair,),  # type: ignore[arg-type]
     )
     uncertainty_pair[0] = "changed"
-    semantic_pair[1] = "changed"
 
-    assert run.envelope(semantic_payload={"run": 1}).kind == "run_checkpoint"
-    assert estimate.envelope(semantic_payload={"cell": 1}).kind == (
-        "checkpoint_estimate"
-    )
+    assert run.envelope().kind == "run_checkpoint"
+    assert estimate.envelope().kind == "checkpoint_estimate"
     assert estimate.validate().valid
     assert estimate.uncertainty[0][0] == "reward"
-    assert estimate.semantic_hashes == (("frontier", "abc"),)
+    assert estimate.semantic_hashes.frontier == semantics.frontier
+    mismatched = replace(
+        estimate,
+        efficiency=EfficiencyMetric(
+            MetricInterval(0.3, 0.5, "ratio"), ValidationReport()
+        ),
+    )
+    assert {item.code for item in mismatched.validate().diagnostics} == {
+        "EFFICIENCY_VALUE_MISMATCH"
+    }
+
+    empty = DeploymentAction()
+    with pytest.raises(ValueError, match="witness support"):
+        replace(
+            run,
+            deployment_witness=empty,
+            deployment_semantic_hash=semantic_hash(empty),
+        )
 
     with pytest.raises(TypeError, match="InformationBreakdown"):
         RunCheckpoint(
-            1,
-            4,
-            (1.0,),
-            population,  # type: ignore[arg-type]
-            witness,
-            semantic_hash(witness),
-            9,
-            novelty,
-            support,
-            ComputeMetrics(1, 1, 1, 0, 1),
-            3,
+            schema_version=1,
+            semantic_hashes=semantics,
+            round_index=4,
+            reward_samples=(1.0,),
+            realized_information=population,  # type: ignore[arg-type]
+            deployment_witness=witness,
+            deployment_semantic_hash=semantic_hash(witness),
+            deployment_seed=9,
+            novelty=novelty,
+            support=support,
+            compute=ComputeMetrics(1, 1, 1, 0, 1),
+            target_size=3,
         )
 
     with pytest.raises(ValueError, match="target_size"):
         RunCheckpoint(
             schema_version=1,
+            semantic_hashes=semantics,
             round_index=4,
             reward_samples=(1.0,),
             realized_information=run.realized_information,
@@ -218,6 +242,37 @@ def test_checkpoint_schemas_keep_run_and_population_information_distinct() -> No
             compute=ComputeMetrics(1, 1, 1, 0, 1),
             target_size=4,
         )
+
+    with pytest.raises(ValueError, match="unique"):
+        replace(
+            estimate,
+            uncertainty=(
+                ("same", MetricInterval(0.0, 0.1, "reward")),
+                ("same", MetricInterval(0.1, 0.2, "reward")),
+            ),
+        )
+
+    with pytest.raises(ValueError, match="nonnegative"):
+        replace(
+            estimate,
+            bit_equivalent=MetricInterval(-1.0, 0.0, "nats"),
+        )
+
+    changed_semantics = replace(
+        semantics,
+        environment=semantic_hash({"environment": 2}),
+    )
+    changed_estimate = replace(estimate, semantic_hashes=changed_semantics)
+    assert (
+        not estimate.envelope().validate_compatible(changed_estimate.envelope()).valid
+    )
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        ScientificSemantics(
+            "abc", semantics.reward, semantics.action, semantics.frontier
+        )
+    with pytest.raises(TypeError, match="ScientificSemantics"):
+        replace(estimate, semantic_hashes=())
 
 
 def test_frozen_wrappers_copy_nested_mutable_values() -> None:
@@ -233,7 +288,29 @@ def test_frozen_wrappers_copy_nested_mutable_values() -> None:
 
 
 def test_byte_seed_has_deterministic_tagged_serialization() -> None:
-    assert canonical_json_bytes(b"\x00\xff") == b'{"$bytes":"00ff"}'
+    assert canonical_json_bytes(b"\x00\xff") == b'["y","00ff"]'
+
+
+def test_unicode_seed_semantics_match_canonical_hashing() -> None:
+    composed = "é"
+    decomposed = "e\u0301"
+
+    assert CounterRNG(composed).digest(1) == CounterRNG(decomposed).digest(1)
+    assert semantic_hash(composed) == semantic_hash(decomposed)
+
+
+def test_tagged_serialization_is_injective_across_payload_types() -> None:
+    float_token_map = {"$float": "0x1.0000000000000p+0"}
+    byte_token_map = {"$bytes": "00ff"}
+
+    assert semantic_hash(1.0) != semantic_hash(float_token_map)
+    assert semantic_hash(b"\x00\xff") != semantic_hash(byte_token_map)
+    assert semantic_hash(witness := DeploymentAction()) != semantic_hash(
+        {
+            "$type": f"{type(witness).__module__}.{type(witness).__qualname__}",
+            "entries": (),
+        }
+    )
 
 
 def test_scientific_hash_is_independent_of_process_hash_seed() -> None:

@@ -6,10 +6,12 @@ import math
 
 import pytest
 
+from infinite_rulebook.artifacts import semantic_hash
 from infinite_rulebook.metrics import (
     CheckpointInterpolation,
     FrontierCurve,
     FrontierPoint,
+    FrontierUpperWitness,
     MetricInterval,
     NoveltyMetrics,
     PopulationInformationEstimate,
@@ -24,17 +26,26 @@ from infinite_rulebook.metrics import (
 )
 
 
+def _frontier_point(reward: float, lower: float, upper: float) -> FrontierPoint:
+    witness_payload = {"reward": reward, "information_nats": upper}
+    return FrontierPoint(
+        reward,
+        MetricInterval(lower, upper, "nats"),
+        FrontierUpperWitness(reward, upper, semantic_hash(witness_payload)),
+    )
+
+
 @pytest.fixture
 def exact_curve() -> FrontierCurve:
     return FrontierCurve(
         points=(
-            FrontierPoint(0.0, MetricInterval(0.0, 0.0, "nats")),
-            FrontierPoint(1.0, MetricInterval(1.0, 1.0, "nats")),
-            FrontierPoint(2.0, MetricInterval(3.0, 3.0, "nats")),
+            _frontier_point(0.0, 0.0, 0.0),
+            _frontier_point(1.0, 1.0, 1.0),
+            _frontier_point(2.0, 3.0, 3.0),
         ),
         zero_information_reward=0.0,
         maximum_reward=2.0,
-        semantic_hash="test-frontier",
+        semantic_hash=semantic_hash({"problem": "test-frontier"}),
         upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
     )
 
@@ -113,6 +124,14 @@ def test_useful_information_efficiency_and_validity_diagnostics() -> None:
         "INCOMPLETE_HISTORY_MANIFEST",
     }
 
+    roundoff = useful_information_efficiency(
+        MetricInterval(1.0, 1.0 + 5e-13, "nats"),
+        PopulationInformationEstimate(1.0, 0.0, 0.0, 0.0, 1.0, 20),
+        complete_history_manifest=True,
+        tolerance=1e-12,
+    )
+    assert roundoff.validation.valid
+
 
 def test_zero_information_efficiency_is_explicitly_undefined() -> None:
     information = PopulationInformationEstimate(0.0, 0.0, 0.0, 0.0, 0.0, 3)
@@ -168,23 +187,21 @@ def test_certified_lookup_contains_nonlinear_exact_frontier() -> None:
     exact = OneCoordinateFrontier()
     curve = FrontierCurve(
         points=(
-            FrontierPoint(0.0, MetricInterval(0.0, 0.0, "nats")),
-            FrontierPoint(
+            _frontier_point(0.0, 0.0, 0.0),
+            _frontier_point(
                 exact.r_star,
-                MetricInterval(
-                    exact.bit_equivalent(exact.r_star),
-                    exact.bit_equivalent(exact.r_star),
-                    "nats",
-                ),
+                exact.bit_equivalent(exact.r_star),
+                exact.bit_equivalent(exact.r_star),
             ),
-            FrontierPoint(
+            _frontier_point(
                 exact.u,
-                MetricInterval(math.log(exact.q), math.log(exact.q), "nats"),
+                math.log(exact.q),
+                math.log(exact.q),
             ),
         ),
         zero_information_reward=0.0,
         maximum_reward=exact.u,
-        semantic_hash="one-coordinate",
+        semantic_hash=semantic_hash({"problem": "one-coordinate"}),
         upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
     )
     target = 0.75
@@ -198,14 +215,36 @@ def test_frontier_rejects_inconsistent_zero_information_endpoint() -> None:
     with pytest.raises(ValueError, match="exactly"):
         FrontierCurve(
             points=(
-                FrontierPoint(0.0, MetricInterval(0.1, 0.1, "nats")),
-                FrontierPoint(1.0, MetricInterval(1.0, 1.0, "nats")),
+                _frontier_point(0.0, 0.1, 0.1),
+                _frontier_point(1.0, 1.0, 1.0),
             ),
             zero_information_reward=0.0,
             maximum_reward=1.0,
-            semantic_hash="bad",
+            semantic_hash=semantic_hash({"problem": "bad"}),
             upper_certificate=UpperEnvelopeCertificate.WITNESS_MIXTURE,
         )
+
+    with pytest.raises(ValueError, match="feasible witness information"):
+        FrontierPoint(
+            0.5,
+            MetricInterval(0.1, 0.2, "nats"),
+            FrontierUpperWitness(
+                0.5,
+                0.1,
+                semantic_hash({"invalid": "witness"}),
+            ),
+        )
+
+
+def test_frontier_point_binds_existing_solver_witness() -> None:
+    from infinite_rulebook.frontier import one_coordinate_problem, solve_frontier
+
+    solution = solve_frontier(one_coordinate_problem(), 0.0)
+    point = FrontierPoint.from_frontier_solution(solution)
+
+    assert point.reward == 0.0
+    assert point.information == MetricInterval(0.0, 0.0, "nats")
+    assert point.upper_witness.witness_hash == semantic_hash(solution.witness)
 
 
 def test_reward_support_and_novelty_records_enforce_semantics() -> None:
@@ -219,3 +258,6 @@ def test_reward_support_and_novelty_records_enforce_semantics() -> None:
 
     with pytest.raises(ValueError, match="correct plus incorrect"):
         SupportMetrics(4, 2, 1, 0)
+
+    with pytest.raises(ValueError, match="cannot be negative"):
+        NoveltyMetrics(-0.1, -0.2, 0.0, 0.0, 0.0, 0.0, 0.0)

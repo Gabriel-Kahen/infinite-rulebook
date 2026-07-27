@@ -231,6 +231,15 @@ def test_probability_and_breakdown_artifacts_reject_malformed_values() -> None:
         InformationBreakdown(-1.0, 2.0, 0.0, 0.0, 0.0, 1.0)
 
 
+def test_negative_approximation_total_returns_diagnostic_instead_of_raising() -> None:
+    report = InformationLedger((), approximation_residual_nats=-1.0).validate()
+
+    assert not report.valid
+    assert tuple(item.code for item in report.diagnostics) == (
+        "NEGATIVE_TOTAL_INFORMATION",
+    )
+
+
 def test_expected_realized_kl_equals_population_mutual_information() -> None:
     q = 3
     epsilon = 0.2

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from bisect import bisect_left
+from dataclasses import dataclass, field
 from enum import StrEnum
 from itertools import pairwise
 from numbers import Real
@@ -23,6 +24,15 @@ def _real(name: str, value: Real, *, finite: bool = True) -> float:
         qualifier = "finite " if finite else ""
         raise ValueError(f"{name} must be a {qualifier}non-NaN number")
     return result
+
+
+def _validate_sha256(name: str, value: str) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +55,65 @@ class MetricInterval:
 
 
 @dataclass(frozen=True, slots=True)
+class FrontierUpperWitness:
+    """Auditable feasible witness backing one frontier upper endpoint."""
+
+    expected_reward: float
+    mutual_information_nats: float
+    witness_hash: str
+
+    @classmethod
+    def from_channel_witness(cls, witness: object) -> FrontierUpperWitness:
+        """Bind an existing finite feasible channel to its scientific hash."""
+
+        from infinite_rulebook.artifacts import semantic_hash
+        from infinite_rulebook.frontier.finite_problem import ChannelWitness
+
+        if not isinstance(witness, ChannelWitness):
+            raise TypeError("witness must be a ChannelWitness")
+        return cls(
+            expected_reward=witness.expected_reward,
+            mutual_information_nats=witness.mutual_information,
+            witness_hash=semantic_hash(witness),
+        )
+
+    def __post_init__(self) -> None:
+        reward = _real("expected_reward", self.expected_reward)
+        information = _real("mutual_information_nats", self.mutual_information_nats)
+        if information < 0.0:
+            raise ValueError("mutual_information_nats cannot be negative")
+        _validate_sha256("witness_hash", self.witness_hash)
+        object.__setattr__(self, "expected_reward", reward)
+        object.__setattr__(self, "mutual_information_nats", information)
+
+
+@dataclass(frozen=True, slots=True)
 class FrontierPoint:
     """Certified information bounds at one expected-reward threshold."""
 
     reward: float
     information: MetricInterval
+    upper_witness: FrontierUpperWitness
+
+    @classmethod
+    def from_frontier_solution(cls, solution: object) -> FrontierPoint:
+        """Construct a point directly from a certified finite solver result."""
+
+        from infinite_rulebook.frontier.inversion import FrontierSolution
+
+        if not isinstance(solution, FrontierSolution):
+            raise TypeError("solution must be a FrontierSolution")
+        if solution.witness is None:
+            raise ValueError("an infeasible frontier solution has no upper witness")
+        return cls(
+            reward=solution.target_reward,
+            information=MetricInterval(
+                solution.lower_bound,
+                solution.upper_bound,
+                "nats",
+            ),
+            upper_witness=FrontierUpperWitness.from_channel_witness(solution.witness),
+        )
 
     def __post_init__(self) -> None:
         reward = _real("reward", self.reward)
@@ -59,6 +123,17 @@ class FrontierPoint:
             raise ValueError("frontier information must be measured in nats")
         if self.information.lower < 0.0:
             raise ValueError("frontier information cannot be negative")
+        if not isinstance(self.upper_witness, FrontierUpperWitness):
+            raise TypeError("upper_witness must be a FrontierUpperWitness")
+        if self.upper_witness.expected_reward < reward:
+            raise ValueError("upper witness does not attain the reward threshold")
+        if not math.isclose(
+            self.upper_witness.mutual_information_nats,
+            self.information.upper,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("upper bound must equal its feasible witness information")
         object.__setattr__(self, "reward", reward)
 
 
@@ -77,6 +152,7 @@ class FrontierCurve:
     maximum_reward: float
     semantic_hash: str
     upper_certificate: UpperEnvelopeCertificate
+    _rewards: tuple[float, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         points = tuple(self.points)
@@ -99,13 +175,13 @@ class FrontierCurve:
             values = tuple(getattr(point.information, bound) for point in points)
             if any(left > right for left, right in pairwise(values)):
                 raise ValueError(f"frontier {bound} information must be nondecreasing")
-        if not isinstance(self.semantic_hash, str) or not self.semantic_hash:
-            raise ValueError("semantic_hash must be a nonempty string")
+        _validate_sha256("semantic_hash", self.semantic_hash)
         if not isinstance(self.upper_certificate, UpperEnvelopeCertificate):
             raise TypeError("upper_certificate must be an UpperEnvelopeCertificate")
         object.__setattr__(self, "points", points)
         object.__setattr__(self, "zero_information_reward", zero)
         object.__setattr__(self, "maximum_reward", maximum)
+        object.__setattr__(self, "_rewards", rewards)
 
 
 def _interpolate(left: float, right: float, weight: float) -> float:
@@ -128,17 +204,15 @@ def lookup_bit_equivalent(
         return MetricInterval(0.0, 0.0, "nats")
     if reward > curve.maximum_reward:
         return MetricInterval(math.inf, math.inf, "nats")
-    for left, right in zip(curve.points, curve.points[1:], strict=True):
-        if reward <= right.reward:
-            weight = (reward - left.reward) / (right.reward - left.reward)
-            return MetricInterval(
-                left.information.lower
-                if reward < right.reward
-                else right.information.lower,
-                _interpolate(left.information.upper, right.information.upper, weight),
-                "nats",
-            )
-    raise AssertionError("frontier span validation failed")
+    right_index = bisect_left(curve._rewards, reward)
+    right = curve.points[right_index]
+    left = curve.points[right_index - 1]
+    weight = (reward - left.reward) / (right.reward - left.reward)
+    return MetricInterval(
+        left.information.lower if reward < right.reward else right.information.lower,
+        _interpolate(left.information.upper, right.information.upper, weight),
+        "nats",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,8 +408,13 @@ class EfficiencyMetric:
 
     interval: MetricInterval | None
     validation: ValidationReport
+    tolerance: float = 1e-12
 
     def __post_init__(self) -> None:
+        tolerance = _real("tolerance", self.tolerance)
+        if tolerance < 0.0:
+            raise ValueError("tolerance must be nonnegative")
+        object.__setattr__(self, "tolerance", tolerance)
         if not isinstance(self.validation, ValidationReport):
             raise TypeError("validation must be a ValidationReport")
         codes = {item.code for item in self.validation.diagnostics}
@@ -347,7 +426,10 @@ class EfficiencyMetric:
             raise TypeError("interval must be a MetricInterval or None")
         if self.interval.units != "ratio" or self.interval.lower < 0.0:
             raise ValueError("efficiency must be a nonnegative ratio")
-        if self.interval.upper > 1.0 and "EFFICIENCY_OUT_OF_RANGE" not in codes:
+        if (
+            self.interval.upper > 1.0 + tolerance
+            and "EFFICIENCY_OUT_OF_RANGE" not in codes
+        ):
             raise ValueError("efficiency above one needs EFFICIENCY_OUT_OF_RANGE")
 
 
@@ -407,13 +489,17 @@ def useful_information_efficiency(
                     "the inconsistent ratio is undefined",
                 )
             )
-        return EfficiencyMetric(None, ValidationReport(tuple(diagnostics)))
+        return EfficiencyMetric(
+            None,
+            ValidationReport(tuple(diagnostics)),
+            tolerance=accuracy,
+        )
     interval = MetricInterval(
         bit_equivalent.lower / denominator,
         bit_equivalent.upper / denominator,
         "ratio",
     )
-    if interval.upper > 1.0:
+    if interval.upper > 1.0 + accuracy:
         diagnostics.append(
             ValidationDiagnostic(
                 DiagnosticSeverity.ERROR,
@@ -422,7 +508,11 @@ def useful_information_efficiency(
                 f"upper efficiency {interval.upper!r} exceeds one",
             )
         )
-    return EfficiencyMetric(interval, ValidationReport(tuple(diagnostics)))
+    return EfficiencyMetric(
+        interval,
+        ValidationReport(tuple(diagnostics)),
+        tolerance=accuracy,
+    )
 
 
 def _reward_at_budget(
@@ -602,13 +692,16 @@ class NoveltyMetrics:
     persistent_trivia_novelty: float
 
     def __post_init__(self) -> None:
-        for name in (
+        nonnegative = (
             "observation_prediction_error",
-            "compression_improvement",
             "count_novelty",
             "latent_visitation_novelty",
             "behavioral_novelty",
             "aleatoric_observation_novelty",
             "persistent_trivia_novelty",
-        ):
-            object.__setattr__(self, name, _real(name, getattr(self, name)))
+        )
+        for name in (*nonnegative, "compression_improvement"):
+            value = _real(name, getattr(self, name))
+            if name in nonnegative and value < 0.0:
+                raise ValueError(f"{name} cannot be negative")
+            object.__setattr__(self, name, value)

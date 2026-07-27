@@ -111,8 +111,44 @@ class FrozenMap:
         object.__setattr__(self, "items", tuple(items))
 
 
+@dataclass(frozen=True, slots=True)
+class FrozenRecord:
+    """A typed dataclass payload, distinct from an ordinary mapping."""
+
+    type_name: str
+    fields: FrozenMap
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.type_name, str) or not self.type_name:
+            raise ValueError("record type_name must be a nonempty string")
+        if not isinstance(self.fields, FrozenMap):
+            raise TypeError("record fields must be a FrozenMap")
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenEnum:
+    """A typed enum payload, distinct from its underlying scalar."""
+
+    type_name: str
+    value: FrozenJson
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.type_name, str) or not self.type_name:
+            raise ValueError("enum type_name must be a nonempty string")
+        object.__setattr__(self, "value", freeze_json(self.value))
+
+
 FrozenJson: TypeAlias = (
-    bool | int | str | FrozenBytes | FrozenFloat | FrozenArray | FrozenMap | None
+    bool
+    | int
+    | str
+    | FrozenBytes
+    | FrozenFloat
+    | FrozenArray
+    | FrozenMap
+    | FrozenRecord
+    | FrozenEnum
+    | None
 )
 
 
@@ -125,10 +161,16 @@ def freeze_json(value: object) -> FrozenJson:
 
     if value is None or isinstance(value, bool):
         return value
-    if isinstance(value, FrozenBytes | FrozenFloat | FrozenArray | FrozenMap):
+    if isinstance(
+        value,
+        FrozenBytes | FrozenFloat | FrozenArray | FrozenMap | FrozenRecord | FrozenEnum,
+    ):
         return value
     if isinstance(value, Enum):
-        return freeze_json(value.value)
+        return FrozenEnum(
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            freeze_json(value.value),
+        )
     if isinstance(value, str):
         return _normalized_string(value)
     if isinstance(value, Integral):
@@ -138,11 +180,16 @@ def freeze_json(value: object) -> FrozenJson:
     if isinstance(value, bytes | bytearray):
         return FrozenBytes(bytes(value))
     if is_dataclass(value) and not isinstance(value, type):
-        payload = {
-            "$type": f"{type(value).__module__}.{type(value).__qualname__}",
-            **{field.name: getattr(value, field.name) for field in fields(value)},
-        }
-        return freeze_json(payload)
+        return FrozenRecord(
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            FrozenMap(
+                tuple(
+                    (field.name, freeze_json(getattr(value, field.name)))
+                    for field in fields(value)
+                    if field.compare
+                )
+            ),
+        )
     if isinstance(value, Mapping):
         items = []
         for key, item in value.items():
@@ -157,15 +204,31 @@ def freeze_json(value: object) -> FrozenJson:
 
 
 def _wire_value(value: FrozenJson) -> object:
+    if value is None:
+        return ["n"]
+    if isinstance(value, bool):
+        return ["b", value]
+    if isinstance(value, int):
+        return ["i", str(value)]
+    if isinstance(value, str):
+        return ["s", value]
     if isinstance(value, FrozenBytes):
-        return {"$bytes": value.value.hex()}
+        return ["y", value.value.hex()]
     if isinstance(value, FrozenFloat):
-        return {"$float": value.token}
+        return ["f", value.token]
     if isinstance(value, FrozenArray):
-        return [_wire_value(item) for item in value.items]
+        return ["a", [_wire_value(item) for item in value.items]]
     if isinstance(value, FrozenMap):
-        return {key: _wire_value(item) for key, item in value.items}
-    return value
+        return ["m", [[key, _wire_value(item)] for key, item in value.items]]
+    if isinstance(value, FrozenRecord):
+        return [
+            "r",
+            value.type_name,
+            [[key, _wire_value(item)] for key, item in value.fields.items],
+        ]
+    if isinstance(value, FrozenEnum):
+        return ["e", value.type_name, _wire_value(value.value)]
+    raise TypeError(f"unsupported frozen value: {type(value).__name__}")
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -198,6 +261,34 @@ def scientific_payload_hash(payload: object) -> str:
     """Hash reported scientific content, excluding runtime metadata."""
 
     return _domain_hash("scientific", payload)
+
+
+def _validate_sha256(name: str, value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ScientificSemantics:
+    """Required semantic provenance for run and checkpoint artifacts."""
+
+    environment: str
+    reward: str
+    action: str
+    frontier: str
+
+    def __post_init__(self) -> None:
+        for name in ("environment", "reward", "action", "frontier"):
+            object.__setattr__(
+                self,
+                name,
+                _validate_sha256(name, getattr(self, name)),
+            )
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -301,6 +392,7 @@ class RunCheckpoint:
     """Immutable per-run checkpoint; information is realized Bayesian surprise."""
 
     schema_version: int
+    semantic_hashes: ScientificSemantics
     round_index: int
     reward_samples: tuple[float, ...]
     realized_information: InformationBreakdown
@@ -320,6 +412,8 @@ class RunCheckpoint:
             minimum = 1 if name == "schema_version" else 0
             if value < minimum:
                 raise ValueError(f"{name} must be at least {minimum}")
+        if not isinstance(self.semantic_hashes, ScientificSemantics):
+            raise TypeError("semantic_hashes must be ScientificSemantics")
         samples = tuple(
             float(_artifact_finite("reward sample", value))
             for value in self.reward_samples
@@ -349,6 +443,10 @@ class RunCheckpoint:
             raise TypeError("support must be SupportMetrics")
         if not isinstance(self.compute, ComputeMetrics):
             raise TypeError("compute must be ComputeMetrics")
+        if len(self.deployment_witness) != self.support.deployment_support:
+            raise ValueError(
+                "deployment witness support does not match support metrics"
+            )
         if (
             self.support.deployment_support + self.support.abstentions
             != self.target_size
@@ -361,7 +459,6 @@ class RunCheckpoint:
     def envelope(
         self,
         *,
-        semantic_payload: object,
         runtime_metadata: object | None = None,
     ) -> ArtifactEnvelope:
         """Wrap this checkpoint with an explicit semantic/runtime boundary."""
@@ -369,7 +466,7 @@ class RunCheckpoint:
         return ArtifactEnvelope(
             kind="run_checkpoint",
             schema_version=self.schema_version,
-            semantic_payload=semantic_payload,
+            semantic_payload=self.semantic_hashes,
             scientific_payload=self,
             runtime_metadata=runtime_metadata,
         )
@@ -389,6 +486,7 @@ class CheckpointEstimate:
     """Immutable pooled checkpoint estimate with distinct population estimands."""
 
     schema_version: int
+    semantic_hashes: ScientificSemantics
     reward: RewardMetrics
     bit_equivalent: MetricInterval
     population_information: PopulationInformationEstimate
@@ -397,7 +495,6 @@ class CheckpointEstimate:
     support: SupportMetrics
     frontier_regret: FrontierRegretMetrics
     uncertainty: tuple[tuple[str, MetricInterval], ...]
-    semantic_hashes: tuple[tuple[str, str], ...]
 
     def __post_init__(self) -> None:
         if isinstance(self.schema_version, bool) or not isinstance(
@@ -406,6 +503,8 @@ class CheckpointEstimate:
             raise TypeError("schema_version must be an integer")
         if self.schema_version < 1:
             raise ValueError("schema_version must be positive")
+        if not isinstance(self.semantic_hashes, ScientificSemantics):
+            raise TypeError("semantic_hashes must be ScientificSemantics")
         expected_types = (
             ("reward", self.reward, RewardMetrics),
             ("bit_equivalent", self.bit_equivalent, MetricInterval),
@@ -422,8 +521,8 @@ class CheckpointEstimate:
         for name, value, expected in expected_types:
             if not isinstance(value, expected):
                 raise TypeError(f"{name} must be {expected.__name__}")
-        if self.bit_equivalent.units != "nats":
-            raise ValueError("bit_equivalent must be measured in nats")
+        if self.bit_equivalent.units != "nats" or self.bit_equivalent.lower < 0.0:
+            raise ValueError("bit_equivalent must be a nonnegative interval in nats")
         uncertainty_items = []
         for name, interval in self.uncertainty:
             if not isinstance(name, str) or not name:
@@ -431,36 +530,48 @@ class CheckpointEstimate:
             if not isinstance(interval, MetricInterval):
                 raise TypeError("uncertainty values must be MetricInterval records")
             uncertainty_items.append((_normalized_string(name), interval))
-        uncertainty = tuple(sorted(uncertainty_items))
+        uncertainty = tuple(sorted(uncertainty_items, key=lambda item: item[0]))
         if len({name for name, _ in uncertainty}) != len(uncertainty):
             raise ValueError("uncertainty component names must be unique")
-        semantic_items = []
-        for name, digest in self.semantic_hashes:
-            if not isinstance(name, str) or not name:
-                raise ValueError("semantic hash names must be nonempty strings")
-            if not isinstance(digest, str) or not digest:
-                raise ValueError("semantic hashes must be nonempty strings")
-            semantic_items.append(
-                (_normalized_string(name), _normalized_string(digest))
-            )
-        semantic_hashes = tuple(sorted(semantic_items))
-        if len({name for name, _ in semantic_hashes}) != len(semantic_hashes):
-            raise ValueError("semantic hash names must be unique")
         object.__setattr__(self, "uncertainty", uncertainty)
-        object.__setattr__(self, "semantic_hashes", semantic_hashes)
 
     def validate(self) -> ValidationReport:
-        diagnostics = (
+        diagnostics = [
             *self.population_information.validate().diagnostics,
             *self.efficiency.validation.diagnostics,
             *self.frontier_regret.validate().diagnostics,
-        )
-        return ValidationReport(diagnostics)
+        ]
+        denominator = self.population_information.total_nats
+        interval = self.efficiency.interval
+        if interval is not None and denominator > 0.0 and math.isfinite(denominator):
+            expected = MetricInterval(
+                self.bit_equivalent.lower / denominator,
+                self.bit_equivalent.upper / denominator,
+                "ratio",
+            )
+            if interval != expected:
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        DiagnosticSeverity.ERROR,
+                        "EFFICIENCY_VALUE_MISMATCH",
+                        "efficiency.interval",
+                        "efficiency is not the pooled bit-equivalent/information ratio",
+                    )
+                )
+        elif interval is not None:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    DiagnosticSeverity.ERROR,
+                    "EFFICIENCY_VALUE_MISMATCH",
+                    "efficiency.interval",
+                    "efficiency must be undefined without finite positive information",
+                )
+            )
+        return ValidationReport(tuple(diagnostics))
 
     def envelope(
         self,
         *,
-        semantic_payload: object,
         runtime_metadata: object | None = None,
     ) -> ArtifactEnvelope:
         """Wrap this estimate with an explicit semantic/runtime boundary."""
@@ -468,7 +579,7 @@ class CheckpointEstimate:
         return ArtifactEnvelope(
             kind="checkpoint_estimate",
             schema_version=self.schema_version,
-            semantic_payload=semantic_payload,
+            semantic_payload=self.semantic_hashes,
             scientific_payload=self,
             runtime_metadata=runtime_metadata,
         )

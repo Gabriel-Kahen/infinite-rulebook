@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
@@ -20,7 +21,7 @@ def _encode(value: Seed) -> bytes:
         payload = sign + magnitude.to_bytes(width, "big")
         tag = b"i"
     elif isinstance(value, str):
-        payload = value.encode("utf-8")
+        payload = unicodedata.normalize("NFC", value).encode("utf-8")
         tag = b"s"
     elif isinstance(value, bytes):
         payload = value
