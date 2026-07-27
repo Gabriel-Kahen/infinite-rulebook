@@ -103,8 +103,10 @@ there is deliberately no scalar novelty total.
 
 ## Immutable artifacts and hashes
 
-`RunCheckpoint` stores run-local reward samples, realized information,
-deployment identity/seed, novelty, support, and target size.
+`RunCheckpoint` stores run-local reward samples, realized information, the
+canonical deployment witness and verified semantic hash, deployment seed,
+novelty, support, target size, and scientific operation counts. Wall/CPU/GPU
+timings remain runtime metadata.
 `CheckpointEstimate` stores pooled reward, bit-equivalent bounds, population
 information, efficiency, novelty/support, both frontier regrets, uncertainty,
 and named semantic hashes. They are distinct immutable schemas.
@@ -118,9 +120,9 @@ and named semantic hashes. They are distinct immutable schemas.
   and affects neither scientific hash.
 
 Canonical JSON sorts object keys, normalizes Unicode to NFC, encodes floats by
-exact hexadecimal value, normalizes negative zero, tags infinities, and rejects
-NaN. SHA-256 hashes are domain-separated, so semantic and scientific hashes of
-the same bytes cannot collide by construction.
+exact hexadecimal value, normalizes negative zero, tags infinities and byte
+seeds, and rejects NaN. SHA-256 hashes are domain-separated, so semantic and
+scientific hashes of the same bytes cannot collide by construction.
 
 Local constructors reject malformed shapes and overlaps. Cross-record checks
 return a deterministically ordered `ValidationReport` with stable diagnostic
