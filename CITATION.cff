@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use Infinite Rulebook, please cite this software."
+title: "Infinite Rulebook"
+type: software
+authors:
+  - family-names: Kahen
+    given-names: Gabriel
+repository-code: "https://github.com/Gabriel-Kahen/infinite-rulebook"
+license: MIT
+version: 0.1.0
+date-released: 2026-07-27
