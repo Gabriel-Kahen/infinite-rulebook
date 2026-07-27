@@ -65,8 +65,8 @@ class FeedbackConfig:
     def __post_init__(self) -> None:
         if self.protocol != "P1":
             raise ValueError("the symbolic pilot currently supports protocol P1")
-        if not math.isfinite(self.epsilon) or not 0 <= self.epsilon < 0.75:
-            raise ValueError("epsilon must satisfy 0 <= epsilon < 0.75")
+        if not math.isfinite(self.epsilon) or not 0 <= self.epsilon < 1:
+            raise ValueError("epsilon must satisfy 0 <= epsilon < 1")
         if (
             isinstance(self.query_budget, bool)
             or not isinstance(self.query_budget, int)
@@ -173,9 +173,24 @@ class ExperimentConfig:
             self.master_seed, (int, str)
         ):
             raise TypeError("master_seed must be an integer or string")
+        if self.feedback.epsilon >= (self.reward.q - 1) / self.reward.q:
+            raise ValueError(
+                "epsilon must define an informative q-ary feedback channel"
+            )
 
     def resolved_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def resolved_run_settings(self) -> dict[str, Any]:
+        """Return settings shared by cells, excluding unrelated sweep members."""
+
+        return {
+            "schema_version": self.schema_version,
+            "phase": self.phase,
+            "horizon": self.horizon,
+            "checkpoints": asdict(self.checkpoints),
+            "master_seed": self.master_seed,
+        }
 
     @property
     def config_hash(self) -> str:

@@ -56,6 +56,34 @@ def test_config_is_frozen_versioned_and_strict() -> None:
         experiment_config_from_dict({**raw, "schema_version": 99})
 
 
+def test_run_identity_is_independent_of_unrelated_sweep_cells(
+    tmp_path: Path,
+) -> None:
+    base = experiment()
+    expanded = replace(
+        base,
+        environments=(
+            EnvironmentConfig(EnvironmentKind.RED_C, projection_size=1),
+            *base.environments,
+        ),
+    )
+    base_result = RunExecutor(tmp_path / "base", ExactSymbolicAdapter()).execute(
+        base, base.cells()[0]
+    )
+    ind_cell = next(
+        cell
+        for cell in expanded.cells()
+        if cell.environment.kind is EnvironmentKind.IND
+    )
+    expanded_result = RunExecutor(
+        tmp_path / "expanded", ExactSymbolicAdapter()
+    ).execute(expanded, ind_cell)
+    assert base_result.run_hash == expanded_result.run_hash
+    assert (
+        base_result.scientific_content_hash == expanded_result.scientific_content_hash
+    )
+
+
 def test_seed_tree_is_stable_and_streams_are_separate() -> None:
     cell = experiment().cells()[0]
     first = SeedBank("master").for_cell(cell)

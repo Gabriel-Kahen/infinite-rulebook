@@ -66,7 +66,7 @@ def run_identity(
     return scientific_hash(
         {
             "runner_version": RUNNER_VERSION,
-            "experiment_config_hash": experiment.config_hash,
+            "run_settings": experiment.resolved_run_settings(),
             "cell": asdict(cell),
             "seeds": asdict(seeds),
         },
@@ -125,7 +125,7 @@ class RunExecutor:
             "resolved-run-config",
             hashes,
             {
-                "experiment": experiment.resolved_dict(),
+                "run_settings": experiment.resolved_run_settings(),
                 "cell": asdict(cell),
                 "seeds": asdict(seeds),
                 "run_hash": run_hash,
