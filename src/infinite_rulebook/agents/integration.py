@@ -19,11 +19,14 @@ from infinite_rulebook.agents.protocols import (
 from infinite_rulebook.core.rng import Seed
 from infinite_rulebook.environments.controls import (
     AleaRulebook,
+    CappedPublicRulebook,
     ControlObservation,
     QueryNamespace,
     RulebookRuntime,
     SymbolicObservation,
     SymbolicQuery,
+    TriviaRulebook,
+    UnboundedPublicRulebook,
 )
 from infinite_rulebook.environments.independent import IndependentRulebook
 from infinite_rulebook.feedback.qary import (
@@ -173,13 +176,16 @@ def execute_p1_round(
         raise ValueError("channel alphabet must match environment reward alphabet")
     if getattr(agent, "q", channel.q) != channel.q:
         raise ValueError("agent, channel, and environment alphabets must match")
+    if getattr(agent, "epsilon", channel.epsilon) != channel.epsilon:
+        raise ValueError("agent and channel epsilon values must match")
+    if (
+        getattr(agent, "reward_spec", environment.reward_spec)
+        != environment.reward_spec
+    ):
+        raise ValueError("agent and environment reward specifications must match")
     policy = getattr(agent, "policy", None)
     if isinstance(policy, NoveltyDirectedPolicy):
-        cosmetic_alphabet = (
-            environment.cosmetic_alphabet
-            if isinstance(environment, AleaRulebook)
-            else 1
-        )
+        cosmetic_alphabet = _cosmetic_alphabet(environment)
         if policy.cosmetic_alphabet != cosmetic_alphabet:
             raise ValueError(
                 "novelty policy cosmetic alphabet must match the environment"
@@ -193,7 +199,10 @@ def execute_p1_round(
         raise ValueError("channel_name must be a nonempty string")
 
     # Reject malformed adapter metadata before the agent records a pending action.
-    tuple(target_to_symbolic_query(target) for target in context.candidates)
+    candidate_queries = tuple(
+        target_to_symbolic_query(target) for target in context.candidates
+    )
+    _validate_query_support(environment, candidate_queries)
     action = agent.select_train_action(context)
     context.validate_action(action)
     queries = tuple(target_to_symbolic_query(target) for target in action.targets)
@@ -226,6 +235,34 @@ def execute_p1_round(
         )
     )
     return trace
+
+
+def _cosmetic_alphabet(environment: RulebookRuntime[object]) -> int:
+    if isinstance(environment, AleaRulebook):
+        return environment.cosmetic_alphabet
+    if isinstance(environment, (CappedPublicRulebook, UnboundedPublicRulebook)):
+        return _cosmetic_alphabet(environment.base)
+    return 1
+
+
+def _validate_query_support(
+    environment: RulebookRuntime[object],
+    queries: Sequence[SymbolicQuery],
+) -> None:
+    if isinstance(environment, TriviaRulebook):
+        return
+    if isinstance(
+        environment,
+        (AleaRulebook, CappedPublicRulebook, UnboundedPublicRulebook),
+    ):
+        _validate_query_support(environment.base, queries)
+        return
+    if isinstance(environment, IndependentRulebook):
+        if any(query.namespace is not QueryNamespace.REWARD for query in queries):
+            raise ValueError("bare IndependentRulebook does not expose trivia queries")
+        return
+    if not callable(getattr(environment, "observe_query", None)):
+        raise TypeError("environment does not expose symbolic queries")
 
 
 def _observe_control(
