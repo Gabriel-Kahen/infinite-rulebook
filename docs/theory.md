@@ -163,11 +163,12 @@ and must declare its support or reward cap.
 ## Proposition 7: symbolic distractor invariance
 
 ALEA observations are independent runtime draws and are not persistent
-coordinates of \(\Theta\). They therefore contribute exactly zero persistent
-environment information and do not change the decision problem.
+coordinates of \(\Theta\). Their tape seed is sampled independently from the
+persistent environment seed. They therefore contribute exactly zero
+persistent environment information and do not change the decision problem.
 
-For independent persistent trivia \(D\), with reward depending only on the
-base latent \(Z\),
+For persistent trivia \(D\) generated from a separately sampled distractor
+seed independent of the base latent \(Z\), with reward depending only on \(Z\),
 
 \[
 B_\rho^{(Z,D)}=B_\rho^Z.

@@ -70,6 +70,49 @@ def _guard_matrix(
         )
 
 
+def _capped_power(base: int, exponent: int, cap: int) -> int:
+    """Return ``base**exponent`` or ``cap + 1`` without huge integers."""
+
+    if cap < 1:
+        return cap + 1
+    result = 1
+    factor = min(base, cap + 1)
+    remaining = exponent
+    while remaining:
+        if remaining & 1:
+            if factor > cap or result > cap // factor:
+                return cap + 1
+            result *= factor
+        remaining >>= 1
+        if remaining:
+            if factor > cap or factor > cap // factor:
+                factor = cap + 1
+            else:
+                factor *= factor
+    return result
+
+
+def _independent_matrix_counts(
+    *,
+    q: int,
+    state_dimensions: int,
+    action_dimensions: int,
+    action_multiplier: int,
+    max_matrix_entries: int,
+) -> tuple[int, int]:
+    """Preflight independent projection counts with saturating arithmetic."""
+
+    limit = _integer(max_matrix_entries, "max_matrix_entries", minimum=1)
+    state_count = _capped_power(q, state_dimensions, limit)
+    if state_count > limit or action_multiplier > limit // state_count:
+        raise ValueError("enumerated reward matrix would exceed max_matrix_entries")
+    action_cap = limit // (state_count * action_multiplier)
+    hidden_action_count = _capped_power(q + 1, action_dimensions, action_cap)
+    if hidden_action_count > action_cap:
+        raise ValueError("enumerated reward matrix would exceed max_matrix_entries")
+    return state_count, hidden_action_count * action_multiplier
+
+
 def alea_frontier_problem(
     base_problem: FiniteDecisionProblem,
 ) -> FiniteDecisionProblem:
@@ -203,6 +246,79 @@ class EnumeratedPublicProblem:
     actions: tuple[PublicDeploymentAction, ...]
 
 
+def augment_with_independent_trivia(
+    base_problem: FiniteDecisionProblem,
+    *,
+    trivia_alphabet_size: int,
+    trivia_dimensions: int,
+    max_matrix_entries: int = 2_000_000,
+) -> FiniteDecisionProblem:
+    """Tensor any finite base source with independent reward-irrelevant trivia."""
+
+    if not isinstance(base_problem, FiniteDecisionProblem):
+        raise TypeError("base_problem must be a FiniteDecisionProblem")
+    alphabet = _integer(
+        trivia_alphabet_size,
+        "trivia_alphabet_size",
+        minimum=1,
+    )
+    if alphabet < 2:
+        raise ValueError("trivia_alphabet_size must be at least two")
+    dimensions = _integer(
+        trivia_dimensions,
+        "trivia_dimensions",
+        minimum=0,
+    )
+    limit = _integer(max_matrix_entries, "max_matrix_entries", minimum=1)
+    base_entries = base_problem.state_count * base_problem.action_count
+    if base_entries > limit:
+        raise ValueError("enumerated reward matrix would exceed max_matrix_entries")
+    trivia_count = _capped_power(
+        alphabet,
+        dimensions,
+        limit // base_entries,
+    )
+    if trivia_count > limit // base_entries:
+        raise ValueError("enumerated reward matrix would exceed max_matrix_entries")
+
+    prior = tuple(
+        probability / trivia_count
+        for probability in base_problem.prior
+        for _ in range(trivia_count)
+    )
+    rewards = tuple(row for row in base_problem.rewards for _ in range(trivia_count))
+    return FiniteDecisionProblem(prior=prior, rewards=rewards)
+
+
+def augment_with_public_c(
+    base_problem: FiniteDecisionProblem,
+    public_schedule: PublicBonusSchedule,
+    *,
+    max_matrix_entries: int = 2_000_000,
+) -> FiniteDecisionProblem:
+    """Cross any finite base problem with every bounded public choice."""
+
+    if not isinstance(base_problem, FiniteDecisionProblem):
+        raise TypeError("base_problem must be a FiniteDecisionProblem")
+    if not isinstance(public_schedule, PublicBonusSchedule):
+        raise TypeError("public_schedule must be a PublicBonusSchedule")
+    action_count = base_problem.action_count * len(public_schedule.rewards)
+    _guard_matrix(
+        base_problem.state_count,
+        action_count,
+        max_matrix_entries,
+    )
+    rewards = tuple(
+        tuple(
+            base_reward + public_reward
+            for base_reward in row
+            for public_reward in public_schedule.rewards
+        )
+        for row in base_problem.rewards
+    )
+    return FiniteDecisionProblem(prior=base_problem.prior, rewards=rewards)
+
+
 def enumerate_trivia_rulebook(
     reward_dimensions: int,
     trivia_dimensions: int,
@@ -221,9 +337,13 @@ def enumerate_trivia_rulebook(
     useful = _integer(reward_dimensions, "reward_dimensions", minimum=1)
     trivia = _integer(trivia_dimensions, "trivia_dimensions", minimum=0)
     spec = _reward_spec(reward_spec)
-    state_count = spec.q ** (useful + trivia)
-    action_count = (spec.q + 1) ** useful
-    _guard_matrix(state_count, action_count, max_matrix_entries)
+    state_count, _action_count = _independent_matrix_counts(
+        q=spec.q,
+        state_dimensions=useful + trivia,
+        action_dimensions=useful,
+        action_multiplier=1,
+        max_matrix_entries=max_matrix_entries,
+    )
 
     states = tuple(itertools.product(range(1, spec.q + 1), repeat=useful + trivia))
     action_vectors = tuple(itertools.product(range(0, spec.q + 1), repeat=useful))
@@ -268,10 +388,13 @@ def enumerate_public_c_rulebook(
     if not isinstance(public_schedule, PublicBonusSchedule):
         raise TypeError("public_schedule must be a PublicBonusSchedule")
     spec = _reward_spec(reward_spec)
-    state_count = spec.q**dimensions
-    hidden_action_count = (spec.q + 1) ** dimensions
-    action_count = hidden_action_count * len(public_schedule.rewards)
-    _guard_matrix(state_count, action_count, max_matrix_entries)
+    state_count, _action_count = _independent_matrix_counts(
+        q=spec.q,
+        state_dimensions=dimensions,
+        action_dimensions=dimensions,
+        action_multiplier=len(public_schedule.rewards),
+        max_matrix_entries=max_matrix_entries,
+    )
 
     states = tuple(itertools.product(range(1, spec.q + 1), repeat=dimensions))
     hidden_vectors = tuple(itertools.product(range(0, spec.q + 1), repeat=dimensions))
@@ -316,6 +439,8 @@ __all__ = [
     "PublicUWitness",
     "alea_frontier_problem",
     "alea_persistent_information_nats",
+    "augment_with_independent_trivia",
+    "augment_with_public_c",
     "enumerate_public_c_rulebook",
     "enumerate_trivia_rulebook",
     "public_c_bit_equivalent",

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
+from itertools import product
 
 import pytest
 
@@ -13,11 +15,13 @@ from infinite_rulebook.environments.controls import (
     PublicBonusSchedule,
     PublicDeploymentAction,
     QueryNamespace,
+    RulebookRuntime,
     SymbolicQuery,
     TriviaRulebook,
     UnboundedPublicRulebook,
 )
 from infinite_rulebook.environments.independent import IndependentRulebook
+from infinite_rulebook.environments.redundant import CappedRedundantRulebook
 from infinite_rulebook.feedback.qary import (
     QarySymmetricChannel,
     SemanticObservationKey,
@@ -26,6 +30,8 @@ from infinite_rulebook.frontier.controls import (
     PublicCFrontier,
     alea_frontier_problem,
     alea_persistent_information_nats,
+    augment_with_independent_trivia,
+    augment_with_public_c,
     enumerate_public_c_rulebook,
     enumerate_trivia_rulebook,
     public_c_bit_equivalent,
@@ -35,6 +41,7 @@ from infinite_rulebook.frontier.controls import (
 )
 from infinite_rulebook.frontier.inversion import solve_frontier
 from infinite_rulebook.frontier.one_coordinate import OneCoordinateFrontier
+from infinite_rulebook.frontier.redundancy import enumerate_redundant_rulebook
 from infinite_rulebook.frontier.rulebook_problem import (
     enumerate_independent_rulebook,
 )
@@ -43,7 +50,7 @@ BASE = OneCoordinateFrontier()
 
 
 def correct_action(
-    environment: IndependentRulebook,
+    environment: RulebookRuntime,
     indices: tuple[int, ...],
 ) -> DeploymentAction:
     return DeploymentAction((index, environment.label(index)) for index in indices)
@@ -51,8 +58,12 @@ def correct_action(
 
 def test_alea_is_stationary_cosmetic_observation_noise_only() -> None:
     seed = "paired-alea"
-    environment = AleaRulebook(seed, cosmetic_alphabet=65_537)
     base = IndependentRulebook(seed)
+    environment = AleaRulebook(
+        base,
+        cosmetic_seed="paired-alea-tape",
+        cosmetic_alphabet=65_537,
+    )
     channel = QarySymmetricChannel(q=4, epsilon=0.2)
     indices = (1, 7, 1000)
     keys = tuple(
@@ -83,46 +94,71 @@ def test_alea_is_stationary_cosmetic_observation_noise_only() -> None:
     assert environment.evaluate(action) == base.evaluate(action)
 
 
-def test_alea_has_exactly_zero_persistent_theta_information() -> None:
-    # An explicit finite factorization P(theta, u)=P(theta)P(u) has zero MI.
-    theta_prior = (0.25,) * 4
-    cosmetic_prior = (0.2, 0.3, 0.5)
-    information = math.fsum(
-        theta * cosmetic * math.log((theta * cosmetic) / (theta * cosmetic))
-        for theta in theta_prior
-        for cosmetic in cosmetic_prior
+def mutual_information_of_uniform_pairs(pairs: list[tuple[int, int]]) -> float:
+    joint = Counter(pairs)
+    left = Counter(value[0] for value in pairs)
+    right = Counter(value[1] for value in pairs)
+    total = len(pairs)
+    return math.fsum(
+        count
+        / total
+        * math.log((count * total) / (left[left_value] * right[right_value]))
+        for (left_value, right_value), count in joint.items()
     )
+
+
+def test_separate_alea_seed_has_exactly_zero_persistent_theta_information() -> None:
+    key = SemanticObservationKey("public-tape-key", 2, 1, 0, "alea")
+    pairs = []
+    for latent_seed, cosmetic_seed in product(range(4), repeat=2):
+        base = IndependentRulebook(latent_seed)
+        environment = AleaRulebook(base, cosmetic_seed=cosmetic_seed)
+        pairs.append((base.label(1), environment.cosmetic_value(key)))
     base_problem = enumerate_independent_rulebook(1).problem
 
-    assert information == 0.0
+    assert mutual_information_of_uniform_pairs(pairs) == pytest.approx(
+        0.0,
+        abs=1e-15,
+    )
     assert alea_persistent_information_nats() == 0.0
     assert alea_frontier_problem(base_problem) is base_problem
 
 
 def test_trivia_is_persistent_queryable_and_reward_irrelevant() -> None:
-    environment = TriviaRulebook("useful", trivia_seed="distractor")
+    base = IndependentRulebook("useful")
+    environment = TriviaRulebook(base, trivia_seed="distractor")
     channel = QarySymmetricChannel(q=4, epsilon=0.1)
     useful_query = SymbolicQuery(QueryNamespace.REWARD, 11)
     trivia_query = SymbolicQuery(QueryNamespace.TRIVIA, 11)
-    useful_key = SemanticObservationKey(
-        environment.seed,
+    shared_key = SemanticObservationKey(
+        base.seed,
         round_index=3,
         rule_index=11,
-        channel="useful",
-    )
-    trivia_key = SemanticObservationKey(
-        environment.seed,
-        round_index=3,
-        rule_index=11,
-        channel="trivia",
+        channel="p1",
     )
 
     assert environment.query_label(trivia_query) == environment.trivia_label(11)
     assert environment.trivia_label(11) == environment.trivia_label(11)
-    assert environment.observe(useful_query, channel, useful_key).query == useful_query
-    assert environment.observe(trivia_query, channel, trivia_key).query == trivia_query
+    assert (
+        environment.observation_key(
+            useful_query,
+            shared_key,
+        )
+        is shared_key
+    )
+    assert shared_key != environment.observation_key(trivia_query, shared_key)
+    expected_useful = channel.observe(base.label(11), shared_key)
+    assert (
+        environment.observe(
+            useful_query,
+            channel,
+            shared_key,
+        ).value
+        == expected_useful
+    )
+    assert environment.observe(useful_query, channel, shared_key).query == useful_query
+    assert environment.observe(trivia_query, channel, shared_key).query == trivia_query
 
-    base = IndependentRulebook("useful")
     action = correct_action(environment, (1, 2, 3))
     assert environment.labels((1, 2, 3)) == base.labels((1, 2, 3))
     assert environment.evaluate(action) == base.evaluate(action)
@@ -130,11 +166,25 @@ def test_trivia_is_persistent_queryable_and_reward_irrelevant() -> None:
 
 def test_trivia_labels_are_query_order_invariant() -> None:
     indices = (1, 2, 19, 10**6)
-    forward = TriviaRulebook(1, trivia_seed=2)
-    reverse = TriviaRulebook(1, trivia_seed=2)
+    forward = TriviaRulebook(IndependentRulebook(1), trivia_seed=2)
+    reverse = TriviaRulebook(IndependentRulebook(1), trivia_seed=2)
     expected = {index: forward.trivia_label(index) for index in indices}
     observed = {index: reverse.trivia_label(index) for index in reversed(indices)}
     assert observed == expected
+
+
+def test_separate_trivia_seed_matches_independent_product_semantics() -> None:
+    pairs = []
+    for latent_seed, trivia_seed in product(range(4), repeat=2):
+        environment = TriviaRulebook(
+            IndependentRulebook(latent_seed),
+            trivia_seed=trivia_seed,
+        )
+        pairs.append((environment.label(1), environment.trivia_label(1)))
+    assert mutual_information_of_uniform_pairs(pairs) == pytest.approx(
+        0.0,
+        abs=1e-15,
+    )
 
 
 def test_trivia_projection_has_exact_counts_rows_and_natural_log_endpoint() -> None:
@@ -202,8 +252,14 @@ def test_public_u_infinite_threshold_is_infeasible() -> None:
 
 
 def test_public_u_runtime_has_finite_state_independent_bonus() -> None:
-    first = UnboundedPublicRulebook("first", public_unit_reward=0.5)
-    second = UnboundedPublicRulebook("second", public_unit_reward=0.5)
+    first = UnboundedPublicRulebook(
+        IndependentRulebook("first"),
+        public_unit_reward=0.5,
+    )
+    second = UnboundedPublicRulebook(
+        IndependentRulebook("second"),
+        public_unit_reward=0.5,
+    )
     public_only = PublicDeploymentAction(public_choice=17)
 
     assert first.evaluate(public_only) == 8.5
@@ -212,9 +268,23 @@ def test_public_u_runtime_has_finite_state_independent_bonus() -> None:
         first.public_reward(10**400)
 
 
+def test_public_u_extreme_witness_agrees_with_runtime() -> None:
+    unit = 1e-308
+    witness = public_u_witness(100.0, public_unit_reward=unit)
+    environment = UnboundedPublicRulebook(
+        IndependentRulebook(1),
+        public_unit_reward=unit,
+    )
+    assert environment.public_reward(witness.public_choice) == (witness.expected_reward)
+    assert witness.expected_reward >= 100.0
+
+
 def test_public_c_runtime_is_fixed_bounded_and_composable() -> None:
     schedule = PublicBonusSchedule((0.0, 0.25, 0.1))
-    environment = CappedPublicRulebook("public-c", public_schedule=schedule)
+    environment = CappedPublicRulebook(
+        IndependentRulebook("public-c"),
+        public_schedule=schedule,
+    )
     hidden = correct_action(environment, (1, 2))
 
     assert schedule.maximum_reward == 0.25
@@ -224,6 +294,33 @@ def test_public_c_runtime_is_fixed_bounded_and_composable() -> None:
     assert environment.evaluate(PublicDeploymentAction(hidden, 2)) == 2.1
     with pytest.raises(ValueError, match="outside"):
         environment.evaluate(PublicDeploymentAction(hidden, 3))
+
+
+def test_runtime_controls_compose_over_redundancy_and_each_other() -> None:
+    redundant = CappedRedundantRulebook(
+        "composed",
+        core_dimensions=2,
+        max_derived_support=3,
+    )
+    trivia = TriviaRulebook(redundant, trivia_seed="trivia")
+    alea = AleaRulebook(trivia, cosmetic_seed="alea")
+    environment = CappedPublicRulebook(
+        alea,
+        public_schedule=PublicBonusSchedule((0.0, 0.5)),
+    )
+    hidden = correct_action(environment, (1, 2, 3))
+    assert environment.evaluate(PublicDeploymentAction(hidden, 1)) == 3.5
+
+    query = SymbolicQuery(QueryNamespace.TRIVIA, 7)
+    key = SemanticObservationKey("composed", 0, 7)
+    observed = environment.observe_query(
+        query,
+        QarySymmetricChannel(4, 0.1),
+        key,
+    )
+    assert observed.symbolic.query == query
+    assert observed.cosmetic_value is not None
+    assert 0 <= observed.cosmetic_value < alea.cosmetic_alphabet
 
 
 @pytest.mark.parametrize(
@@ -278,6 +375,33 @@ def test_control_projection_allocation_guards_precede_materialization() -> None:
             PublicBonusSchedule((0.0, 1.0)),
             max_matrix_entries=100,
         )
+    with pytest.raises(ValueError, match="max_matrix_entries"):
+        enumerate_trivia_rulebook(
+            1,
+            10**9,
+            max_matrix_entries=100,
+        )
+
+
+def test_generic_finite_controls_compose_over_redundant_base() -> None:
+    redundant = enumerate_redundant_rulebook(1, 1, 1)
+    trivia = augment_with_independent_trivia(
+        redundant.problem,
+        trivia_alphabet_size=4,
+        trivia_dimensions=1,
+    )
+    public = augment_with_public_c(
+        trivia,
+        PublicBonusSchedule((0.0, 0.25)),
+    )
+    solution = solve_frontier(public, 0.5, tolerance=1e-9)
+    expected = BASE.bit_equivalent(0.25)
+
+    assert trivia.state_count == redundant.problem.state_count * 4
+    assert trivia.action_count == redundant.problem.action_count
+    assert public.action_count == trivia.action_count * 2
+    assert solution.lower_bound <= expected + 2e-7
+    assert solution.upper_bound >= expected - 2e-7
 
 
 @pytest.mark.parametrize(
@@ -299,7 +423,10 @@ def test_control_runtime_types_reject_ambiguous_values() -> None:
     with pytest.raises(ValueError):
         PublicDeploymentAction(public_choice=-1)
     with pytest.raises(ValueError, match="must match"):
-        AleaRulebook(1).observe(
+        AleaRulebook(
+            IndependentRulebook(1),
+            cosmetic_seed=2,
+        ).observe(
             2,
             QarySymmetricChannel(4, 0.1),
             SemanticObservationKey(1, 0, 1),

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from fractions import Fraction
 from numbers import Real
+from typing import Protocol, runtime_checkable
 
 from infinite_rulebook.core.behavior import DeploymentAction
+from infinite_rulebook.core.reward import RewardSpec
 from infinite_rulebook.core.rng import CounterRNG, Seed
-from infinite_rulebook.environments.independent import IndependentRulebook
 from infinite_rulebook.feedback.qary import (
     QarySymmetricChannel,
     SemanticObservationKey,
@@ -38,6 +41,28 @@ def _finite_nonnegative(value: Real, name: str) -> float:
     if not math.isfinite(result) or result < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
     return result
+
+
+@runtime_checkable
+class RulebookRuntime(Protocol):
+    """Structural runtime contract accepted by composable controls."""
+
+    @property
+    def reward_spec(self) -> RewardSpec: ...
+
+    def label(self, index: int) -> int: ...
+
+    def labels(self, indices: Iterable[int]) -> tuple[int, ...]: ...
+
+    def evaluate(self, action: DeploymentAction) -> float: ...
+
+
+def _runtime(value: object) -> RulebookRuntime:
+    if not isinstance(value, RulebookRuntime):
+        raise TypeError("base must implement RulebookRuntime")
+    if not isinstance(value.reward_spec, RewardSpec):
+        raise TypeError("base.reward_spec must be a RewardSpec")
+    return value
 
 
 class QueryNamespace(StrEnum):
@@ -69,33 +94,146 @@ class SymbolicObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class ControlObservation:
+    """A unified query result for arbitrarily composed symbolic controls."""
+
+    symbolic: SymbolicObservation
+    cosmetic_value: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AleaObservation:
-    """A useful observation with independent, nonpersistent cosmetic novelty."""
+    """A base observation with independent, nonpersistent cosmetic novelty."""
 
     reward_value: int
     cosmetic_value: int
 
 
+def _base_observe_query(
+    base: RulebookRuntime,
+    query: SymbolicQuery,
+    channel: QarySymmetricChannel,
+    key: SemanticObservationKey,
+) -> ControlObservation:
+    if not isinstance(query, SymbolicQuery):
+        raise TypeError("query must be a SymbolicQuery")
+    if not isinstance(channel, QarySymmetricChannel):
+        raise TypeError("channel must be a QarySymmetricChannel")
+    if not isinstance(key, SemanticObservationKey):
+        raise TypeError("key must be a SemanticObservationKey")
+    observer = getattr(base, "observe_query", None)
+    if callable(observer):
+        result = observer(query, channel, key)
+        if not isinstance(result, ControlObservation):
+            raise TypeError("base.observe_query must return ControlObservation")
+        return result
+    if query.namespace is not QueryNamespace.REWARD:
+        raise ValueError("base runtime does not expose a trivia namespace")
+    if channel.q != base.reward_spec.q:
+        raise ValueError("channel alphabet must match reward_spec.q")
+    if key.rule_index != query.index:
+        raise ValueError("key.rule_index must match query.index")
+    value = channel.observe(base.label(query.index), key)
+    return ControlObservation(SymbolicObservation(query, value))
+
+
 @dataclass(frozen=True, slots=True)
-class AleaRulebook(IndependentRulebook):
-    """IND plus fresh reward-irrelevant cosmetic observations.
+class AleaRulebook:
+    """A composable rulebook plus fresh cosmetic observations.
 
     Cosmetic values are keyed by the complete semantic observation coordinate.
     Replaying one coordinate is deterministic, but distinct rounds/ordinals
     are distinct draws. The cosmetic tape is not part of the persistent
-    environment latent and never enters deployment reward.
+    environment latent and never enters deployment reward. ``cosmetic_seed``
+    is a separately sampled runtime-noise seed, independent of the base
+    environment seed under the experiment's declared product seed law.
     """
 
+    base: RulebookRuntime
+    cosmetic_seed: Seed
     cosmetic_alphabet: int = 256
     _cosmetic_rng: CounterRNG = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        super(AleaRulebook, self).__post_init__()
+        _runtime(self.base)
         _positive_integer(self.cosmetic_alphabet, "cosmetic_alphabet")
         object.__setattr__(
             self,
             "_cosmetic_rng",
-            CounterRNG(self.seed, stream="alea.cosmetic-observation.v1"),
+            CounterRNG(
+                self.cosmetic_seed,
+                stream="alea.cosmetic-observation.v1",
+            ),
+        )
+
+    @property
+    def reward_spec(self) -> RewardSpec:
+        return self.base.reward_spec
+
+    def label(self, index: int) -> int:
+        return self.base.label(index)
+
+    def labels(self, indices: Iterable[int]) -> tuple[int, ...]:
+        return self.base.labels(indices)
+
+    def evaluate(self, action: DeploymentAction) -> float:
+        return self.base.evaluate(action)
+
+    def cosmetic_value(self, key: SemanticObservationKey) -> int:
+        """Return fresh-event novelty keyed only by the ALEA tape."""
+
+        if not isinstance(key, SemanticObservationKey):
+            raise TypeError("key must be a SemanticObservationKey")
+        return self._cosmetic_rng.randbelow(
+            self.cosmetic_alphabet,
+            key.round_index,
+            key.rule_index,
+            key.query_ordinal,
+            key.channel,
+        )
+
+    def augment_observation(
+        self,
+        reward_value: int,
+        key: SemanticObservationKey,
+    ) -> AleaObservation:
+        """Append cosmetic novelty to any q-ary base observation."""
+
+        if (
+            not isinstance(reward_value, int)
+            or isinstance(reward_value, bool)
+            or not 1 <= reward_value <= self.reward_spec.q
+        ):
+            raise ValueError(
+                f"reward_value must be an integer in 1..{self.reward_spec.q}"
+            )
+        return AleaObservation(reward_value, self.cosmetic_value(key))
+
+    def observe_query(
+        self,
+        query: SymbolicQuery,
+        channel: QarySymmetricChannel,
+        key: SemanticObservationKey,
+    ) -> ControlObservation:
+        """Observe any base namespace and append ALEA cosmetic novelty."""
+
+        if not isinstance(query, SymbolicQuery):
+            raise TypeError("query must be a SymbolicQuery")
+        if not isinstance(channel, QarySymmetricChannel):
+            raise TypeError("channel must be a QarySymmetricChannel")
+        if not isinstance(key, SemanticObservationKey):
+            raise TypeError("key must be a SemanticObservationKey")
+        base_observation = _base_observe_query(self.base, query, channel, key)
+        cosmetic_key = SemanticObservationKey(
+            environment_seed=key.environment_seed,
+            round_index=key.round_index,
+            rule_index=key.rule_index,
+            query_ordinal=key.query_ordinal,
+            channel=f"{key.channel}.{query.namespace.value}",
+        )
+        return ControlObservation(
+            symbolic=base_observation.symbolic,
+            cosmetic_value=self.cosmetic_value(cosmetic_key),
         )
 
     def observe(
@@ -115,32 +253,50 @@ class AleaRulebook(IndependentRulebook):
             raise TypeError("key must be a SemanticObservationKey")
         if key.rule_index != rule_index:
             raise ValueError("key.rule_index must match rule_index")
-        reward_value = channel.observe(self.label(rule_index), key)
-        cosmetic_value = self._cosmetic_rng.randbelow(
-            self.cosmetic_alphabet,
-            key.round_index,
-            key.rule_index,
-            key.query_ordinal,
-            key.channel,
+        observation = self.observe_query(
+            SymbolicQuery(QueryNamespace.REWARD, rule_index),
+            channel,
+            key,
         )
-        return AleaObservation(reward_value, cosmetic_value)
+        if observation.cosmetic_value is None:
+            raise RuntimeError("ALEA observation is missing cosmetic novelty")
+        return AleaObservation(
+            observation.symbolic.value,
+            observation.cosmetic_value,
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class TriviaRulebook(IndependentRulebook):
-    """IND plus countably many persistent, queryable irrelevant labels."""
+class TriviaRulebook:
+    """A composable rulebook plus persistent, queryable irrelevant labels."""
 
-    trivia_seed: Seed | None = None
+    base: RulebookRuntime
+    trivia_seed: Seed
     _trivia_rng: CounterRNG = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        super(TriviaRulebook, self).__post_init__()
-        seed = self.seed if self.trivia_seed is None else self.trivia_seed
+        _runtime(self.base)
         object.__setattr__(
             self,
             "_trivia_rng",
-            CounterRNG(seed, stream="trivia.persistent-latent.v1"),
+            CounterRNG(
+                self.trivia_seed,
+                stream="trivia.persistent-latent.v1",
+            ),
         )
+
+    @property
+    def reward_spec(self) -> RewardSpec:
+        return self.base.reward_spec
+
+    def label(self, index: int) -> int:
+        return self.base.label(index)
+
+    def labels(self, indices: Iterable[int]) -> tuple[int, ...]:
+        return self.base.labels(indices)
+
+    def evaluate(self, action: DeploymentAction) -> float:
+        return self.base.evaluate(action)
 
     def trivia_label(self, index: int) -> int:
         """Return one fixed reward-irrelevant q-ary latent coordinate."""
@@ -175,8 +331,40 @@ class TriviaRulebook(IndependentRulebook):
             raise TypeError("key must be a SemanticObservationKey")
         if key.rule_index != query.index:
             raise ValueError("key.rule_index must match query.index")
-        value = channel.observe(self.query_label(query), key)
+        namespaced_key = self.observation_key(query, key)
+        value = channel.observe(self.query_label(query), namespaced_key)
         return SymbolicObservation(query, value)
+
+    def observe_query(
+        self,
+        query: SymbolicQuery,
+        channel: QarySymmetricChannel,
+        key: SemanticObservationKey,
+    ) -> ControlObservation:
+        return ControlObservation(self.observe(query, channel, key))
+
+    def observation_key(
+        self,
+        query: SymbolicQuery,
+        key: SemanticObservationKey,
+    ) -> SemanticObservationKey:
+        """Domain-separate useful and trivia observation-noise draws."""
+
+        if not isinstance(query, SymbolicQuery):
+            raise TypeError("query must be a SymbolicQuery")
+        if not isinstance(key, SemanticObservationKey):
+            raise TypeError("key must be a SemanticObservationKey")
+        if key.rule_index != query.index:
+            raise ValueError("key.rule_index must match query.index")
+        if query.namespace is QueryNamespace.REWARD:
+            return key
+        return SemanticObservationKey(
+            environment_seed=key.environment_seed,
+            round_index=key.round_index,
+            rule_index=key.rule_index,
+            query_ordinal=key.query_ordinal,
+            channel=f"{key.channel}.trivia",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,15 +414,26 @@ class PublicBonusSchedule:
 
 
 @dataclass(frozen=True, slots=True)
-class CappedPublicRulebook(IndependentRulebook):
-    """PUBLIC-C with a fixed, bounded, attained public contribution."""
+class CappedPublicRulebook:
+    """A composable PUBLIC-C wrapper with a fixed public contribution."""
 
+    base: RulebookRuntime
     public_schedule: PublicBonusSchedule = field(default_factory=PublicBonusSchedule)
 
     def __post_init__(self) -> None:
-        super(CappedPublicRulebook, self).__post_init__()
+        _runtime(self.base)
         if not isinstance(self.public_schedule, PublicBonusSchedule):
             raise TypeError("public_schedule must be a PublicBonusSchedule")
+
+    @property
+    def reward_spec(self) -> RewardSpec:
+        return self.base.reward_spec
+
+    def label(self, index: int) -> int:
+        return self.base.label(index)
+
+    def labels(self, indices: Iterable[int]) -> tuple[int, ...]:
+        return self.base.labels(indices)
 
     @property
     def maximum_public_reward(self) -> float:
@@ -243,27 +442,48 @@ class CappedPublicRulebook(IndependentRulebook):
     def evaluate(self, action: PublicDeploymentAction) -> float:
         if not isinstance(action, PublicDeploymentAction):
             raise TypeError("action must be a PublicDeploymentAction")
-        hidden_reward = super(CappedPublicRulebook, self).evaluate(action.deployment)
+        hidden_reward = self.base.evaluate(action.deployment)
         return hidden_reward + self.public_schedule.reward(action.public_choice)
+
+    def observe_query(
+        self,
+        query: SymbolicQuery,
+        channel: QarySymmetricChannel,
+        key: SemanticObservationKey,
+    ) -> ControlObservation:
+        """Forward training queries without exposing public reward to feedback."""
+
+        return _base_observe_query(self.base, query, channel, key)
 
 
 @dataclass(frozen=True, slots=True)
-class UnboundedPublicRulebook(IndependentRulebook):
-    """PUBLIC-U with public reward ``unit_reward * k`` for any finite ``k``."""
+class UnboundedPublicRulebook:
+    """A composable PUBLIC-U wrapper with reward ``unit_reward * k``."""
 
+    base: RulebookRuntime
     public_unit_reward: float = 1.0
 
     def __post_init__(self) -> None:
-        super(UnboundedPublicRulebook, self).__post_init__()
+        _runtime(self.base)
         reward = _finite_nonnegative(self.public_unit_reward, "public_unit_reward")
         if reward == 0.0:
             raise ValueError("public_unit_reward must be positive")
         object.__setattr__(self, "public_unit_reward", reward)
 
+    @property
+    def reward_spec(self) -> RewardSpec:
+        return self.base.reward_spec
+
+    def label(self, index: int) -> int:
+        return self.base.label(index)
+
+    def labels(self, indices: Iterable[int]) -> tuple[int, ...]:
+        return self.base.labels(indices)
+
     def public_reward(self, choice: int) -> float:
         allocation = _nonnegative_integer(choice, "public_choice")
         try:
-            reward = allocation * self.public_unit_reward
+            reward = float(allocation * Fraction.from_float(self.public_unit_reward))
         except OverflowError as error:
             raise ValueError("public_choice produces non-finite reward") from error
         if not math.isfinite(reward):
@@ -273,17 +493,29 @@ class UnboundedPublicRulebook(IndependentRulebook):
     def evaluate(self, action: PublicDeploymentAction) -> float:
         if not isinstance(action, PublicDeploymentAction):
             raise TypeError("action must be a PublicDeploymentAction")
-        hidden_reward = super(UnboundedPublicRulebook, self).evaluate(action.deployment)
+        hidden_reward = self.base.evaluate(action.deployment)
         return hidden_reward + self.public_reward(action.public_choice)
+
+    def observe_query(
+        self,
+        query: SymbolicQuery,
+        channel: QarySymmetricChannel,
+        key: SemanticObservationKey,
+    ) -> ControlObservation:
+        """Forward training queries without exposing public reward to feedback."""
+
+        return _base_observe_query(self.base, query, channel, key)
 
 
 __all__ = [
     "AleaObservation",
     "AleaRulebook",
     "CappedPublicRulebook",
+    "ControlObservation",
     "PublicBonusSchedule",
     "PublicDeploymentAction",
     "QueryNamespace",
+    "RulebookRuntime",
     "SymbolicObservation",
     "SymbolicQuery",
     "TriviaRulebook",
