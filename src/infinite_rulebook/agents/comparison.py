@@ -355,6 +355,7 @@ class FactorizedQueryAgent:
         if budget > self.query_budget:
             raise ValueError("context query budget exceeds the agent budget")
         candidate_tuple = tuple(candidates)
+        self._validate_candidate_metadata(candidate_tuple)
         return AcquisitionContext(
             round_index=self._completed_rounds,
             query_budget=budget,
@@ -370,6 +371,7 @@ class FactorizedQueryAgent:
             raise ValueError("context round does not match agent state")
         if context.query_budget > self.query_budget:
             raise ValueError("context query budget exceeds the agent budget")
+        self._validate_candidate_metadata(context.candidates)
         if self._pending_action is not None:
             context.validate_action(self._pending_action)
             return self._pending_action
@@ -503,6 +505,27 @@ class FactorizedQueryAgent:
         if target.persistent and target.key in self._posteriors:
             return self._posteriors[target.key]
         return CategoricalPosterior(q=self.q, epsilon=self.epsilon)
+
+    def _validate_candidate_metadata(
+        self,
+        candidates: Sequence[QueryTarget],
+    ) -> None:
+        rule_owners = {
+            target.rule_index: key
+            for key, target in self._targets.items()
+            if target.rule_index is not None
+        }
+        for target in candidates:
+            if not isinstance(target, QueryTarget):
+                raise TypeError("candidates must contain QueryTarget instances")
+            known = self._targets.get(target.key)
+            if known is not None and known != target:
+                raise ValueError("target metadata changed across rounds")
+            if target.rule_index is None:
+                continue
+            owner = rule_owners.setdefault(target.rule_index, target.key)
+            if owner != target.key:
+                raise ValueError("one deployment rule cannot have multiple targets")
 
 
 def useful_targets(

@@ -379,6 +379,27 @@ def test_checkpoint_is_pure_and_deployment_snapshot_is_immutable() -> None:
     assert len(agent.deployment().support) == 2
 
 
+def test_changed_candidate_metadata_cannot_wedge_pending_action() -> None:
+    target = useful_targets(1)[0]
+    agent = FactorizedQueryAgent(
+        TotalInformationDirectedPolicy(),
+        epsilon=0.2,
+    )
+    _observe(agent, (target,), (1,))
+    changed = QueryTarget(target.key, rule_index=2)
+    context = AcquisitionContext(
+        round_index=agent.completed_rounds,
+        query_budget=1,
+        candidates=(changed,),
+    )
+
+    with pytest.raises(ValueError, match="metadata changed"):
+        agent.select_train_action(context)
+
+    action = agent.select_train_action(agent.acquisition_context((target,)))
+    assert action.targets == (target,)
+
+
 def test_objectives_match_one_query_closed_forms() -> None:
     posterior = CategoricalPosterior(q=4, epsilon=0.2)
     reward = RewardSpec()

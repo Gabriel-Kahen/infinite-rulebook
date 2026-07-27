@@ -221,7 +221,7 @@ def test_multi_query_round_uses_target_local_semantic_ordinals() -> None:
     candidates = useful_targets(1) + distractor_targets(1)
     agent = FactorizedQueryAgent(
         TotalInformationDirectedPolicy(),
-        epsilon=0.0,
+        epsilon=0.2,
         query_budget=2,
         seed="batch-agent",
     )
@@ -230,13 +230,22 @@ def test_multi_query_round_uses_target_local_semantic_ordinals() -> None:
         agent,
         environment,
         agent.acquisition_context(candidates),
-        QarySymmetricChannel(q=4, epsilon=0.0),
+        QarySymmetricChannel(q=4, epsilon=0.2),
         environment_seed=P1_SEED,
     )
 
     assert len(trace.action.targets) == 2
     assert tuple(key.query_ordinal for key in trace.observation_keys) == (0, 0)
     assert len(set(zip(trace.queries, trace.observation_keys, strict=True))) == 2
+    effective_keys = tuple(
+        environment.observation_key(query, key)
+        for query, key in zip(
+            trace.queries,
+            trace.observation_keys,
+            strict=True,
+        )
+    )
+    assert len(set(effective_keys)) == 2
 
 
 def test_fixed_target_saturates_real_ind_trajectory() -> None:
