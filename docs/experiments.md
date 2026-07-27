@@ -20,10 +20,9 @@ uv run infinite-rulebook pilot configs/pilot-foundation.json
 uv run infinite-rulebook validate artifacts/pilot-foundation/<run-hash>
 ```
 
-The foundation adapter exercises IND, RED-C, and MIX with bounded P1 training
-and a reward-directed symbolic control. It is deliberately not a substitute for
-the richer distractor environments or agent objectives owned by their simulator
-and agent implementations.
+The foundation config retains the original narrow IND, RED-C, and MIX
+reward-directed regression. The same runner now integrates the registered
+control, ledger, metric, and comparison-agent APIs for the broader smoke sweep.
 
 The dependency-integrated smoke sweep is:
 
@@ -34,8 +33,10 @@ uv run infinite-rulebook pilot configs/pilot-smoke.json --workers 4
 It crosses IND, RED-C, MIX, ALEA, TRIVIA, and PUBLIC-C with fixed-target,
 reward-directed, novelty-directed, and total-information agents. The projection,
 horizon, support caps, public schedule, and replica count are intentionally
-small. Its per-run population metric has `run_count = 1`; this exercises the
-scientific schema and is not a powered population estimate.
+small. Its per-run population metric has `run_count = 1` and is explicitly
+stored as a diagnostic, not a confirmatory estimand. The authoritative run
+record uses realized Bayesian surprise; population-MI efficiency and regret
+diagnostics may remain invalid until complete histories are pooled.
 
 ## Artifact contract
 

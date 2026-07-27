@@ -207,7 +207,10 @@ def test_checkpoint_is_side_effect_free_and_frontier_components_persist(
         "frontier-diagnostics",
     } <= {artifact.artifact_type for artifact in frontier_artifacts}
     final = max(checkpoints, key=lambda checkpoint: checkpoint.payload["round"])
-    assert final.payload["result"]["support"] <= config.environments[0].projection_size
+    assert (
+        final.payload["result"]["support"]["deployment_support"]
+        <= config.environments[0].projection_size
+    )
     curve = next(
         artifact
         for artifact in frontier_artifacts

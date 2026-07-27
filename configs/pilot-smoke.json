@@ -56,7 +56,7 @@
     {
       "kind": "PUBLIC-C",
       "projection_size": 2,
-      "public_reward_cap": 1.0
+      "public_reward_cap": 0.25
     }
   ],
   "agents": [

@@ -65,6 +65,7 @@ class ExperimentAdapter(Protocol):
         round_index: int,
         cell: RunCell,
         seeds: RunSeeds,
+        semantic_hashes: dict[str, str],
     ) -> Any: ...
 
     def state_fingerprint(self, state: Any) -> str: ...
@@ -333,7 +334,11 @@ class RunExecutor:
                 "checkpoint clone changed the scientific training state"
             )
         payload = evaluation_adapter.checkpoint(
-            evaluation_state, round_index, cell, seeds
+            evaluation_state,
+            round_index,
+            cell,
+            seeds,
+            hashes,
         )
         evaluation_after = evaluation_adapter.state_fingerprint(evaluation_state)
         if evaluation_before != evaluation_after:

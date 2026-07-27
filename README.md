@@ -53,6 +53,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv build
 uv run infinite-rulebook pilot configs/pilot-foundation.json
+uv run infinite-rulebook pilot configs/pilot-smoke.json --workers 4
 ```
 
 The symbolic control API and its exact identities are documented in
