@@ -49,6 +49,8 @@ class FrontierSolution:
     iterations: int
     converged: bool
     problem_semantic_hash: str
+    lower_certificate_marginal: tuple[float, ...] | None = None
+    lower_certificate_supports: tuple[tuple[int, ...], ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +172,8 @@ def solve_frontier(
             0,
             True,
             problem_hash,
+            None,
+            None,
         )
     if target > maximum_reward:
         return FrontierSolution(
@@ -183,6 +187,8 @@ def solve_frontier(
             0,
             True,
             problem_hash,
+            None,
+            None,
         )
     if target == maximum_reward:
         maximizing_supports = tuple(
@@ -215,6 +221,8 @@ def solve_frontier(
             and math.isfinite(gap)
             and _bounds_converged(lower, upper, accuracy),
             problem_semantic_hash=problem_hash,
+            lower_certificate_marginal=endpoint.witness.action_marginal,
+            lower_certificate_supports=maximizing_supports,
         )
 
     maximizing = problem.maximizing_channel()
@@ -225,6 +233,7 @@ def solve_frontier(
     beta_high = 1.0
     best_lower = 0.0
     best_beta = 0.0
+    best_marginal = lower_solution.witness.action_marginal
     total_iterations = 0
     search_blocked = False
 
@@ -238,6 +247,7 @@ def solve_frontier(
     candidate = _frontier_lower_bound(target, high_solution)
     if candidate > best_lower:
         best_lower, best_beta = candidate, beta_high
+        best_marginal = high_solution.witness.action_marginal
     if not high_solution.converged:
         search_blocked = True
     while high_solution.witness.expected_reward < target:
@@ -261,6 +271,7 @@ def solve_frontier(
         candidate = _frontier_lower_bound(target, high_solution)
         if candidate > best_lower:
             best_lower, best_beta = candidate, beta_high
+            best_marginal = high_solution.witness.action_marginal
 
     if high_solution.converged and high_solution.witness.expected_reward >= target:
         above = high_solution.witness
@@ -284,6 +295,7 @@ def solve_frontier(
         candidate = _frontier_lower_bound(target, solution)
         if candidate > best_lower:
             best_lower, best_beta = candidate, beta
+            best_marginal = solution.witness.action_marginal
         if not solution.converged:
             search_blocked = True
             break
@@ -323,6 +335,8 @@ def solve_frontier(
         iterations=total_iterations,
         converged=converged,
         problem_semantic_hash=problem_hash,
+        lower_certificate_marginal=best_marginal,
+        lower_certificate_supports=None,
     )
 
 

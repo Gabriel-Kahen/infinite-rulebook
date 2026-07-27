@@ -107,12 +107,171 @@ class FrontierUpperWitness:
         return self.channel_witness.mutual_information
 
 
+class LowerCertificateMethod(StrEnum):
+    """Certified solver argument supporting a frontier lower endpoint."""
+
+    ZERO_INFORMATION = "zero_information"
+    LAGRANGIAN_DUAL = "lagrangian_dual"
+    SUPPORTED_ENDPOINT = "supported_endpoint"
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class FrontierLowerCertificate:
+    """Problem-bound evidence for one certified information lower bound."""
+
+    problem_semantic_hash: str
+    requested_reward: float
+    effective_reward: float
+    information_lower_bound_nats: float
+    dual_beta: float
+    dual_objective_lower_bound: float | None
+    dual_action_marginal: tuple[float, ...] | None
+    supported_actions: tuple[tuple[int, ...], ...] | None
+    duality_gap: float
+    solver_iterations: int
+    method: LowerCertificateMethod
+    source_solution_hash: str
+    certificate_hash: str
+
+    def __init__(
+        self,
+        problem: FiniteDecisionProblem,
+        solution: object,
+    ) -> None:
+        from infinite_rulebook.artifacts import semantic_hash
+        from infinite_rulebook.frontier.blahut_arimoto import (
+            lagrangian_certificate_lower_bound,
+            supported_certificate_lower_bound,
+        )
+        from infinite_rulebook.frontier.finite_problem import FiniteDecisionProblem
+        from infinite_rulebook.frontier.inversion import FrontierSolution
+
+        if not isinstance(problem, FiniteDecisionProblem):
+            raise TypeError("problem must be a FiniteDecisionProblem")
+        if not isinstance(solution, FrontierSolution):
+            raise TypeError("solution must be a FrontierSolution")
+        problem_hash = semantic_hash(problem)
+        if solution.problem_semantic_hash != problem_hash:
+            raise ValueError("frontier solution is bound to a different problem")
+        if not solution.converged:
+            raise ValueError("frontier lower bound requires a converged solver result")
+        if solution.witness is None:
+            raise ValueError("an infeasible frontier solution has no lower certificate")
+
+        requested = _real("solution.target_reward", solution.target_reward)
+        effective = _real(
+            "solution.effective_target_reward",
+            solution.effective_target_reward,
+        )
+        lower = _real("solution.lower_bound", solution.lower_bound)
+        upper = _real("solution.upper_bound", solution.upper_bound)
+        beta = _real("solution.dual_beta", solution.dual_beta, finite=False)
+        gap = _real("solution.duality_gap", solution.duality_gap)
+        if requested < effective:
+            raise ValueError("requested reward cannot be below effective reward")
+        if lower < 0.0 or lower > upper:
+            raise ValueError("solver lower bound must lie in [0, upper_bound]")
+        if beta < 0.0 or gap < 0.0:
+            raise ValueError("solver dual evidence cannot be negative")
+        if (
+            isinstance(solution.iterations, bool)
+            or not isinstance(solution.iterations, int)
+            or solution.iterations < 0
+        ):
+            raise ValueError("solver iterations must be a nonnegative integer")
+        expected_gap = upper - lower
+        roundoff = 64.0 * math.ulp(max(1.0, abs(lower), abs(upper)))
+        if not math.isclose(gap, expected_gap, rel_tol=0.0, abs_tol=roundoff):
+            raise ValueError("solver duality gap does not reconcile with its bounds")
+
+        dual_objective: float | None
+        dual_marginal: tuple[float, ...] | None
+        supported_actions: tuple[tuple[int, ...], ...] | None
+        if effective <= problem.zero_information_reward:
+            method = LowerCertificateMethod.ZERO_INFORMATION
+            if lower != 0.0:
+                raise ValueError("zero-information lower certificate must equal zero")
+            dual_objective = 0.0
+            dual_marginal = None
+            supported_actions = None
+        elif effective == problem.maximum_reward and math.isinf(beta):
+            method = LowerCertificateMethod.SUPPORTED_ENDPOINT
+            dual_objective = None
+            expected_supports = tuple(
+                tuple(action for action, reward in enumerate(row) if reward == max(row))
+                for row in problem.rewards
+            )
+            if solution.lower_certificate_supports != expected_supports:
+                raise ValueError("endpoint certificate has incorrect action supports")
+            if solution.lower_certificate_marginal is None:
+                raise ValueError("endpoint certificate is missing its action marginal")
+            dual_marginal = tuple(solution.lower_certificate_marginal)
+            supported_actions = expected_supports
+            certified = max(
+                0.0,
+                supported_certificate_lower_bound(
+                    problem,
+                    supported_actions,
+                    dual_marginal,
+                ),
+            )
+            if lower > certified + roundoff:
+                raise ValueError("reported lower bound exceeds endpoint certificate")
+        else:
+            if not math.isfinite(beta):
+                raise ValueError("an interior dual certificate needs a finite beta")
+            method = LowerCertificateMethod.LAGRANGIAN_DUAL
+            if solution.lower_certificate_marginal is None:
+                raise ValueError("dual certificate is missing its action marginal")
+            if solution.lower_certificate_supports is not None:
+                raise ValueError(
+                    "interior dual certificate cannot have action supports"
+                )
+            dual_marginal = tuple(solution.lower_certificate_marginal)
+            dual_objective = lagrangian_certificate_lower_bound(
+                problem,
+                beta,
+                dual_marginal,
+            )
+            certified = max(0.0, beta * effective + dual_objective)
+            if lower > certified + roundoff:
+                raise ValueError("reported lower bound exceeds Lagrangian certificate")
+            supported_actions = None
+
+        source_hash = semantic_hash(solution)
+        certificate_hash = semantic_hash(
+            {
+                "problem": problem_hash,
+                "method": method,
+                "source_solution": source_hash,
+            }
+        )
+        values = (
+            ("problem_semantic_hash", problem_hash),
+            ("requested_reward", requested),
+            ("effective_reward", effective),
+            ("information_lower_bound_nats", lower),
+            ("dual_beta", beta),
+            ("dual_objective_lower_bound", dual_objective),
+            ("dual_action_marginal", dual_marginal),
+            ("supported_actions", supported_actions),
+            ("duality_gap", gap),
+            ("solver_iterations", solution.iterations),
+            ("method", method),
+            ("source_solution_hash", source_hash),
+            ("certificate_hash", certificate_hash),
+        )
+        for name, value in values:
+            object.__setattr__(self, name, value)
+
+
 @dataclass(frozen=True, slots=True)
 class FrontierPoint:
     """Certified information bounds at one expected-reward threshold."""
 
     reward: float
     information: MetricInterval
+    lower_certificate: FrontierLowerCertificate
     upper_witness: FrontierUpperWitness
     requested_reward: float | None = None
 
@@ -130,10 +289,7 @@ class FrontierPoint:
             raise TypeError("solution must be a FrontierSolution")
         if solution.witness is None:
             raise ValueError("an infeasible frontier solution has no upper witness")
-        from infinite_rulebook.artifacts import semantic_hash
-
-        if solution.problem_semantic_hash != semantic_hash(problem):
-            raise ValueError("frontier solution is bound to a different problem")
+        lower_certificate = FrontierLowerCertificate(problem, solution)
         return cls(
             reward=solution.effective_target_reward,
             information=MetricInterval(
@@ -141,6 +297,7 @@ class FrontierPoint:
                 solution.upper_bound,
                 "nats",
             ),
+            lower_certificate=lower_certificate,
             upper_witness=FrontierUpperWitness(problem, solution.witness),
             requested_reward=solution.target_reward,
         )
@@ -160,8 +317,23 @@ class FrontierPoint:
             raise ValueError("frontier information must be measured in nats")
         if self.information.lower < 0.0:
             raise ValueError("frontier information cannot be negative")
+        if not isinstance(self.lower_certificate, FrontierLowerCertificate):
+            raise TypeError("lower_certificate must be a FrontierLowerCertificate")
+        if self.lower_certificate.effective_reward != reward:
+            raise ValueError("lower certificate is for a different reward threshold")
+        if self.lower_certificate.requested_reward != requested:
+            raise ValueError("requested reward does not match the lower certificate")
+        if self.information.lower != (
+            self.lower_certificate.information_lower_bound_nats
+        ):
+            raise ValueError("lower bound must equal its certified solver value")
         if not isinstance(self.upper_witness, FrontierUpperWitness):
             raise TypeError("upper_witness must be a FrontierUpperWitness")
+        if (
+            self.lower_certificate.problem_semantic_hash
+            != self.upper_witness.problem_semantic_hash
+        ):
+            raise ValueError("frontier certificates are bound to different problems")
         if self.upper_witness.expected_reward < reward:
             raise ValueError("upper witness does not attain the reward threshold")
         if not math.isclose(
@@ -234,6 +406,10 @@ class FrontierCurve:
         for point in points:
             if point.upper_witness.problem_semantic_hash != self.semantic_hash:
                 raise ValueError("frontier witness is bound to a different problem")
+            if point.lower_certificate.problem_semantic_hash != self.semantic_hash:
+                raise ValueError(
+                    "frontier lower certificate is bound to a different problem"
+                )
         object.__setattr__(self, "points", points)
         object.__setattr__(self, "zero_information_reward", zero)
         object.__setattr__(self, "maximum_reward", maximum)
@@ -241,10 +417,14 @@ class FrontierCurve:
 
 
 def _interpolate(left: float, right: float, weight: float) -> float:
+    if weight <= 0.0:
+        return left
+    if weight >= 1.0:
+        return right
     if left == right:
         return left
     if math.isinf(left) or math.isinf(right):
-        return left if weight == 0.0 else right
+        return right
     return left + weight * (right - left)
 
 

@@ -135,6 +135,94 @@ def _marginal_objective_bounds(
     return certificate, value, tuple(action_log_slacks)
 
 
+def _certificate_marginal(
+    problem: FiniteDecisionProblem,
+    marginal: Sequence[Real],
+) -> tuple[float, ...]:
+    if len(marginal) != problem.action_count:
+        raise ValueError("certificate marginal has the wrong action count")
+    values = tuple(
+        _nonnegative_finite(f"marginal[{index}]", value)
+        for index, value in enumerate(marginal)
+    )
+    total = math.fsum(values)
+    if not math.isclose(total, 1.0, rel_tol=1e-12, abs_tol=1e-12):
+        raise ValueError("certificate marginal must sum to one")
+    return tuple(value / total for value in values)
+
+
+def lagrangian_certificate_lower_bound(
+    problem: FiniteDecisionProblem,
+    beta: Real,
+    action_marginal: Sequence[Real],
+) -> float:
+    """Re-evaluate a Lagrangian lower certificate from its sufficient data."""
+
+    if not isinstance(problem, FiniteDecisionProblem):
+        raise TypeError("problem must be a FiniteDecisionProblem")
+    multiplier = _nonnegative_finite("beta", beta)
+    marginal = _certificate_marginal(problem, action_marginal)
+    _, log_normalizers = _channel_from_marginal(problem, multiplier, marginal)
+    lower, _, _ = _marginal_objective_bounds(
+        problem,
+        multiplier,
+        marginal,
+        log_normalizers,
+    )
+    return lower
+
+
+def supported_certificate_lower_bound(
+    problem: FiniteDecisionProblem,
+    allowed_actions: Sequence[Sequence[int]],
+    action_marginal: Sequence[Real],
+) -> float:
+    """Re-evaluate a supported-endpoint certificate from its sufficient data."""
+
+    if not isinstance(problem, FiniteDecisionProblem):
+        raise TypeError("problem must be a FiniteDecisionProblem")
+    if len(allowed_actions) != problem.state_count:
+        raise ValueError("allowed_actions must have one support per state")
+    supports = []
+    for state, support in enumerate(allowed_actions):
+        canonical = frozenset(support)
+        if not canonical:
+            raise ValueError(f"allowed_actions[{state}] must not be empty")
+        if any(
+            isinstance(action, bool)
+            or not isinstance(action, int)
+            or not 0 <= action < problem.action_count
+            for action in canonical
+        ):
+            raise ValueError(f"allowed_actions[{state}] contains an invalid action")
+        supports.append(canonical)
+    marginal = _certificate_marginal(problem, action_marginal)
+    support_mass = tuple(
+        math.fsum(marginal[action] for action in support) for support in supports
+    )
+    if any(
+        probability > 0.0 and support_mass[state] <= 0.0
+        for state, probability in enumerate(problem.prior)
+    ):
+        raise ValueError("certificate marginal gives zero mass to a required support")
+    marginal_objective = -math.fsum(
+        probability * math.log(support_mass[state])
+        for state, probability in enumerate(problem.prior)
+        if probability > 0.0
+    )
+    slacks = tuple(
+        math.fsum(
+            probability / support_mass[state]
+            for state, (probability, support) in enumerate(
+                zip(problem.prior, supports, strict=True)
+            )
+            if probability > 0.0 and action in support
+        )
+        for action in range(problem.action_count)
+    )
+    return marginal_objective - math.log(max(slacks))
+
+
 def _normalize_on_support(
     marginal: Sequence[float],
     support: set[int],
