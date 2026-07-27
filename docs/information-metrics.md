@@ -65,7 +65,7 @@ The additive buckets are:
 `relevant_nats` is the sum of the first two fields and is not another bucket.
 ALEA has no persistent latent contribution. PUBLIC changes reward/frontier
 semantics but adds no environment information. These future conditions can
-construct the records above without the ledger importing an unfinished
+construct the records above without the ledger depending on any particular
 environment implementation.
 
 `InformationBreakdown` is a realized-history Bayesian surprise. It is not
@@ -79,6 +79,11 @@ efficiency calculations.
 envelope. The lower bound holds the previous certified value until the next
 grid point; it does not incorrectly use a convex chord as a lower bound. The
 upper chord is accepted only with an explicit witness-mixture certificate.
+Every lower endpoint requires a converged, problem-bound solver certificate
+that retains the requested and effective thresholds, lower bound, dual
+multiplier/objective or endpoint action supports, gap, iterations, source
+solution hash, and certificate hash. A point cannot be built from an arbitrary
+lower number or a nonconverged solve.
 Every upper endpoint carries a feasible witness record whose attained reward
 meets the threshold, whose information equals the reported upper bound, and
 whose payload hash binds the independently stored evidence. The record
@@ -129,6 +134,7 @@ bound with self-reported reward or information values, or reuse a channel
 certificate across semantically different reward problems. A solver-derived
 point uses the numerically attainable `effective_target_reward` as its curve
 coordinate while retaining the ideal semantic endpoint as `requested_reward`.
+The lower and upper certificates must bind to the same problem hash.
 Only the final point may use this alias, the gap must be within the solver's
 floating-roundoff tolerance, and lookup treats both values as the same finite
 endpoint.
