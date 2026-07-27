@@ -29,6 +29,12 @@ The repository is implementing the first exact-calibration gates. It covers:
 - unrestricted, support-capped, and mixed redundancy controls;
 - stationary ALEA and persistent queryable TRIVIA controls;
 - exact PUBLIC-U and bounded PUBLIC-C reward transformations;
+- an auditable finite-closure information ledger with correlated RED/MIX
+  no-double-count guarantees;
+- typed bit-equivalent, efficiency, regret, reward, support, and novelty
+  metrics;
+- deterministic immutable artifacts with separate semantic, scientific, and
+  runtime payload boundaries;
 - and regression tests against analytic frontiers and control semantics.
 
 ## Development
@@ -52,7 +58,8 @@ The full plan continues through learned frontier bounds, distractor controls,
 adaptive curricula, dynamic-state extensions, and a procedural neural
 benchmark. See [docs/research-plan.md](docs/research-plan.md) for definitions,
 gates, and falsification criteria. The finite numerical contract is in
-[docs/finite-solver.md](docs/finite-solver.md).
+[docs/finite-solver.md](docs/finite-solver.md), and the information/artifact
+contract is in [docs/information-metrics.md](docs/information-metrics.md).
 
 ## License
 
