@@ -25,6 +25,7 @@ from infinite_rulebook.agents.protocols import (
 from infinite_rulebook.core.behavior import DeploymentAction
 from infinite_rulebook.core.reward import RewardSpec
 from infinite_rulebook.core.rng import CounterRNG, Seed
+from infinite_rulebook.environments.controls import QueryNamespace
 from infinite_rulebook.posteriors.categorical import CategoricalPosterior
 
 _FACTOR_CAPABILITIES = CapabilityManifest(
@@ -98,7 +99,7 @@ class FixedTargetPolicy:
     """Information-directed allocation within a fixed useful prefix."""
 
     target_size: int
-    namespace: str = "useful"
+    namespace: str = QueryNamespace.REWARD.value
     capabilities: CapabilityManifest = field(
         default=_TARGET_CAPABILITIES,
         init=False,
@@ -135,7 +136,7 @@ class ScheduledTargetPolicy:
     """Information-directed allocation within an expanding useful prefix."""
 
     schedule: ExpandingTargetSchedule
-    namespace: str = "useful"
+    namespace: str = QueryNamespace.REWARD.value
     capabilities: CapabilityManifest = field(
         default=_TARGET_CAPABILITIES,
         init=False,
@@ -211,13 +212,17 @@ class RewardDirectedPolicy:
 
 @dataclass(frozen=True, slots=True)
 class NoveltyDirectedPolicy:
-    """Select targets with maximal one-step observation prediction error."""
+    """Maximize prediction error of the full symbolic-plus-cosmetic observation."""
 
+    cosmetic_alphabet: int = 1
     capabilities: CapabilityManifest = field(
         default=_FACTOR_CAPABILITIES,
         init=False,
         repr=False,
     )
+
+    def __post_init__(self) -> None:
+        _integer(self.cosmetic_alphabet, "cosmetic_alphabet", minimum=1)
 
     def score(
         self,
@@ -227,7 +232,8 @@ class NoveltyDirectedPolicy:
         round_index: int,
     ) -> float:
         del target, reward_spec, round_index
-        return prediction_error_novelty(posterior)
+        symbolic_error = prediction_error_novelty(posterior)
+        return 1.0 - (1.0 - symbolic_error) / self.cosmetic_alphabet
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,7 +505,11 @@ class FactorizedQueryAgent:
         return CategoricalPosterior(q=self.q, epsilon=self.epsilon)
 
 
-def useful_targets(count: int, *, namespace: str = "useful") -> tuple[QueryTarget, ...]:
+def useful_targets(
+    count: int,
+    *,
+    namespace: str = QueryNamespace.REWARD.value,
+) -> tuple[QueryTarget, ...]:
     """Return a canonical useful prefix for IND-style comparisons."""
 
     _integer(count, "count")
@@ -518,7 +528,7 @@ def useful_targets(count: int, *, namespace: str = "useful") -> tuple[QueryTarge
 def distractor_targets(
     count: int,
     *,
-    namespace: str = "trivia",
+    namespace: str = QueryNamespace.TRIVIA.value,
     persistent: bool = True,
 ) -> tuple[QueryTarget, ...]:
     """Return reward-irrelevant persistent or aleatoric query targets."""

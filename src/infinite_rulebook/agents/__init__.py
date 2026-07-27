@@ -12,6 +12,15 @@ from infinite_rulebook.agents.comparison import (
     distractor_targets,
     useful_targets,
 )
+from infinite_rulebook.agents.integration import (
+    P1RoundTrace,
+    exact_ind_bit_equivalent,
+    execute_p1_round,
+    factorized_information_ledger,
+    population_information_estimate,
+    symbolic_query_to_target,
+    target_to_symbolic_query,
+)
 from infinite_rulebook.agents.protocols import (
     AcquisitionContext,
     AgentCheckpoint,
@@ -41,6 +50,7 @@ __all__ = [
     "FreshCoordinateSanityAgent",
     "NoveltyDirectedPolicy",
     "ObservationBatch",
+    "P1RoundTrace",
     "QueryAction",
     "QueryTarget",
     "RelevantInformationDirectedPolicy",
@@ -53,7 +63,13 @@ __all__ = [
     "average_bit_equivalent_slope",
     "bit_equivalent_slope",
     "distractor_targets",
+    "exact_ind_bit_equivalent",
+    "execute_p1_round",
     "expected_coordinate_reward",
     "expected_reward_slope",
+    "factorized_information_ledger",
+    "population_information_estimate",
+    "symbolic_query_to_target",
+    "target_to_symbolic_query",
     "useful_targets",
 ]

@@ -230,7 +230,7 @@ def test_total_information_ties_use_seeded_candidate_choice() -> None:
             agent.select_train_action(agent.acquisition_context(order)).targets[0].key
         )
 
-    assert choice(0, candidates) == TargetKey("useful", 1)
+    assert choice(3, candidates) == TargetKey("reward", 1)
     assert choice(1, candidates) == TargetKey("trivia", 1)
     assert choice(1, tuple(reversed(candidates))) == TargetKey("trivia", 1)
 
@@ -279,6 +279,20 @@ def test_budget_is_strict_and_context_rejects_invalid_actions() -> None:
         agent.acquisition_context(candidates, query_budget=2)
     with pytest.raises(ValueError, match="selected acquisition action"):
         agent.observe(ObservationBatch(QueryAction(0, candidates[:2]), (1, 1)))
+
+
+def test_observation_batch_keeps_cosmetics_separate_and_aligned() -> None:
+    target = useful_targets(1)[0]
+    action = QueryAction(0, (target,))
+    batch = ObservationBatch(action, (2,), (17,))
+
+    assert batch.items == ((target, 2),)
+    assert batch.full_items == ((target, 2, 17),)
+    assert ObservationBatch(action, (2,)).cosmetic_observations == (None,)
+    with pytest.raises(ValueError, match="align"):
+        ObservationBatch(action, (2,), ())
+    with pytest.raises(ValueError, match="nonnegative"):
+        ObservationBatch(action, (2,), (-1,))
 
 
 def test_candidate_order_and_same_seed_leave_query_trace_unchanged() -> None:

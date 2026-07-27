@@ -181,6 +181,7 @@ class ObservationBatch:
 
     action: QueryAction
     observations: tuple[int, ...]
+    cosmetic_observations: tuple[int | None, ...] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.action, QueryAction):
@@ -193,11 +194,41 @@ class ObservationBatch:
                 raise TypeError("observations must be integers")
             if observation < 1:
                 raise ValueError("observations must be positive labels")
+        cosmetics = (
+            (None,) * len(observations)
+            if self.cosmetic_observations is None
+            else tuple(self.cosmetic_observations)
+        )
+        if len(cosmetics) != len(observations):
+            raise ValueError("cosmetic observations must align with observations")
+        for cosmetic in cosmetics:
+            if cosmetic is not None and (
+                isinstance(cosmetic, bool)
+                or not isinstance(cosmetic, int)
+                or cosmetic < 0
+            ):
+                raise ValueError(
+                    "cosmetic observations must be nonnegative integers or None"
+                )
         object.__setattr__(self, "observations", observations)
+        object.__setattr__(self, "cosmetic_observations", cosmetics)
 
     @property
     def items(self) -> tuple[tuple[QueryTarget, int], ...]:
         return tuple(zip(self.action.targets, self.observations, strict=True))
+
+    @property
+    def full_items(
+        self,
+    ) -> tuple[tuple[QueryTarget, int, int | None], ...]:
+        return tuple(
+            zip(
+                self.action.targets,
+                self.observations,
+                self.cosmetic_observations,
+                strict=True,
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
