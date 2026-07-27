@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from fractions import Fraction
 from numbers import Real
-from typing import Protocol, runtime_checkable
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 
 from infinite_rulebook.core.behavior import DeploymentAction
 from infinite_rulebook.core.reward import RewardSpec
@@ -43,8 +43,11 @@ def _finite_nonnegative(value: Real, name: str) -> float:
     return result
 
 
+ActionT = TypeVar("ActionT", contravariant=True)
+
+
 @runtime_checkable
-class RulebookRuntime(Protocol):
+class RulebookRuntime(Protocol[ActionT]):
     """Structural runtime contract accepted by composable controls."""
 
     @property
@@ -54,10 +57,10 @@ class RulebookRuntime(Protocol):
 
     def labels(self, indices: Iterable[int]) -> tuple[int, ...]: ...
 
-    def evaluate(self, action: DeploymentAction) -> float: ...
+    def evaluate(self, action: ActionT) -> float: ...
 
 
-def _runtime(value: object) -> RulebookRuntime:
+def _runtime(value: object) -> RulebookRuntime[object]:
     if not isinstance(value, RulebookRuntime):
         raise TypeError("base must implement RulebookRuntime")
     if not isinstance(value.reward_spec, RewardSpec):
@@ -110,7 +113,7 @@ class AleaObservation:
 
 
 def _base_observe_query(
-    base: RulebookRuntime,
+    base: RulebookRuntime[object],
     query: SymbolicQuery,
     channel: QarySymmetricChannel,
     key: SemanticObservationKey,
@@ -138,7 +141,7 @@ def _base_observe_query(
 
 
 @dataclass(frozen=True, slots=True)
-class AleaRulebook:
+class AleaRulebook(Generic[ActionT]):
     """A composable rulebook plus fresh cosmetic observations.
 
     Cosmetic values are keyed by the complete semantic observation coordinate.
@@ -149,7 +152,7 @@ class AleaRulebook:
     environment seed under the experiment's declared product seed law.
     """
 
-    base: RulebookRuntime
+    base: RulebookRuntime[ActionT]
     cosmetic_seed: Seed
     cosmetic_alphabet: int = 256
     _cosmetic_rng: CounterRNG = field(init=False, repr=False, compare=False)
@@ -176,7 +179,7 @@ class AleaRulebook:
     def labels(self, indices: Iterable[int]) -> tuple[int, ...]:
         return self.base.labels(indices)
 
-    def evaluate(self, action: DeploymentAction) -> float:
+    def evaluate(self, action: ActionT) -> float:
         return self.base.evaluate(action)
 
     def cosmetic_value(self, key: SemanticObservationKey) -> int:
@@ -267,10 +270,10 @@ class AleaRulebook:
 
 
 @dataclass(frozen=True, slots=True)
-class TriviaRulebook:
+class TriviaRulebook(Generic[ActionT]):
     """A composable rulebook plus persistent, queryable irrelevant labels."""
 
-    base: RulebookRuntime
+    base: RulebookRuntime[ActionT]
     trivia_seed: Seed
     _trivia_rng: CounterRNG = field(init=False, repr=False, compare=False)
 
@@ -295,7 +298,7 @@ class TriviaRulebook:
     def labels(self, indices: Iterable[int]) -> tuple[int, ...]:
         return self.base.labels(indices)
 
-    def evaluate(self, action: DeploymentAction) -> float:
+    def evaluate(self, action: ActionT) -> float:
         return self.base.evaluate(action)
 
     def trivia_label(self, index: int) -> int:
@@ -417,7 +420,7 @@ class PublicBonusSchedule:
 class CappedPublicRulebook:
     """A composable PUBLIC-C wrapper with a fixed public contribution."""
 
-    base: RulebookRuntime
+    base: RulebookRuntime[DeploymentAction]
     public_schedule: PublicBonusSchedule = field(default_factory=PublicBonusSchedule)
 
     def __post_init__(self) -> None:
@@ -460,7 +463,7 @@ class CappedPublicRulebook:
 class UnboundedPublicRulebook:
     """A composable PUBLIC-U wrapper with reward ``unit_reward * k``."""
 
-    base: RulebookRuntime
+    base: RulebookRuntime[DeploymentAction]
     public_unit_reward: float = 1.0
 
     def __post_init__(self) -> None:
