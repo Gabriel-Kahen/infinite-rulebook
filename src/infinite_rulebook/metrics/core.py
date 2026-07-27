@@ -114,6 +114,7 @@ class FrontierPoint:
     reward: float
     information: MetricInterval
     upper_witness: FrontierUpperWitness
+    requested_reward: float | None = None
 
     @classmethod
     def from_frontier_solution(
@@ -134,17 +135,25 @@ class FrontierPoint:
         if solution.problem_semantic_hash != semantic_hash(problem):
             raise ValueError("frontier solution is bound to a different problem")
         return cls(
-            reward=solution.target_reward,
+            reward=solution.effective_target_reward,
             information=MetricInterval(
                 solution.lower_bound,
                 solution.upper_bound,
                 "nats",
             ),
             upper_witness=FrontierUpperWitness(problem, solution.witness),
+            requested_reward=solution.target_reward,
         )
 
     def __post_init__(self) -> None:
         reward = _real("reward", self.reward)
+        requested = (
+            reward
+            if self.requested_reward is None
+            else _real("requested_reward", self.requested_reward)
+        )
+        if requested < reward:
+            raise ValueError("requested reward cannot be below effective reward")
         if not isinstance(self.information, MetricInterval):
             raise TypeError("information must be a MetricInterval")
         if self.information.units != "nats":
@@ -163,6 +172,7 @@ class FrontierPoint:
         ):
             raise ValueError("upper bound must equal its feasible witness information")
         object.__setattr__(self, "reward", reward)
+        object.__setattr__(self, "requested_reward", requested)
 
 
 class UpperEnvelopeCertificate(StrEnum):

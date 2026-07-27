@@ -126,7 +126,9 @@ been re-evaluated against the exact `FiniteDecisionProblem`. Its certificate is
 domain-bound to that problem's semantic hash, and a `FrontierCurve` rejects
 endpoints from any other problem. Callers therefore cannot certify an upper
 bound with self-reported reward or information values, or reuse a channel
-certificate across semantically different reward problems.
+certificate across semantically different reward problems. A solver-derived
+point uses the numerically attainable `effective_target_reward` as its curve
+coordinate while retaining the ideal semantic endpoint as `requested_reward`.
 
 `ArtifactEnvelope` has three explicit payload boundaries:
 

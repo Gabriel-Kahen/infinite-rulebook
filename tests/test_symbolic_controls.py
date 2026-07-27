@@ -46,6 +46,7 @@ from infinite_rulebook.frontier.redundancy import enumerate_redundant_rulebook
 from infinite_rulebook.frontier.rulebook_problem import (
     enumerate_independent_rulebook,
 )
+from infinite_rulebook.metrics import FrontierPoint
 
 BASE = OneCoordinateFrontier()
 
@@ -434,6 +435,9 @@ def test_generic_control_endpoints_tolerate_only_float_roundoff() -> None:
         assert solution.witness == problem.evaluate(solution.witness.channel)
         assert solution.witness.expected_reward == problem.maximum_reward
         assert math.isfinite(solution.upper_bound)
+        point = FrontierPoint.from_frontier_solution(problem, solution)
+        assert point.reward == solution.effective_target_reward
+        assert point.requested_reward == requested_target
 
     ordinary_infeasible = math.nextafter(base.maximum_reward, math.inf)
     ordinary_solution = solve_frontier(base, ordinary_infeasible)
