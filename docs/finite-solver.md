@@ -162,6 +162,16 @@ reward-maximizing actions and directly solves the resulting
 support-constrained minimum-information problem. This also minimizes
 information correctly when maximizing-action sets overlap.
 
+A `FiniteControlProblem` records the ideal semantic \(R_{\max}\) of an exact
+TRIVIA or PUBLIC-C transform, which can differ from its matrix-computed
+endpoint by a few ulps. Only when a request equals that declared semantic
+endpoint and is no more than 64 scaled ulps above the matrix endpoint is it
+solved at the matrix endpoint. `FrontierSolution.target_reward` retains the
+request and `effective_target_reward` records the certified matrix threshold.
+Ordinary finite problems and larger excesses remain strictly infeasible. The
+witness and both certificates always use the same stored prior and reward
+matrix.
+
 ## Numerical acceptance
 
 - Channel rows sum to one within \(10^{-12}\).

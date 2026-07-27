@@ -39,6 +39,7 @@ from infinite_rulebook.frontier.controls import (
     public_u_witness,
     trivia_invariant_bit_equivalent,
 )
+from infinite_rulebook.frontier.finite_problem import FiniteDecisionProblem
 from infinite_rulebook.frontier.inversion import solve_frontier
 from infinite_rulebook.frontier.one_coordinate import OneCoordinateFrontier
 from infinite_rulebook.frontier.redundancy import enumerate_redundant_rulebook
@@ -402,6 +403,50 @@ def test_generic_finite_controls_compose_over_redundant_base() -> None:
     assert public.action_count == trivia.action_count * 2
     assert solution.lower_bound <= expected + 2e-7
     assert solution.upper_bound >= expected - 2e-7
+
+
+def test_generic_control_endpoints_tolerate_only_float_roundoff() -> None:
+    base = FiniteDecisionProblem(
+        prior=(0.2, 0.8),
+        rewards=((0.0, 2.0, -1.0), (0.0, -1.0, 1.0)),
+    )
+    trivia = augment_with_independent_trivia(
+        base,
+        trivia_alphabet_size=3,
+        trivia_dimensions=2,
+    )
+    schedule = PublicBonusSchedule((0.0, 0.4, 0.1))
+    public = augment_with_public_c(base, schedule)
+    targets = (
+        (trivia, base.maximum_reward),
+        (
+            public,
+            math.fsum((base.maximum_reward, schedule.maximum_reward)),
+        ),
+    )
+
+    for problem, requested_target in targets:
+        assert requested_target >= problem.maximum_reward
+        solution = solve_frontier(problem, requested_target)
+        assert solution.target_reward == requested_target
+        assert solution.effective_target_reward == problem.maximum_reward
+        assert solution.witness is not None
+        assert solution.witness == problem.evaluate(solution.witness.channel)
+        assert solution.witness.expected_reward == problem.maximum_reward
+        assert math.isfinite(solution.upper_bound)
+
+    ordinary_infeasible = math.nextafter(base.maximum_reward, math.inf)
+    ordinary_solution = solve_frontier(base, ordinary_infeasible)
+    assert ordinary_solution.effective_target_reward == ordinary_infeasible
+    assert ordinary_solution.witness is None
+    assert math.isinf(ordinary_solution.upper_bound)
+
+    # The solver's documented numerical endpoint tolerance is deliberately
+    # larger than a few ulps, so move beyond it for this assertion.
+    far_infeasible = public.maximum_reward + 256 * math.ulp(abs(public.maximum_reward))
+    solution = solve_frontier(public, far_infeasible)
+    assert solution.witness is None
+    assert math.isinf(solution.upper_bound)
 
 
 @pytest.mark.parametrize(

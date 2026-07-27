@@ -22,6 +22,7 @@ from infinite_rulebook.environments import (
 )
 from infinite_rulebook.frontier.controls import (
     EnumeratedPublicProblem,
+    FiniteControlProblem,
     PublicCFrontier,
     PublicUWitness,
     alea_frontier_problem,
@@ -48,6 +49,7 @@ __all__ = [
     "ControlObservation",
     "DeploymentAction",
     "EnumeratedPublicProblem",
+    "FiniteControlProblem",
     "FiniteDecisionProblem",
     "IndependentRulebook",
     "MixedRulebook",
