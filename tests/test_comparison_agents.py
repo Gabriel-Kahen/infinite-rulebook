@@ -164,6 +164,25 @@ def test_reward_directed_does_not_deadlock_before_threshold() -> None:
     assert action.targets == (useful,)
 
 
+def test_reward_directed_repeats_evidence_in_a_broad_weak_channel() -> None:
+    candidates = useful_targets(100)
+    agent = FactorizedQueryAgent(
+        RewardDirectedPolicy(),
+        epsilon=0.65,
+        query_budget=1,
+        seed="weak-channel",
+    )
+    queried = []
+
+    for _ in range(8):
+        action = agent.select_train_action(agent.acquisition_context(candidates))
+        queried.append(action.targets[0].key)
+        agent.observe(ObservationBatch(action, (1,)))
+
+    assert queried[0] == queried[1] == queried[2]
+    assert agent.deployment().support
+
+
 def test_novelty_directed_prefers_fresh_alea_to_learned_useful() -> None:
     useful = useful_targets(1)[0]
     alea = distractor_targets(1, namespace="alea", persistent=False)[0]

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from infinite_rulebook.agents.objectives import (
+    bayes_deployment_value,
     decision_value_gain,
     expected_entropy_reduction,
     prediction_error_novelty,
@@ -187,18 +188,24 @@ class RewardDirectedPolicy:
         del round_index
         if target.rule_index is None or target.relevance_weight <= 0.0:
             return None
-        gain = target.relevance_weight * decision_value_gain(
-            posterior,
-            reward_spec,
-        )
+        gain = decision_value_gain(posterior, reward_spec)
         if gain > 0.0:
-            return 1.0 + gain / reward_spec.u
+            return 1.0 + target.relevance_weight * gain / reward_spec.u
+        information_gain = expected_entropy_reduction(posterior)
+        if (
+            information_gain <= 0.0
+            or bayes_deployment_value(
+                posterior,
+                reward_spec,
+            )
+            > 0.0
+        ):
+            return 0.0
         # An informative observation may need several repetitions before the
-        # strict deployment threshold is crossed. Retain a lexicographically
-        # smaller
-        # information-gain fallback rather than deadlocking at zero value.
-        return target.relevance_weight * (
-            expected_entropy_reduction(posterior) / math.log(posterior.q)
+        # strict deployment threshold is crossed. Prefer a started coordinate
+        # so a broad target does not spread all queries across fresh rules.
+        return (
+            target.relevance_weight * math.ulp(1.0) * (1 + posterior.total_observations)
         )
 
 
