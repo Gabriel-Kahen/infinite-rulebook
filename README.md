@@ -27,6 +27,8 @@ The repository is implementing the first exact-calibration gates. It covers:
   Blahut--Arimoto frontier bounds and information-budget inversion;
 - exhaustive finite Rulebook projections;
 - unrestricted, support-capped, and mixed redundancy controls;
+- stationary ALEA and persistent queryable TRIVIA controls;
+- exact PUBLIC-U and bounded PUBLIC-C reward transformations;
 - and regression tests against analytic frontiers and control semantics.
 
 ## Development
@@ -37,7 +39,12 @@ The project uses Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
 uv sync --all-groups
 uv run pytest
 uv run ruff check .
+uv run ruff format --check .
+uv build
 ```
+
+The symbolic control API and its exact identities are documented in
+[docs/symbolic-controls.md](docs/symbolic-controls.md).
 
 ## Research scope
 
