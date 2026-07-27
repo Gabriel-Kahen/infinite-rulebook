@@ -8,6 +8,7 @@ from infinite_rulebook.frontier.blahut_arimoto import (
 )
 from infinite_rulebook.frontier.controls import (
     EnumeratedPublicProblem,
+    FiniteControlProblem,
     PublicCFrontier,
     PublicUWitness,
     alea_frontier_problem,
@@ -54,6 +55,7 @@ __all__ = [
     "ChannelWitness",
     "EnumeratedPublicProblem",
     "EnumeratedRulebookProblem",
+    "FiniteControlProblem",
     "FiniteDecisionProblem",
     "FrontierInversion",
     "FrontierSolution",

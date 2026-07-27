@@ -40,6 +40,7 @@ class FrontierSolution:
     """Bounds and a feasible channel for a reward threshold."""
 
     target_reward: float
+    effective_target_reward: float
     witness: ChannelWitness | None
     lower_bound: float
     upper_bound: float
@@ -115,7 +116,8 @@ def solve_frontier(
 
     if not isinstance(problem, FiniteDecisionProblem):
         raise TypeError("problem must be a FiniteDecisionProblem")
-    target = _extended_real("target_reward", target_reward)
+    requested_target = _extended_real("target_reward", target_reward)
+    target = requested_target
     search_accuracy = _finite_real("tolerance", tolerance)
     if search_accuracy <= 0.0:
         raise ValueError("tolerance must be strictly positive")
@@ -139,14 +141,44 @@ def solve_frontier(
         if value < 1:
             raise ValueError(f"{name} must be positive")
 
+    maximum_reward = problem.maximum_reward
+    semantic_maximum = getattr(problem, "semantic_maximum_reward", None)
+    if (
+        isinstance(semantic_maximum, float)
+        and target == semantic_maximum
+        and target > maximum_reward
+    ):
+        scale = max(abs(target), abs(maximum_reward))
+        endpoint_roundoff = 64.0 * math.ulp(scale)
+        if target - maximum_reward <= endpoint_roundoff:
+            target = maximum_reward
+
     constant = problem.constant_channel()
     if target <= constant.expected_reward:
-        return FrontierSolution(target, constant, 0.0, 0.0, 0.0, 0.0, 0, True)
-    if target > problem.maximum_reward:
         return FrontierSolution(
-            target, None, math.inf, math.inf, 0.0, math.inf, 0, True
+            requested_target,
+            target,
+            constant,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0,
+            True,
         )
-    if target == problem.maximum_reward:
+    if target > maximum_reward:
+        return FrontierSolution(
+            requested_target,
+            target,
+            None,
+            math.inf,
+            math.inf,
+            0.0,
+            math.inf,
+            0,
+            True,
+        )
+    if target == maximum_reward:
         maximizing_supports = tuple(
             tuple(action for action, reward in enumerate(row) if reward == max(row))
             for row in problem.rewards
@@ -165,7 +197,8 @@ def solve_frontier(
             lower = upper
         gap = upper - lower if upper >= lower else math.inf
         return FrontierSolution(
-            target_reward=target,
+            target_reward=requested_target,
+            effective_target_reward=target,
             witness=endpoint.witness,
             lower_bound=lower,
             upper_bound=upper,
@@ -273,7 +306,8 @@ def solve_frontier(
         and _bounds_converged(best_lower, upper_bound, accuracy)
     )
     return FrontierSolution(
-        target_reward=target,
+        target_reward=requested_target,
+        effective_target_reward=target,
         witness=witness,
         lower_bound=best_lower,
         upper_bound=upper_bound,
