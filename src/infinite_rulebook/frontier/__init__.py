@@ -3,8 +3,10 @@
 from infinite_rulebook.frontier.blahut_arimoto import (
     LagrangianSolution,
     SupportedInformationSolution,
+    lagrangian_certificate_lower_bound,
     solve_lagrangian,
     solve_supported_minimum_information,
+    supported_certificate_lower_bound,
 )
 from infinite_rulebook.frontier.controls import (
     EnumeratedPublicProblem,
@@ -78,6 +80,7 @@ __all__ = [
     "enumerate_trivia_rulebook",
     "infinite_bit_equivalent",
     "invert_frontier",
+    "lagrangian_certificate_lower_bound",
     "one_coordinate_problem",
     "public_c_bit_equivalent",
     "public_u_bit_equivalent",
@@ -86,6 +89,7 @@ __all__ = [
     "solve_frontier",
     "solve_lagrangian",
     "solve_supported_minimum_information",
+    "supported_certificate_lower_bound",
     "trivia_invariant_bit_equivalent",
     "unrestricted_redundant_bit_equivalent",
 ]
