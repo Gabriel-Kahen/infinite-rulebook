@@ -35,6 +35,8 @@ The repository is implementing the first exact-calibration gates. It covers:
   metrics;
 - deterministic immutable artifacts with separate semantic, scientific, and
   runtime payload boundaries;
+- bounded factorized comparison agents with fixed, expanding, reward, novelty,
+  total-information, and useful-information acquisition objectives;
 - and regression tests against analytic frontiers and control semantics.
 
 ## Development
