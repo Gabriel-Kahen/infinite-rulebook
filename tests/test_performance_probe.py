@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from infinite_rulebook.orchestration.config import load_experiment_config
+from scripts.benchmark_artifact_ingestion import project_report_ingestion
 from scripts.generate_ingestion_probe import build_ingestion_probe
 
 
@@ -39,3 +40,22 @@ def test_ingestion_probe_rejects_a_nonregistered_source_design() -> None:
 
     with pytest.raises(ValueError):
         build_ingestion_probe(replace(calibration, horizon=11))
+
+
+def test_ingestion_projection_does_not_scale_fixed_frontier_work() -> None:
+    fixed, marginal, residual, projected = project_report_ingestion(
+        frontier_validation=10.0,
+        frontier_copy=2.0,
+        frontier_raw=1.0,
+        run_validation=0.1,
+        run_raw=0.01,
+        run_load=0.2,
+        observed_probe=100.0,
+        probe_runs=10,
+        projected_runs=100,
+    )
+
+    assert fixed == 78.0
+    assert marginal == pytest.approx(0.62)
+    assert residual == pytest.approx(1.58)
+    assert projected == pytest.approx(298.0)

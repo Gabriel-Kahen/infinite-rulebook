@@ -319,7 +319,7 @@ horizon-12, 13-checkpoint producer shape, then measure it on the intended
 filesystem:
 
 ```bash
-uv run python scripts/run_ingestion_probe.py \
+uv run python -m scripts.run_ingestion_probe \
   configs/symbolic-calibration-v1.json \
   configs/symbolic-artifact-ingestion-probe-v1.json \
   artifacts/symbolic-artifact-ingestion-probe-v1 \
@@ -337,11 +337,27 @@ replay, but its master/algorithm seed namespaces are excluded from both
 registered study phases. The dedicated lower-level runner accepts only the
 exact derived probe and deliberately does not create study receipts or
 evidence. Its outcomes are discarded and cannot tune the protocol. The
-projection is a planning estimate, not a promise that millions of files scale
+projection separates the four shared frontier trees, whose cost is fixed as
+replicas grow, from warm-frontier marginal run validation, raw hashing, and
+loading. It models the report's exact two-inventory/one-load pass structure and
+conservatively charges any unexplained probe residual per projected run.
+
+On the reference local NVMe host, the public-registration-commit probe produced
+36 runs, 468 observations, 1,044 run files, and four unique frontier trees.
+One inventory took 78.427 seconds and a selected-root load took 30.534 seconds.
+One complete frontier validation set took 24.776 seconds; a cached frontier
+copy took 1.350 seconds; the marginal warm-frontier costs were 0.102457 seconds
+per run for validation, 0.000744 for raw hashing, and 0.115777 for loading. The
+corrected maximum-candidate projection is 8.145 hours, or 16.291 hours with the
+registered two-times operational factor. The calibration projection is 3.085
+hours, or 6.171 hours with that factor. The earlier naive calculation that
+scaled fixed frontier work with every replica is invalid and must not be used.
+
+This remains a planning estimate, not a promise that millions of files scale
 perfectly linearly. Reserve a 60-hour reporting window for the maximum
-candidate, keep the raw roots on local SSD/NVMe storage, and rerun the retained
-dataset benchmark on the reporting host. If the measured two-times operational
-budget exceeds that window, move the unchanged sealed workflow to faster or
+candidate, keep the raw roots on local SSD/NVMe storage, and rerun both
+benchmarks on the reporting host. If the measured two-times operational budget
+exceeds that window, move the unchanged sealed workflow to faster or
 longer-lived infrastructure; do not reduce replicas, checkpoints, metrics, raw
 verification, or the scientific scope.
 
