@@ -72,6 +72,18 @@ def test_builds_valid_typed_and_persisted_frontier(tmp_path, kind) -> None:
     )
 
 
+def test_frontier_reward_grid_density_is_frozen_in_solver_config() -> None:
+    cell = replace(
+        _cell(EnvironmentKind.IND),
+        solver=replace(_cell(EnvironmentKind.IND).solver, reward_grid_points=7),
+    )
+
+    result = build_pilot_frontier(cell)
+
+    assert len(result.curve.points) == 7
+    assert len(result.bundle["curve"]["points"]) == 7
+
+
 def test_alea_and_trivia_reuse_canonical_ind_problem_identity() -> None:
     ind = build_pilot_frontier(_cell(EnvironmentKind.IND))
     alea = build_pilot_frontier(_cell(EnvironmentKind.ALEA))

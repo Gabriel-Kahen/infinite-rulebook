@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 
 from infinite_rulebook.orchestration.config import ExperimentConfig
@@ -29,11 +29,34 @@ class SweepRunner:
         if max_workers == 1:
             results = [self.executor.execute(experiment, cell) for cell in cells]
         else:
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                results = list(
-                    pool.map(
-                        lambda cell: self.executor.execute(experiment, cell),
-                        cells,
-                    )
-                )
+            results = []
+            remaining = iter(cells)
+            pool = ThreadPoolExecutor(max_workers=max_workers)
+            pending: set[Future[RunResult]] = set()
+            try:
+                for _ in range(max_workers):
+                    try:
+                        cell = next(remaining)
+                    except StopIteration:
+                        break
+                    pending.add(pool.submit(self.executor.execute, experiment, cell))
+                while pending:
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                    completed = [future.result() for future in done]
+                    results.extend(completed)
+                    for _ in completed:
+                        try:
+                            cell = next(remaining)
+                        except StopIteration:
+                            break
+                        pending.add(
+                            pool.submit(self.executor.execute, experiment, cell)
+                        )
+            except BaseException:
+                for future in pending:
+                    future.cancel()
+                pool.shutdown(wait=True, cancel_futures=True)
+                raise
+            else:
+                pool.shutdown(wait=True)
         return tuple(sorted(results, key=lambda result: result.run_hash))

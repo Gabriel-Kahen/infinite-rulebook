@@ -8,12 +8,15 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from infinite_rulebook.agents import (
+    ExpandingTargetSchedule,
     FactorizedQueryAgent,
     FixedTargetPolicy,
     NoveltyDirectedPolicy,
     P1RoundTrace,
     QueryTarget,
+    RelevantInformationDirectedPolicy,
     RewardDirectedPolicy,
+    ScheduledTargetPolicy,
     TotalInformationDirectedPolicy,
     distractor_targets,
     execute_p1_round,
@@ -41,6 +44,7 @@ from infinite_rulebook.feedback.qary import (
 )
 from infinite_rulebook.metrics import ComputeMetrics, NoveltyMetrics, SupportMetrics
 from infinite_rulebook.orchestration.config import (
+    SYMBOLIC_ADAPTER_CONTRACT_VERSION,
     AgentKind,
     EnvironmentKind,
     RunCell,
@@ -152,6 +156,18 @@ def _policy(cell: RunCell) -> Any:
     kind = cell.agent.kind
     if kind is AgentKind.FIXED:
         return FixedTargetPolicy(cell.agent.target_size)
+    if kind is AgentKind.SCHEDULED:
+        assert cell.agent.growth_step is not None
+        assert cell.agent.growth_interval is not None
+        assert cell.agent.maximum_size is not None
+        return ScheduledTargetPolicy(
+            ExpandingTargetSchedule(
+                initial_size=cell.agent.target_size,
+                growth_step=cell.agent.growth_step,
+                growth_interval=cell.agent.growth_interval,
+                maximum_size=cell.agent.maximum_size,
+            )
+        )
     if kind is AgentKind.REWARD:
         return RewardDirectedPolicy()
     if kind is AgentKind.NOVELTY:
@@ -161,7 +177,11 @@ def _policy(cell: RunCell) -> Any:
             else 1
         )
         return NoveltyDirectedPolicy(cosmetic_alphabet=cosmetic_alphabet)
-    return TotalInformationDirectedPolicy()
+    if kind is AgentKind.TOTAL_INFORMATION:
+        return TotalInformationDirectedPolicy()
+    if kind is AgentKind.RELEVANT_INFORMATION:
+        return RelevantInformationDirectedPolicy()
+    raise ValueError(f"unsupported symbolic agent kind: {kind}")
 
 
 def _target_payload(target: QueryTarget) -> dict[str, Any]:
@@ -336,6 +356,27 @@ def _hidden_deployment(
     )
 
 
+def _reward_components(
+    environment: Any,
+    deployment: DeploymentAction | PublicDeploymentAction,
+) -> tuple[float, float, float]:
+    total = environment.evaluate(deployment)
+    if isinstance(deployment, PublicDeploymentAction):
+        hidden = environment.base.evaluate(deployment.deployment)
+        return total, hidden, total - hidden
+    return total, total, 0.0
+
+
+def recompute_reward_components(
+    cell: RunCell,
+    seeds: RunSeeds,
+    deployment: DeploymentAction | PublicDeploymentAction,
+) -> tuple[float, float, float]:
+    """Recompute registered total, hidden, and public checkpoint rewards."""
+
+    return _reward_components(_environment(cell, seeds), deployment)
+
+
 def _support_metrics(
     deployment: DeploymentAction | PublicDeploymentAction,
     state: PilotState,
@@ -398,6 +439,8 @@ def _novelty_metrics(
 class ExactSymbolicAdapter:
     """Execute all registered smoke-pilot conditions against merged APIs."""
 
+    contract_version = SYMBOLIC_ADAPTER_CONTRACT_VERSION
+
     def initial_state(self, cell: RunCell, seeds: RunSeeds) -> PilotState:
         environment = _environment(cell, seeds)
         return PilotState(
@@ -454,7 +497,10 @@ class ExactSymbolicAdapter:
         semantic_hashes: dict[str, str],
     ) -> dict[str, Any]:
         deployment = _project_deployment(state.agent.deployment(), cell)
-        reward = state.environment.evaluate(deployment)
+        reward, hidden_reward, public_reward = _reward_components(
+            state.environment,
+            deployment,
+        )
         breakdown = information_breakdown_from_observations(
             state.observations,
             environment=cell.environment.kind,
@@ -480,7 +526,7 @@ class ExactSymbolicAdapter:
             ),
             environment_steps=round_index,
             posterior_updates=sum(state.agent.checkpoint().query_counts.values()),
-            frontier_solver_calls=3,
+            frontier_solver_calls=cell.solver.reward_grid_points,
             deployment_evaluations=1,
         )
         scientific_records = build_checkpoint_record(
@@ -496,6 +542,8 @@ class ExactSymbolicAdapter:
         )
         return {
             "expected_reward": reward,
+            "hidden_expected_reward": hidden_reward,
+            "public_reward": public_reward,
             "deployment": (
                 {
                     "entries": [list(entry) for entry in deployment.deployment],

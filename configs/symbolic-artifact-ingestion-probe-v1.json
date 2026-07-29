@@ -1,0 +1,141 @@
+{
+  "agents": [
+    {
+      "growth_interval": null,
+      "growth_step": null,
+      "kind": "fixed",
+      "maximum_size": null,
+      "target_size": 1
+    },
+    {
+      "growth_interval": 4,
+      "growth_step": 1,
+      "kind": "scheduled",
+      "maximum_size": 3,
+      "target_size": 1
+    },
+    {
+      "growth_interval": null,
+      "growth_step": null,
+      "kind": "reward",
+      "maximum_size": null,
+      "target_size": 3
+    },
+    {
+      "growth_interval": null,
+      "growth_step": null,
+      "kind": "relevant-information",
+      "maximum_size": null,
+      "target_size": 3
+    },
+    {
+      "growth_interval": null,
+      "growth_step": null,
+      "kind": "total-information",
+      "maximum_size": null,
+      "target_size": 3
+    },
+    {
+      "growth_interval": null,
+      "growth_step": null,
+      "kind": "novelty",
+      "maximum_size": null,
+      "target_size": 3
+    }
+  ],
+  "algorithm_master_seed": "irb-symbolic-artifact-ingestion-probe-algorithm-v1",
+  "algorithm_replicas": 1,
+  "checkpoints": {
+    "rounds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ]
+  },
+  "environment_replicas": 1,
+  "environments": [
+    {
+      "core_dimensions": 2,
+      "distractor_dimensions": 2,
+      "kind": "IND",
+      "max_redundant_support": 2,
+      "projection_size": 3,
+      "public_reward_cap": 2.0
+    },
+    {
+      "core_dimensions": 1,
+      "distractor_dimensions": 2,
+      "kind": "RED-C",
+      "max_redundant_support": 3,
+      "projection_size": 3,
+      "public_reward_cap": 2.0
+    },
+    {
+      "core_dimensions": 1,
+      "distractor_dimensions": 2,
+      "kind": "MIX",
+      "max_redundant_support": 1,
+      "projection_size": 3,
+      "public_reward_cap": 2.0
+    },
+    {
+      "core_dimensions": 2,
+      "distractor_dimensions": 32,
+      "kind": "ALEA",
+      "max_redundant_support": 2,
+      "projection_size": 3,
+      "public_reward_cap": 2.0
+    },
+    {
+      "core_dimensions": 2,
+      "distractor_dimensions": 6,
+      "kind": "TRIVIA",
+      "max_redundant_support": 2,
+      "projection_size": 3,
+      "public_reward_cap": 2.0
+    },
+    {
+      "core_dimensions": 2,
+      "distractor_dimensions": 2,
+      "kind": "PUBLIC-C",
+      "max_redundant_support": 2,
+      "projection_size": 3,
+      "public_reward_cap": 0.5
+    }
+  ],
+  "feedback": {
+    "epsilon": 0.1,
+    "protocol": "P1",
+    "query_budget": 1
+  },
+  "horizon": 12,
+  "master_seed": "irb-symbolic-artifact-ingestion-probe-v1",
+  "name": "symbolic-artifact-ingestion-probe-v1",
+  "phase": "calibration",
+  "reward": {
+    "c": 1.0,
+    "q": 4,
+    "u": 1.0,
+    "units": "nats"
+  },
+  "schema_version": 1,
+  "solver": {
+    "bound_tolerance": 1e-07,
+    "contract_version": "certified-finite-frontier.v1",
+    "lagrangian_max_iterations": 100000,
+    "lagrangian_tolerance": 1e-12,
+    "max_iterations": 96,
+    "reward_grid_points": 13,
+    "tolerance": 1e-09
+  }
+}

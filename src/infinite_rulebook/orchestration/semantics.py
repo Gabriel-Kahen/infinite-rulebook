@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Any
 
 from infinite_rulebook.orchestration.config import EnvironmentKind, RunCell
 from infinite_rulebook.orchestration.hashing import scientific_hash
@@ -12,6 +13,7 @@ def semantic_hashes(
     cell: RunCell,
     *,
     analysis_code_hash: str | None = None,
+    solver_identity_payload: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     environment_payload = asdict(cell.environment)
     reward_payload = asdict(cell.reward)
@@ -58,7 +60,11 @@ def semantic_hashes(
         "environment": frontier_environment,
         "reward_hash": reward_hash,
         "action_hash": action_hash,
-        "solver": asdict(cell.solver),
+        "solver": (
+            asdict(cell.solver)
+            if solver_identity_payload is None
+            else dict(solver_identity_payload)
+        ),
         "analysis_code_hash": analysis_code_hash or "unspecified",
     }
     return {
