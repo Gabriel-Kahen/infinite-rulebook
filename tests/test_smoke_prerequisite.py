@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -91,6 +92,18 @@ def test_smoke_prerequisite_is_portable_and_reauthenticates_relocated_roots(
 
     assert relocated.scientific_hash == evidence.scientific_hash
     assert relocated.engineering_anomalies == ("non-invalidating note",)
+
+
+def test_smoke_prerequisite_survives_its_exact_json_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = _evidence(tmp_path, monkeypatch)
+    serialized = json.loads(
+        json.dumps(evidence.to_dict(), allow_nan=False, sort_keys=True)
+    )
+
+    assert SmokePrerequisiteEvidence.from_dict(serialized) == evidence
 
 
 def test_smoke_prerequisite_rejects_a_fabricated_reproducibility_report(

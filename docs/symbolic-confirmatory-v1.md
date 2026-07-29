@@ -96,6 +96,13 @@ calibration-evidence hash binds its config, reproducibility, inventories,
 anomaly log, and evidence hash; the confirmatory seal in turn binds that
 calibration-evidence hash.
 
+The first post-registration attempt completed its 24 paired cells, but its
+serialized prerequisite failed an independent hash round-trip because enum
+values in the embedded smoke config were hashed before JSON normalization.
+That evidence was rejected before calibration. The serialization boundary was
+repaired and regression-tested; the generated fields below refer only to the
+fresh post-repair paired invocation.
+
 ### Smoke evidence
 
 - Artifact inventory and root scientific hash:

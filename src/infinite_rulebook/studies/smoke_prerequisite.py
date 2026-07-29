@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -190,7 +191,7 @@ class SmokePrerequisiteEvidence:
         parallel_inventory: RawArtifactInventory,
         anomalies: tuple[str, ...],
     ) -> dict[str, object]:
-        return {
+        payload = {
             "study_contract": STUDY_CONTRACT,
             "passed": True,
             "engineering_anomalies": list(anomalies),
@@ -199,6 +200,14 @@ class SmokePrerequisiteEvidence:
             "serial_inventory": serial_inventory.to_dict(),
             "parallel_inventory": parallel_inventory.to_dict(),
         }
+        return json.loads(
+            json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
 
     def to_dict(self) -> dict[str, object]:
         report = self.reproducibility.to_dict()
