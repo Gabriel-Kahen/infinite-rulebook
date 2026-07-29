@@ -106,15 +106,23 @@ fresh post-repair paired invocation.
 ### Smoke evidence
 
 - Artifact inventory and root scientific hash:
-  **[GENERATED EVIDENCE: fill after validated rerun]**
+  serial inventory
+  `f43f472561b4b33b580dfbde3a0bf3bb0eff58e5ac525ba1a9f81a588aa0b02c`;
+  parallel inventory
+  `eb1f9874f3d0ff1e36b119ae46d0d1c92a620984abd4a60d96ba31a6e0730dfa`;
+  paired reproducibility report
+  `778e2196dcdb0e73aaf7f92bdf216af74a3608068747a1eb5218ebddd18bf569`.
 - Serial/parallel scientific-hash agreement:
-  **[GENERATED EVIDENCE: fill after validated rerun]**
+  exact agreement for all 24 registered cells.
 - Validation result:
-  **[GENERATED EVIDENCE: fill after validated rerun]**
+  passed on public source commit
+  `2a680d5ce4e5b5dfd57a37f8a5ec8df75dcbd41e`; both 28-tree
+  inventories independently reverified, and the saved prerequisite passed a
+  strict JSON reload with live-root authentication.
 - Observed engineering anomalies:
-  **[GENERATED EVIDENCE: fill after validated rerun; “none” is allowed]**
+  none.
 - Smoke-prerequisite evidence hash:
-  **[GENERATED EVIDENCE: fill after validated rerun]**
+  `0ab32994d8c75c4ab36eb8de171f67ec802ae54c09bbb250b773918d5d892249`.
 
 Failure at this stage blocks calibration until the implementation is repaired.
 It does not permit weakening a later scientific criterion.

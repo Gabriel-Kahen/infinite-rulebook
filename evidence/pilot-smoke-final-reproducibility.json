@@ -1,0 +1,148 @@
+{
+  "operational": {
+    "parallel": {
+      "artifact_root": "artifacts/pilot-smoke-final-parallel",
+      "max_workers": 4
+    },
+    "serial": {
+      "artifact_root": "artifacts/pilot-smoke-final-serial",
+      "max_workers": 1
+    }
+  },
+  "report_format": "infinite-rulebook-reproducibility",
+  "schema_version": 2,
+  "scientific": {
+    "comparison": "exact-serial-vs-parallel",
+    "config_hash": "fae70beb1e57206d77cf192e437eb9d8baef2fb0f877a29f04181b0412edbec2",
+    "exact_match": true,
+    "execution_receipts": {
+      "invocation_id": "04bebac4779fb6dfa660f53ffbb7f7240ba40d5427b6c2773ddf43fecb4e4f18",
+      "parallel": "12f4e683f49ddf02cfdb9e322f34e90a51a5a750b90f7932a4436db86188d99f",
+      "serial": "518330a0cf157294141289fcf42b78037435c073bbbf434bb00ebbb9d85a9e3e"
+    },
+    "run_count": 24,
+    "runs": [
+      {
+        "cell_hash": "02532888e735e521a8904efe65f8f8b9de32ff68b382b2a141ddf89eccc6983b",
+        "run_hash": "2c8c0485c6f004df548d41ca18f99999138bc3e9bd3cc70dfaafdad205add29e",
+        "scientific_content_hash": "7bdaaa0c0121b4dfd3661afca33c772e5fb16314e427a0477114a249bb53c20b"
+      },
+      {
+        "cell_hash": "0370e4a2ee2014082a8fe381cd26dc3a952b3b7c4cb88db048c0a4b99b8ba2eb",
+        "run_hash": "0476ed211ff5601ecfe89d2cc263e084f0e670debccfd525945e139304356ede",
+        "scientific_content_hash": "f1ce20d8d636e9293e5183ec3c1f5835cb29b5d22b41926280f7796665a2cbf4"
+      },
+      {
+        "cell_hash": "13c72252ac135efb66ffa667e9e5b3379035bb39b09c4337431d4ca89fae5fe7",
+        "run_hash": "c924a6f7f009e759478cb622acae9d2e3b953392d1067cb5a6e9caf543637d94",
+        "scientific_content_hash": "8598671f0b7402a3bf8748f814d28a76b4066f06113f4c258bd7703d0755cfee"
+      },
+      {
+        "cell_hash": "23feb2c64b36e28432d0c5a2e5fbafaef4bebb1dfb72bc6207539ca749106f84",
+        "run_hash": "714c022bce756e07e20857ea2062f98ecb0133fa15e9c41dafa57336174cb0cd",
+        "scientific_content_hash": "72fdcddd19b44b1fd1ddbecacaf62d05adfaeea927333a4d5c4f96f357d4055e"
+      },
+      {
+        "cell_hash": "2564488992db3c936095a85d90d68ccf032d7af09cd69f4407475b609e6b607b",
+        "run_hash": "9cf0d86d8ef444ffbcccb94c44111ef649c3908f6cf722c08434c3e656205dde",
+        "scientific_content_hash": "b67fa972a3574c2e55fbcc81a51bd0d780ad83e62b35b986e542eca2a61a9dca"
+      },
+      {
+        "cell_hash": "2b0f018997c85aba2600206bfa325585d1ca1a74280e5fe2504e88463d0c639a",
+        "run_hash": "39803baba204f71d76b8802adab872fc0c1ca3c3714e0dd1c402abe5c14570e5",
+        "scientific_content_hash": "6f658d4abaeab834f1d8f246da6f31301ab7d2b4321b7c89de52e52adb9f99b5"
+      },
+      {
+        "cell_hash": "38241cf6cfd9db780006b79662614b8233d54b6efe20c5ddb01ec5b5c2fa6d84",
+        "run_hash": "bcf19b2864f0d6534cf29b66e8edac0edbe45e4a6e7de173a2b3a7c27cd81b47",
+        "scientific_content_hash": "c9d880a08817c8b7ce6686f3e8d726bd59ab014fc01df4671255927830cc2f5a"
+      },
+      {
+        "cell_hash": "482dd8573c180eb48ec4a85111e8413c28a4fd32ae4b9aa937e8d55c8b5637d1",
+        "run_hash": "75647f284cf629eb4b641b4e37515ab4796c5157e806d507fd41c8476eb7ee85",
+        "scientific_content_hash": "bd438e82b21a4c3fce8ab4bc327a78f5e31a058a84a02c30107aa3eeff309b5c"
+      },
+      {
+        "cell_hash": "4c5a33a05c6960f1e288e8784529a43929bbaac2e24f75b7b8f3f7be3e58d7f7",
+        "run_hash": "231ba798394a07db86a1c352bc2cf87c9076c146b779454d1cf2f0fff156621a",
+        "scientific_content_hash": "a84f1d6a43537853650ab56cda8b82710eb696a6ee9df58cf5fbe004ff1855bc"
+      },
+      {
+        "cell_hash": "4da9fbee7a938e1a1682cc715b65fba5b2ee8f138e48e83f6ebcda97aef65fa4",
+        "run_hash": "d441db5ef94a4630b62601ecd3b43319104ea52a9dbc222a937f351e08996a07",
+        "scientific_content_hash": "0b17deb33f26d98b0ee5688adea9c0699991a3c9fa5abf53b74ba421996dfa18"
+      },
+      {
+        "cell_hash": "54d7c0324750d7ed42a8e54141d3f0ddd04e1693b95bf431218fc1988bedbbc6",
+        "run_hash": "73ff7fb6d915b289636b80f2f36f257fe195fc5dcfd1fc3fcbecaa491f7cc9dd",
+        "scientific_content_hash": "fbd3bd4c163fe88767a936ba4e2bece59357486a0dfe4fc8785bfdccc67ff7ef"
+      },
+      {
+        "cell_hash": "673dc1aad3897770d0ee2a248b69112996f3d26a18d2c6e145798f7614799a9b",
+        "run_hash": "78819f9c60adf13aaa617355ed4fc9996e60b120420d1eddeaed6bce8df7c6df",
+        "scientific_content_hash": "47425b6652a9ad89ea95f09b36243cbd7bccd16eda8dc15cb6a5effe536d3d49"
+      },
+      {
+        "cell_hash": "6bdc89e2509634890dddafe7e449ab1d62e0d93261b15dda3e9b3c387c86e8c9",
+        "run_hash": "faaed5ee62909e5a0b89aab4658e99562ab897692dd830778b30920cbb149d02",
+        "scientific_content_hash": "16cfd757349196b02a47cad010d3326fbdc2417e27909e63df077b89c7365d6b"
+      },
+      {
+        "cell_hash": "7170d15c89ba90186fb0dc16145cc86cb74be4ab18c7100ebb4249841c647903",
+        "run_hash": "00b1e947ead899adc658533e5e11fe7027a020a60d96528215c0a8832010dab7",
+        "scientific_content_hash": "cf7f9493873fc39e05cce4a66ba4bfa63236b6f2420a914587c48af09ebfaf7c"
+      },
+      {
+        "cell_hash": "80bffaf769ce3e4eed84974e7efec4603d62904d187da1909bf032a899ae5f6a",
+        "run_hash": "d24fab5ddd9b10cf7ba8656a63d4ef4122c4cc3bad96f713ee38fa274b9805d6",
+        "scientific_content_hash": "1c2aa3dfd4173cb75c680c513b5ded8ac7bb02f19ee9f9fc20820a2901d8692f"
+      },
+      {
+        "cell_hash": "86763eeb3cb1557c435e443c94182e393bae26b55dcbcf53aaa15c6679471b3c",
+        "run_hash": "04a92da03bf2a2b749f6c5610742fd7c1af4c1a6f89047f2178359be3fa982d9",
+        "scientific_content_hash": "8a39224b69545f9de6675abc0cfcf312d018e4d92717f681c21731e83ac39819"
+      },
+      {
+        "cell_hash": "8a73410c9dee881a91ac46aa0fa9c3bf26889a014850fadb644591588513b2b9",
+        "run_hash": "9ff22b496b2eab30cd62e690a73d437ca3b32b18e653d7f8937bb8e90b26f72f",
+        "scientific_content_hash": "9612304aedf8c962ef34ff17d3abe90f85fc0bbf4d97b2fc5746156b0d01a9ea"
+      },
+      {
+        "cell_hash": "afa0aab568b7020b128a4a80a933713216e47ace76f0cf035ec1d32f6a3211f0",
+        "run_hash": "6f1bb544f05832bafef2f1836fb6cca9538ed3ceaedc47f1464030dc517c58f7",
+        "scientific_content_hash": "ecd753f5fd8f8df4111ac3675e41c8157a4a3b904b4db9d11d4f6ba0f0dbea80"
+      },
+      {
+        "cell_hash": "ca70a915e92ff2af2118671acbe9ad9ac615f803cfb6c7ac32df97ae02ba0d63",
+        "run_hash": "776b19aa5c9d6d74c13aa8cd9d692627019b86ac418fdf8d302b3c649f9c7d97",
+        "scientific_content_hash": "0aaee4430b72402cb5098ceb049e35af1e752ff20f7a129f05570edacfb26694"
+      },
+      {
+        "cell_hash": "d0d170371c86bfe7c6c4271905f770256c8a98e3e9f224a516b373098a14faa8",
+        "run_hash": "c065c8baf26551269108de7f7d20f6fd098e6204a42e33ce3db6ccb5def3d998",
+        "scientific_content_hash": "80979f5180181f0a90051d6fc358fb40eaf21623c301318ba32be09751a89e47"
+      },
+      {
+        "cell_hash": "d1d37c15b6e91868c7e5b4fbc3fc5e1b62dae91739933d70a2d740b2f216f642",
+        "run_hash": "23f18a1b4167fbfccce5f6680227ff9abd14d00aea20045cf0274315d90a5908",
+        "scientific_content_hash": "5f0a1e474c2a6d51e3c3800f4df782529c7db64c6b7bf9a3b0532ba09bc2d9b8"
+      },
+      {
+        "cell_hash": "da4a4d249179ee6ca0b335db5de20cdaf22a4eb5ba129faa06723ff5ea8a4447",
+        "run_hash": "85f29d0a0a190c22190e9b09cce6f36d196cc84de4917b065d3e9e032dc94b25",
+        "scientific_content_hash": "0d5d7804445cde51f8f8ee860eec38bee5f92dd7887de0497f5c6b91a3e76998"
+      },
+      {
+        "cell_hash": "e6dd736533ca29a4fa302e0ae85012065dbb7fa66b28c1dd4040786f980f3fca",
+        "run_hash": "d9b2e5ae6a90658b0a8fedd8b4935b673d154187ae7bf0ac28df762108c729ca",
+        "scientific_content_hash": "5e0aeedea41840e111d6b81b8d640bcf3f523df691b8a0e0ba2abaa3c4c9e792"
+      },
+      {
+        "cell_hash": "fde6ed6bdb53b9eb05802076212770e1228d8f3f11029b393e15bb940fabd08d",
+        "run_hash": "e65a37e30be00d5a7265757198c2d1ec7ee665dc895c6fb64d5680faad028c4c",
+        "scientific_content_hash": "6a21c3230fb2d0b179e64fa9380da2f80070f7e209383114c61cdced1f4402c4"
+      }
+    ]
+  },
+  "scientific_hash": "778e2196dcdb0e73aaf7f92bdf216af74a3608068747a1eb5218ebddd18bf569"
+}

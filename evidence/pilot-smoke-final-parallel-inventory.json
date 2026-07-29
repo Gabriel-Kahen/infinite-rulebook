@@ -1,0 +1,294 @@
+{
+  "artifact_type": "infinite-rulebook-raw-artifact-inventory",
+  "config_hash": "fae70beb1e57206d77cf192e437eb9d8baef2fb0f877a29f04181b0412edbec2",
+  "execution_receipt": {
+    "receipt_format": "infinite-rulebook-execution-receipt",
+    "schema_version": 2,
+    "scientific": {
+      "config_hash": "fae70beb1e57206d77cf192e437eb9d8baef2fb0f877a29f04181b0412edbec2",
+      "invocation_id": "04bebac4779fb6dfa660f53ffbb7f7240ba40d5427b6c2773ddf43fecb4e4f18",
+      "max_workers": 4,
+      "pair": {
+        "parallel": "a8fea7937c4916c8258f0e65f69ff6e11c029e85d0fa1f4cb28c9bfa1ce852a8",
+        "serial": "c22cef4fd672f7733d33bf3b7a85e967c7b63bc32e6a865ac464acce49d6403f"
+      },
+      "parallel_workers": 4,
+      "provenance": {
+        "analysis_code_hash": "305191365ada2ca7881ca5d7ced79b7a2b75559b1ba2f436cc34eb867cb89317",
+        "blas": "not-applicable-stdlib",
+        "code_commit": "2a680d5ce4e5b5dfd57a37f8a5ec8df75dcbd41e",
+        "cuda": "not-applicable",
+        "cudnn": "not-applicable",
+        "dependency_lock_hash": "58c85106b9d520ea2bbb1783244de8888648207cfb583f9079adf6732454e415",
+        "deterministic_mode": "counter-rng+semantic-keys",
+        "dirty_tree_hash": "66399679e4d7c55a762eb9b4482b137e57581d595fe699c794b3734e02a3d5ff",
+        "environment_digest": "f8d7f34aa897050b35aba33a5ba29dda08063395522cf0cf42449d7eb028ccb6",
+        "environment_fingerprint": "{\"byteorder\":\"little\",\"dependency_lock_hash\":\"58c85106b9d520ea2bbb1783244de8888648207cfb583f9079adf6732454e415\",\"float_info\":{\"mant_dig\":53,\"max_exp\":1024,\"min_exp\":-1021,\"radix\":2,\"rounds\":1},\"libc_name\":\"glibc\",\"libc_version\":\"2.43\",\"machine\":\"x86_64\",\"python_build_date\":\"Jun 23 2026 15:19:43\",\"python_build_number\":\"main\",\"python_compiler\":\"Clang 22.1.3 \",\"python_implementation\":\"CPython\",\"python_version\":\"3.11.15\",\"release\":\"7.1.2-3-cachyos\",\"system\":\"Linux\"}",
+        "numeric_precision": "python-float64",
+        "python_implementation": "CPython",
+        "python_version": "3.11.15"
+      },
+      "role": "parallel",
+      "smoke_prerequisite_hash": null
+    },
+    "scientific_hash": "12f4e683f49ddf02cfdb9e322f34e90a51a5a750b90f7932a4436db86188d99f"
+  },
+  "experiment_name": "symbolic-smoke-pilot",
+  "schema_version": 2,
+  "scientific_hash": "eb1f9874f3d0ff1e36b119ae46d0d1c92a620984abd4a60d96ba31a6e0730dfa",
+  "side": "parallel",
+  "trees": [
+    {
+      "byte_size": 43791,
+      "file_count": 9,
+      "identity_hash": "0d862eb08bdc72b064d1b9e05f75877cf45e7d4a8759722acc401977a4037feb",
+      "path": "_frontiers/0d862eb08bdc72b064d1b9e05f75877cf45e7d4a8759722acc401977a4037feb",
+      "scientific_content_hash": "9b693d2b3b9f1a652089226307108e024fd4e8849d26f0b94eda1c7b9739f6c6",
+      "tree_byte_sha256": "584f4de95f7bcc36c6e6b6e18f342da66bbfbeede4d4522f1a97825ff3d7ec72",
+      "tree_type": "frontier"
+    },
+    {
+      "byte_size": 43510,
+      "file_count": 9,
+      "identity_hash": "ba63f00f2016af9bf98be8b7cbf3e1a00c6be68d65c6bb5d57ca3cf449de645a",
+      "path": "_frontiers/ba63f00f2016af9bf98be8b7cbf3e1a00c6be68d65c6bb5d57ca3cf449de645a",
+      "scientific_content_hash": "9fe90f0f3688f9faf876b0079c35a64b52ed545add7aa2b21dfb2d50334e405c",
+      "tree_byte_sha256": "048b8b38a30efb79ce6596230b7c70d11b4a53677fa9e57ab661f09afdb3490f",
+      "tree_type": "frontier"
+    },
+    {
+      "byte_size": 73868,
+      "file_count": 9,
+      "identity_hash": "d3060e8eedb1f36f34d76ae5b49bcce94c1d50ae4a075520a6768cf3a36c6f5b",
+      "path": "_frontiers/d3060e8eedb1f36f34d76ae5b49bcce94c1d50ae4a075520a6768cf3a36c6f5b",
+      "scientific_content_hash": "4717f64699081b25608de130de4936bf6d7ce1d9ddb581d7eb18be5fc4314b73",
+      "tree_byte_sha256": "648539a834dcc39cd318984489f50902b3fa827ec0f7a3aa3ae869a987236a87",
+      "tree_type": "frontier"
+    },
+    {
+      "byte_size": 43505,
+      "file_count": 9,
+      "identity_hash": "f9b15852332854f475c75f45856856f034f8b3ef97c2878f8ac8f33aa0f3590f",
+      "path": "_frontiers/f9b15852332854f475c75f45856856f034f8b3ef97c2878f8ac8f33aa0f3590f",
+      "scientific_content_hash": "0ac06881970a842f5828c13e52ac7005fe2b8c7880d984df348f1a99badbf367",
+      "tree_byte_sha256": "57489c7bac44463f8a53906388689216be86088f9c365e6d927e39bab955dc8b",
+      "tree_type": "frontier"
+    },
+    {
+      "byte_size": 75174,
+      "file_count": 11,
+      "identity_hash": "00b1e947ead899adc658533e5e11fe7027a020a60d96528215c0a8832010dab7",
+      "path": "symbolic-smoke-pilot/00b1e947ead899adc658533e5e11fe7027a020a60d96528215c0a8832010dab7",
+      "scientific_content_hash": "cf7f9493873fc39e05cce4a66ba4bfa63236b6f2420a914587c48af09ebfaf7c",
+      "tree_byte_sha256": "ece73b4cf9a4a4397fd7719221ad9ff0a3aa874eedb79ab0f0d9d236db6517c6",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72611,
+      "file_count": 11,
+      "identity_hash": "0476ed211ff5601ecfe89d2cc263e084f0e670debccfd525945e139304356ede",
+      "path": "symbolic-smoke-pilot/0476ed211ff5601ecfe89d2cc263e084f0e670debccfd525945e139304356ede",
+      "scientific_content_hash": "f1ce20d8d636e9293e5183ec3c1f5835cb29b5d22b41926280f7796665a2cbf4",
+      "tree_byte_sha256": "6800d349432562656d91db4b2d071851c74f2adbf7dccfd9b921aafaaa8d95ea",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72616,
+      "file_count": 11,
+      "identity_hash": "04a92da03bf2a2b749f6c5610742fd7c1af4c1a6f89047f2178359be3fa982d9",
+      "path": "symbolic-smoke-pilot/04a92da03bf2a2b749f6c5610742fd7c1af4c1a6f89047f2178359be3fa982d9",
+      "scientific_content_hash": "8a39224b69545f9de6675abc0cfcf312d018e4d92717f681c21731e83ac39819",
+      "tree_byte_sha256": "0e1e8fd84ceab7c8b062ee7bea2b1c6eb89590b963ad2854e457aa400a089b13",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72643,
+      "file_count": 11,
+      "identity_hash": "231ba798394a07db86a1c352bc2cf87c9076c146b779454d1cf2f0fff156621a",
+      "path": "symbolic-smoke-pilot/231ba798394a07db86a1c352bc2cf87c9076c146b779454d1cf2f0fff156621a",
+      "scientific_content_hash": "a84f1d6a43537853650ab56cda8b82710eb696a6ee9df58cf5fbe004ff1855bc",
+      "tree_byte_sha256": "21b257ba9fcd8ce44ef69d265c9ef2a4b7f6fea51f7b82398ac4f989e153a186",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72628,
+      "file_count": 11,
+      "identity_hash": "23f18a1b4167fbfccce5f6680227ff9abd14d00aea20045cf0274315d90a5908",
+      "path": "symbolic-smoke-pilot/23f18a1b4167fbfccce5f6680227ff9abd14d00aea20045cf0274315d90a5908",
+      "scientific_content_hash": "5f0a1e474c2a6d51e3c3800f4df782529c7db64c6b7bf9a3b0532ba09bc2d9b8",
+      "tree_byte_sha256": "904dc5bdcbdf70e4378110267b2b677aa272a475e871c1edc234fe5578ad3ccd",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72644,
+      "file_count": 11,
+      "identity_hash": "2c8c0485c6f004df548d41ca18f99999138bc3e9bd3cc70dfaafdad205add29e",
+      "path": "symbolic-smoke-pilot/2c8c0485c6f004df548d41ca18f99999138bc3e9bd3cc70dfaafdad205add29e",
+      "scientific_content_hash": "7bdaaa0c0121b4dfd3661afca33c772e5fb16314e427a0477114a249bb53c20b",
+      "tree_byte_sha256": "2cc0e5f02a4a4ea55a80535226165142ed74488c04e05d928b24ddd4b5d2b338",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72711,
+      "file_count": 11,
+      "identity_hash": "39803baba204f71d76b8802adab872fc0c1ca3c3714e0dd1c402abe5c14570e5",
+      "path": "symbolic-smoke-pilot/39803baba204f71d76b8802adab872fc0c1ca3c3714e0dd1c402abe5c14570e5",
+      "scientific_content_hash": "6f658d4abaeab834f1d8f246da6f31301ab7d2b4321b7c89de52e52adb9f99b5",
+      "tree_byte_sha256": "7c8235f2ee178244ac2c7f69d99d8b824fd0a54e0e97acd4383b4340ab2a6159",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72640,
+      "file_count": 11,
+      "identity_hash": "6f1bb544f05832bafef2f1836fb6cca9538ed3ceaedc47f1464030dc517c58f7",
+      "path": "symbolic-smoke-pilot/6f1bb544f05832bafef2f1836fb6cca9538ed3ceaedc47f1464030dc517c58f7",
+      "scientific_content_hash": "ecd753f5fd8f8df4111ac3675e41c8157a4a3b904b4db9d11d4f6ba0f0dbea80",
+      "tree_byte_sha256": "5e9b6941995cb7dba4b9236d39a508e5980f11589b80184430856497840614a8",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72701,
+      "file_count": 11,
+      "identity_hash": "714c022bce756e07e20857ea2062f98ecb0133fa15e9c41dafa57336174cb0cd",
+      "path": "symbolic-smoke-pilot/714c022bce756e07e20857ea2062f98ecb0133fa15e9c41dafa57336174cb0cd",
+      "scientific_content_hash": "72fdcddd19b44b1fd1ddbecacaf62d05adfaeea927333a4d5c4f96f357d4055e",
+      "tree_byte_sha256": "edf78971663e7e4dfb16071189ada397208394eedbd59551faec3e5d32de24e3",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 75168,
+      "file_count": 11,
+      "identity_hash": "73ff7fb6d915b289636b80f2f36f257fe195fc5dcfd1fc3fcbecaa491f7cc9dd",
+      "path": "symbolic-smoke-pilot/73ff7fb6d915b289636b80f2f36f257fe195fc5dcfd1fc3fcbecaa491f7cc9dd",
+      "scientific_content_hash": "fbd3bd4c163fe88767a936ba4e2bece59357486a0dfe4fc8785bfdccc67ff7ef",
+      "tree_byte_sha256": "e9801de3fcf3a2b34100725c4a2a272db38a8718039c6db7bc1fc86f4a2f16df",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72611,
+      "file_count": 11,
+      "identity_hash": "75647f284cf629eb4b641b4e37515ab4796c5157e806d507fd41c8476eb7ee85",
+      "path": "symbolic-smoke-pilot/75647f284cf629eb4b641b4e37515ab4796c5157e806d507fd41c8476eb7ee85",
+      "scientific_content_hash": "bd438e82b21a4c3fce8ab4bc327a78f5e31a058a84a02c30107aa3eeff309b5c",
+      "tree_byte_sha256": "7e0ea67d9be931a9734133c8e03dc8c642e8bd0dcea1a9efad0db0310e1ef40b",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72110,
+      "file_count": 11,
+      "identity_hash": "776b19aa5c9d6d74c13aa8cd9d692627019b86ac418fdf8d302b3c649f9c7d97",
+      "path": "symbolic-smoke-pilot/776b19aa5c9d6d74c13aa8cd9d692627019b86ac418fdf8d302b3c649f9c7d97",
+      "scientific_content_hash": "0aaee4430b72402cb5098ceb049e35af1e752ff20f7a129f05570edacfb26694",
+      "tree_byte_sha256": "5e5caf1e2fab709e5fcb43935ab6f579c6b9ce0154ea7613903b9d78ec75f47b",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72616,
+      "file_count": 11,
+      "identity_hash": "78819f9c60adf13aaa617355ed4fc9996e60b120420d1eddeaed6bce8df7c6df",
+      "path": "symbolic-smoke-pilot/78819f9c60adf13aaa617355ed4fc9996e60b120420d1eddeaed6bce8df7c6df",
+      "scientific_content_hash": "47425b6652a9ad89ea95f09b36243cbd7bccd16eda8dc15cb6a5effe536d3d49",
+      "tree_byte_sha256": "801d6a03c638e49edc14e262e2546fb828a09929cc62f64992e016087d20ec47",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72614,
+      "file_count": 11,
+      "identity_hash": "85f29d0a0a190c22190e9b09cce6f36d196cc84de4917b065d3e9e032dc94b25",
+      "path": "symbolic-smoke-pilot/85f29d0a0a190c22190e9b09cce6f36d196cc84de4917b065d3e9e032dc94b25",
+      "scientific_content_hash": "0d5d7804445cde51f8f8ee860eec38bee5f92dd7887de0497f5c6b91a3e76998",
+      "tree_byte_sha256": "c7765434806ad0f3bd62065a06af7761b5a735bcabbdc9c519edfeaf32c76b7a",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72701,
+      "file_count": 11,
+      "identity_hash": "9cf0d86d8ef444ffbcccb94c44111ef649c3908f6cf722c08434c3e656205dde",
+      "path": "symbolic-smoke-pilot/9cf0d86d8ef444ffbcccb94c44111ef649c3908f6cf722c08434c3e656205dde",
+      "scientific_content_hash": "b67fa972a3574c2e55fbcc81a51bd0d780ad83e62b35b986e542eca2a61a9dca",
+      "tree_byte_sha256": "f4df53da794bb82f4dfdb2a2d3c1b4d94df7ac11e8acdd0428b0ad04324893bf",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 75174,
+      "file_count": 11,
+      "identity_hash": "9ff22b496b2eab30cd62e690a73d437ca3b32b18e653d7f8937bb8e90b26f72f",
+      "path": "symbolic-smoke-pilot/9ff22b496b2eab30cd62e690a73d437ca3b32b18e653d7f8937bb8e90b26f72f",
+      "scientific_content_hash": "9612304aedf8c962ef34ff17d3abe90f85fc0bbf4d97b2fc5746156b0d01a9ea",
+      "tree_byte_sha256": "9f340ab96c605de5c6053216dda078d41f0ed0f4f3caacbfc049cab38e3ac975",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72614,
+      "file_count": 11,
+      "identity_hash": "bcf19b2864f0d6534cf29b66e8edac0edbe45e4a6e7de173a2b3a7c27cd81b47",
+      "path": "symbolic-smoke-pilot/bcf19b2864f0d6534cf29b66e8edac0edbe45e4a6e7de173a2b3a7c27cd81b47",
+      "scientific_content_hash": "c9d880a08817c8b7ce6686f3e8d726bd59ab014fc01df4671255927830cc2f5a",
+      "tree_byte_sha256": "c6291e849ada57a91da67ac13a9023b4862f12a05c7478ab05e46ef05a66e7f6",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72118,
+      "file_count": 11,
+      "identity_hash": "c065c8baf26551269108de7f7d20f6fd098e6204a42e33ce3db6ccb5def3d998",
+      "path": "symbolic-smoke-pilot/c065c8baf26551269108de7f7d20f6fd098e6204a42e33ce3db6ccb5def3d998",
+      "scientific_content_hash": "80979f5180181f0a90051d6fc358fb40eaf21623c301318ba32be09751a89e47",
+      "tree_byte_sha256": "a5dde2f6421afd0c37fe8d8c06a59553a967fd2516241523688657d8ba278e43",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72616,
+      "file_count": 11,
+      "identity_hash": "c924a6f7f009e759478cb622acae9d2e3b953392d1067cb5a6e9caf543637d94",
+      "path": "symbolic-smoke-pilot/c924a6f7f009e759478cb622acae9d2e3b953392d1067cb5a6e9caf543637d94",
+      "scientific_content_hash": "8598671f0b7402a3bf8748f814d28a76b4066f06113f4c258bd7703d0755cfee",
+      "tree_byte_sha256": "04904ceee26de153fb582c7c3c3f2d873c4541afeb197564c104c4dcf302e310",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72626,
+      "file_count": 11,
+      "identity_hash": "d24fab5ddd9b10cf7ba8656a63d4ef4122c4cc3bad96f713ee38fa274b9805d6",
+      "path": "symbolic-smoke-pilot/d24fab5ddd9b10cf7ba8656a63d4ef4122c4cc3bad96f713ee38fa274b9805d6",
+      "scientific_content_hash": "1c2aa3dfd4173cb75c680c513b5ded8ac7bb02f19ee9f9fc20820a2901d8692f",
+      "tree_byte_sha256": "dc000aea4f3a438c5a12df5e82905e59992ab794382ea9d6085eea0aa54b36f2",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 75184,
+      "file_count": 11,
+      "identity_hash": "d441db5ef94a4630b62601ecd3b43319104ea52a9dbc222a937f351e08996a07",
+      "path": "symbolic-smoke-pilot/d441db5ef94a4630b62601ecd3b43319104ea52a9dbc222a937f351e08996a07",
+      "scientific_content_hash": "0b17deb33f26d98b0ee5688adea9c0699991a3c9fa5abf53b74ba421996dfa18",
+      "tree_byte_sha256": "f45cdd082a467f73dcdc1a103c05e1dc5889a67d79dd32fdaca71be056ffc455",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72616,
+      "file_count": 11,
+      "identity_hash": "d9b2e5ae6a90658b0a8fedd8b4935b673d154187ae7bf0ac28df762108c729ca",
+      "path": "symbolic-smoke-pilot/d9b2e5ae6a90658b0a8fedd8b4935b673d154187ae7bf0ac28df762108c729ca",
+      "scientific_content_hash": "5e0aeedea41840e111d6b81b8d640bcf3f523df691b8a0e0ba2abaa3c4c9e792",
+      "tree_byte_sha256": "105587e397db13503b955b3b06cf8c84bd467a211c16f0105c2b64ccc927384a",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72697,
+      "file_count": 11,
+      "identity_hash": "e65a37e30be00d5a7265757198c2d1ec7ee665dc895c6fb64d5680faad028c4c",
+      "path": "symbolic-smoke-pilot/e65a37e30be00d5a7265757198c2d1ec7ee665dc895c6fb64d5680faad028c4c",
+      "scientific_content_hash": "6a21c3230fb2d0b179e64fa9380da2f80070f7e209383114c61cdced1f4402c4",
+      "tree_byte_sha256": "096f580b347eb7fb47adaba2436de19e052308cbb108b1cca3335ff4a353309e",
+      "tree_type": "run"
+    },
+    {
+      "byte_size": 72654,
+      "file_count": 11,
+      "identity_hash": "faaed5ee62909e5a0b89aab4658e99562ab897692dd830778b30920cbb149d02",
+      "path": "symbolic-smoke-pilot/faaed5ee62909e5a0b89aab4658e99562ab897692dd830778b30920cbb149d02",
+      "scientific_content_hash": "16cfd757349196b02a47cad010d3326fbdc2417e27909e63df077b89c7365d6b",
+      "tree_byte_sha256": "7cf912ab16ff69e4cef671eea926ec10b4044a2203e490f4e994ca2a3a00d5af",
+      "tree_type": "run"
+    }
+  ]
+}
