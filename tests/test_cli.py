@@ -15,6 +15,7 @@ from infinite_rulebook.cli import (
     _reconstruct_registered_power,
     _trusted_reproducibility_root,
     _validate_inventory_receipts,
+    _write_json,
     main,
 )
 from infinite_rulebook.orchestration.config import (
@@ -38,6 +39,21 @@ from infinite_rulebook.studies.symbolic_construct import (
     build_symbolic_analysis_plan,
     build_symbolic_canary_plan,
 )
+
+
+def test_json_output_is_verified_before_publication(tmp_path: Path) -> None:
+    output = tmp_path / "evidence.json"
+
+    def reject(candidate: Path) -> None:
+        assert candidate != output
+        assert candidate.is_file()
+        raise ValueError("semantic verification failed")
+
+    with pytest.raises(ValueError, match="semantic verification failed"):
+        _write_json(output, {"valid": True}, verifier=reject)
+
+    assert not output.exists()
+    assert not tuple(tmp_path.iterdir())
 
 
 def test_trusted_report_root_is_stable_after_alias_retarget(

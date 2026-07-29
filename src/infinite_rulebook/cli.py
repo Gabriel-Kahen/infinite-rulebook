@@ -8,7 +8,7 @@ import json
 import os
 import secrets
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -234,24 +234,45 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _write_json(path: Path, payload: object) -> None:
+def _write_json(
+    path: Path,
+    payload: object,
+    *,
+    verifier: Callable[[Path], None] | None = None,
+) -> None:
+    normalized = _jsonable(payload)
+
+    def verify(candidate: Path) -> None:
+        if _read_json_object(candidate, label="persisted JSON output") != normalized:
+            raise ValueError(f"persisted JSON output differs from its payload: {path}")
+        if verifier is not None:
+            verifier(candidate)
+
     _write_immutable_text(
         path,
         json.dumps(
-            _jsonable(payload),
+            normalized,
             allow_nan=False,
             ensure_ascii=True,
             indent=2,
             sort_keys=True,
         )
         + "\n",
+        verifier=verify,
     )
 
 
-def _write_immutable_text(path: Path, content: str) -> None:
+def _write_immutable_text(
+    path: Path,
+    content: str,
+    *,
+    verifier: Callable[[Path], None] | None = None,
+) -> None:
     if path.exists():
         if not path.is_file() or path.read_text(encoding="utf-8") != content:
             raise ValueError(f"refusing to overwrite immutable output: {path}")
+        if verifier is not None:
+            verifier(path)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f".{path.name}.{secrets.token_hex(16)}.tmp"
@@ -260,6 +281,8 @@ def _write_immutable_text(path: Path, content: str) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        if verifier is not None:
+            verifier(temporary)
         try:
             os.link(temporary, path)
             directory_descriptor = os.open(
@@ -500,6 +523,118 @@ def _load_smoke_prerequisite(path: Path) -> SmokePrerequisiteEvidence:
         _read_json_object(path, label="smoke prerequisite"),
         verify_roots=True,
     )
+
+
+def _require_equal(observed: object, expected: object, *, label: str) -> None:
+    if observed != expected:
+        raise ValueError(f"{label} differs from its source")
+
+
+def _verify_report_json_outputs(
+    output: Path,
+    *,
+    experiment: ExperimentConfig,
+    plan: object,
+    canary_plan: object,
+    report: object,
+    canaries: object,
+    deviations: dict[str, object],
+    reproducibility: ReproducibilityReport,
+    serial_inventory: RawArtifactInventory,
+    parallel_inventory: RawArtifactInventory,
+    smoke_evidence: SmokePrerequisiteEvidence | None,
+    power: dict[str, object] | None,
+    summary: dict[str, object],
+) -> None:
+    _require_equal(
+        load_experiment_config(output / "experiment-config.json"),
+        experiment,
+        label="persisted report config",
+    )
+    _require_equal(
+        load_analysis_plan(output / "analysis-plan.json"),
+        plan,
+        label="persisted report analysis plan",
+    )
+    _load_registered_canary_plan(
+        output / "canary-plan.json",
+        canary_plan.to_dict(),
+    )
+    for name, filename, expected, domain in (
+        (
+            "analysis",
+            "analysis.json",
+            report.to_payload(),
+            "registered-analysis-report",
+        ),
+        (
+            "canary",
+            "canaries.json",
+            canaries.to_dict(),
+            "scientific-canary-report",
+        ),
+        (
+            "deviation",
+            "deviations.json",
+            deviations,
+            "symbolic-study-deviation-log",
+        ),
+        ("summary", "summary.json", summary, "symbolic-study-summary"),
+    ):
+        _require_equal(
+            _load_hashed_json(
+                output / filename,
+                label=f"persisted {name} evidence",
+                domain=domain,
+            ),
+            expected,
+            label=f"persisted {name} evidence",
+        )
+    persisted_reproducibility = ReproducibilityReport.from_dict(
+        _read_json_object(
+            output / "reproducibility.json",
+            label="persisted reproducibility report",
+        ),
+        expected_serial_root=reproducibility.serial_root,
+        expected_parallel_root=reproducibility.parallel_root,
+        expected_parallel_workers=reproducibility.parallel_workers,
+    )
+    _require_equal(
+        persisted_reproducibility,
+        reproducibility,
+        label="persisted reproducibility report",
+    )
+    for name, expected in (
+        ("serial", serial_inventory),
+        ("parallel", parallel_inventory),
+    ):
+        persisted = RawArtifactInventory.from_dict(
+            _read_json_object(
+                output / f"raw-{name}-inventory.json",
+                label=f"persisted {name} raw inventory",
+            )
+        )
+        _require_equal(
+            persisted,
+            expected,
+            label=f"persisted {name} raw inventory",
+        )
+    if smoke_evidence is not None:
+        _require_equal(
+            _load_smoke_prerequisite(output / "smoke-prerequisite.json"),
+            smoke_evidence,
+            label="persisted smoke prerequisite",
+        )
+    if power is not None:
+        _require_equal(
+            _load_hashed_json(
+                output / "power.json",
+                label="persisted power calibration",
+                domain="symbolic-power-calibration",
+            ),
+            power,
+            label="persisted power calibration",
+        )
 
 
 def _smoke_prerequisite_for_execution(
@@ -1052,9 +1187,32 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         sealed,
         phase=AnalysisPhase.CONFIRMATORY,
     )
-    _write_json(arguments.output_config, sealed.resolved_dict())
-    _write_immutable_text(arguments.output_plan, analysis_plan_json(plan))
-    _write_immutable_text(arguments.output_canary_plan, canary_plan.to_json())
+    _write_json(
+        arguments.output_config,
+        sealed.resolved_dict(),
+        verifier=lambda candidate: _require_equal(
+            load_experiment_config(candidate),
+            sealed,
+            label="persisted confirmatory config",
+        ),
+    )
+    _write_immutable_text(
+        arguments.output_plan,
+        analysis_plan_json(plan),
+        verifier=lambda candidate: _require_equal(
+            load_analysis_plan(candidate),
+            plan,
+            label="persisted confirmatory analysis plan",
+        ),
+    )
+    _write_immutable_text(
+        arguments.output_canary_plan,
+        canary_plan.to_json(),
+        verifier=lambda candidate: _load_registered_canary_plan(
+            candidate,
+            canary_plan.to_dict(),
+        ),
+    )
     result = {
         "config": str(arguments.output_config),
         "plan": str(arguments.output_plan),
@@ -1429,6 +1587,7 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
                 },
             }
         )
+    power_evidence: dict[str, object] | None = None
     if phase is AnalysisPhase.CALIBRATION and canaries.passed:
         assert smoke_evidence is not None
         hypotheses = power_hypotheses(report)
@@ -1460,6 +1619,7 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
             plain_power,
             domain="symbolic-power-calibration",
         )
+        power_evidence = plain_power
         _write_json(output / "power.json", plain_power)
         _write_immutable_text(
             output / "power-calibration.csv",
@@ -1507,6 +1667,7 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
             blocked_power,
             domain="symbolic-power-calibration",
         )
+        power_evidence = blocked_power
         _write_json(output / "power.json", blocked_power)
         _write_immutable_text(
             output / "power-calibration.csv",
@@ -1545,6 +1706,21 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
         domain="symbolic-study-summary",
     )
     _write_json(output / "summary.json", summary)
+    _verify_report_json_outputs(
+        output,
+        experiment=experiment,
+        plan=plan,
+        canary_plan=expected_canary_plan,
+        report=report,
+        canaries=canaries,
+        deviations=deviations,
+        reproducibility=reproducibility,
+        serial_inventory=serial_inventory,
+        parallel_inventory=parallel_inventory,
+        smoke_evidence=smoke_evidence,
+        power=power_evidence,
+        summary=summary,
+    )
     member_names = _expected_release_members(phase)
     observed_names = {path.name for path in output.iterdir()}
     allowed_names = {*member_names, STUDY_RELEASE_MANIFEST_FILENAME}
@@ -1566,7 +1742,8 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
         output / STUDY_RELEASE_MANIFEST_FILENAME,
         release.to_dict(),
     )
-    release.verify_files(output)
+    if load_study_release_manifest(output / STUDY_RELEASE_MANIFEST_FILENAME) != release:
+        raise ValueError("persisted release manifest differs from its source")
     return {
         **summary,
         "release_manifest_hash": release.scientific_hash,
@@ -1630,7 +1807,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 reproducibility.parallel_root,
             ),
         )
-        _write_json(arguments.output, evidence.to_dict())
+        _write_json(
+            arguments.output,
+            evidence.to_dict(),
+            verifier=lambda candidate: _require_equal(
+                _load_smoke_prerequisite(candidate),
+                evidence,
+                label="persisted smoke prerequisite",
+            ),
+        )
         print(
             json.dumps(
                 {
@@ -1659,7 +1844,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             experiment,
             side=arguments.side,
         )
-        _write_immutable_text(arguments.output, inventory.to_json())
+        _write_immutable_text(
+            arguments.output,
+            inventory.to_json(),
+            verifier=lambda candidate: _require_equal(
+                RawArtifactInventory.from_dict(
+                    _read_json_object(
+                        candidate,
+                        label="persisted raw artifact inventory",
+                    )
+                ),
+                inventory,
+                label="persisted raw inventory",
+            ),
+        )
         print(
             json.dumps(
                 {
@@ -1721,8 +1919,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "confirmatory config is bound to a different analysis registration"
             )
         canary_plan = build_symbolic_canary_plan(experiment, phase=phase)
-        _write_immutable_text(arguments.output, analysis_plan_json(plan))
-        _write_immutable_text(arguments.canary_output, canary_plan.to_json())
+        _write_immutable_text(
+            arguments.output,
+            analysis_plan_json(plan),
+            verifier=lambda candidate: _require_equal(
+                load_analysis_plan(candidate),
+                plan,
+                label="persisted analysis plan",
+            ),
+        )
+        _write_immutable_text(
+            arguments.canary_output,
+            canary_plan.to_json(),
+            verifier=lambda candidate: _load_registered_canary_plan(
+                candidate,
+                canary_plan.to_dict(),
+            ),
+        )
         print(
             json.dumps(
                 {
@@ -1812,7 +2025,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 None if smoke_evidence is None else smoke_evidence.scientific_hash
             ),
         )
-        _write_json(arguments.output, report.to_dict())
+        _write_json(
+            arguments.output,
+            report.to_dict(),
+            verifier=lambda candidate: _require_equal(
+                ReproducibilityReport.from_dict(
+                    _read_json_object(
+                        candidate,
+                        label="persisted reproducibility report",
+                    ),
+                    expected_serial_root=arguments.serial_root,
+                    expected_parallel_root=arguments.parallel_root,
+                    expected_parallel_workers=arguments.workers,
+                ),
+                report,
+                label="persisted reproducibility report",
+            ),
+        )
         print(
             json.dumps(
                 {
