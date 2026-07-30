@@ -1,0 +1,186 @@
+{
+  "capacity_benchmarks": {
+    "calibration_e192": {
+      "benchmark_process_sample": {
+        "available_memory_bytes": 20297744384,
+        "available_memory_gib_rounded": 19,
+        "elapsed": "00:01:54",
+        "major_faults": 0,
+        "rss_kib": 3499076
+      },
+      "command": "uv run python scripts/benchmark_analysis_scale.py --config configs/symbolic-calibration-v2.json --metrics 29 --positive-checkpoint-metrics 31",
+      "decision": {
+        "benchmark_swap_dependence_observed": false,
+        "equal_physical_reserve": "pass",
+        "notes": "At the steady high-water sample, remaining physically available memory was more than five times peak RSS, the process had zero major faults, and the host recorded zero swap-outs."
+      },
+      "host_memory_observations": {
+        "after_available_memory_bytes": 23920623616,
+        "before_available_memory_bytes": 23875436544,
+        "steady_high_water_available_memory_bytes": 20297744384
+      },
+      "host_swap_counters": {
+        "page_size_bytes": 4096,
+        "pswpin_delta_bytes": 6434816,
+        "pswpin_delta_pages": 1571,
+        "pswpin_end_pages": 2451398,
+        "pswpin_start_pages": 2449827,
+        "pswpout_delta_bytes": 0,
+        "pswpout_delta_pages": 0,
+        "pswpout_end_pages": 5090803,
+        "pswpout_start_pages": 5090803
+      },
+      "result": {
+        "algorithm_replicas": 8,
+        "checkpoint_count": 13,
+        "checkpoint_zero_metric_count": 29,
+        "dataset_elapsed_seconds": 359.658,
+        "dataset_hash": "f8eb1d5d130f283959c469049ea5ec1e53dbfc053e656e0c4817ae8c1534d1ee",
+        "environment_replicas": 192,
+        "maximum_rss_mib": 3515.719,
+        "metric_count": 29,
+        "observation_count": 958464,
+        "pool_elapsed_seconds": 11.083,
+        "pooled_checkpoint_count": 624,
+        "positive_checkpoint_metric_count": 31,
+        "rss_before_mib": 30.312,
+        "rss_increment_upper_bound_mib": 3485.406,
+        "total_elapsed_seconds": 370.742
+      }
+    },
+    "maximum_candidate_e768": {
+      "benchmark_process_samples": [
+        {
+          "available_memory_gib_rounded": 8.9,
+          "elapsed": "00:03:43",
+          "major_faults": 8038,
+          "rss_kib": 13465632
+        },
+        {
+          "available_memory_gib_rounded": 10.0,
+          "elapsed": "00:21:57",
+          "major_faults": 443862,
+          "rss_kib": 13892508
+        }
+      ],
+      "command": "uv run python scripts/benchmark_analysis_scale.py --config configs/symbolic-calibration-v2.json --environment-replicas 768 --metrics 29 --positive-checkpoint-metrics 31",
+      "decision": {
+        "equal_physical_reserve": "fail",
+        "host_swap_idle": "fail",
+        "notes": "Peak RSS exceeded the remaining physically available memory at observed high-water samples, and the benchmark process incurred at least 443862 major faults after pages were evicted.",
+        "reporting_host_approved": false
+      },
+      "host_swap_counters": {
+        "page_size_bytes": 4096,
+        "pswpin_delta_bytes": 1990295552,
+        "pswpin_delta_pages": 485912,
+        "pswpin_end_pages": 2206874,
+        "pswpin_start_pages": 1720962,
+        "pswpout_delta_bytes": 2188128256,
+        "pswpout_delta_pages": 534211,
+        "pswpout_end_pages": 5058958,
+        "pswpout_start_pages": 4524747
+      },
+      "result": {
+        "algorithm_replicas": 8,
+        "checkpoint_count": 13,
+        "checkpoint_zero_metric_count": 29,
+        "dataset_elapsed_seconds": 1444.358,
+        "dataset_hash": "b4de258dc8e72d78e5324c072dbfc7fab19f4534d40aaf6175c3e596873cf58a",
+        "environment_replicas": 768,
+        "maximum_rss_mib": 13747.113,
+        "metric_count": 29,
+        "observation_count": 3833856,
+        "pool_elapsed_seconds": 93.763,
+        "pooled_checkpoint_count": 624,
+        "positive_checkpoint_metric_count": 31,
+        "rss_before_mib": 30.414,
+        "rss_increment_upper_bound_mib": 13716.699,
+        "total_elapsed_seconds": 1538.121
+      }
+    }
+  },
+  "decision": {
+    "calibration_authorized_on_this_host": false,
+    "confirmatory_execution_authorized_on_this_host": false,
+    "current_host_reference_operational_budget_hours": 92.628,
+    "next_action": "Move the unchanged workflow to an intended reporting host with at least 64 GiB physical RAM and local SSD/NVMe capacity for both complete raw roots plus reports. Before calibration, rerun both exact capacity benchmarks and the ingestion probe there, then reserve that host's newly measured 2x ingestion projection plus interruption-recovery margin. Before selected confirmation, repeat both capacity benchmarks for the unchanged registered workflow.",
+    "scope_reduction_allowed": false
+  },
+  "host": {
+    "filesystem": {
+      "device": "/dev/nvme0n1p6",
+      "mount_options": "rw,noatime,compress=zstd:1,ssd,discard=async,space_cache=v2",
+      "type": "btrfs"
+    },
+    "kernel": "Linux 7.1.2-3-cachyos x86_64 GNU/Linux",
+    "logical_cpu_count": 16,
+    "physical_memory_bytes": 33561464832,
+    "python": "3.11.15",
+    "swap_bytes": 33560719360,
+    "vm_swappiness": 150
+  },
+  "ingestion_probe": {
+    "artifact_root": {
+      "disposition": "moved-to-desktop-trash",
+      "disposed_at": "2026-07-30T10:35:37-04:00",
+      "du_apparent_bytes": 22868963,
+      "file_count": 1560,
+      "recoverable": true,
+      "trash_entry": "symbolic-artifact-ingestion-probe-v2"
+    },
+    "benchmark_command": "uv run python scripts/benchmark_artifact_ingestion.py configs/symbolic-artifact-ingestion-probe-v2.json artifacts/symbolic-artifact-ingestion-probe-v2 --projected-runs 294912 --budget-multiplier 2",
+    "benchmark_result": {
+      "budget_multiplier": 2.0,
+      "dataset_hash": "881f1c3ac959baedb22ab961ad35aaa2654ec092407da725de79fe858265a043",
+      "fixed_frontier_cache_copy_seconds": 1.287675,
+      "fixed_frontier_raw_hash_seconds": 0.008001,
+      "fixed_frontier_validation_seconds": 21.626169,
+      "fixed_report_ingestion_seconds": 155.262212,
+      "frontier_tree_count": 4,
+      "inventory_elapsed_seconds": 76.969183,
+      "load_elapsed_seconds": 28.435729,
+      "marginal_run_load_seconds_per_run": 0.109072,
+      "marginal_run_raw_hash_seconds_per_run": 0.000721,
+      "marginal_run_validation_seconds_per_run": 0.107968,
+      "maximum_rss_mib": 104.133,
+      "modeled_probe_report_seconds": 181.296686,
+      "observation_count": 624,
+      "observed_probe_report_seconds": 182.374096,
+      "operational_budget_hours": 92.628,
+      "projected_report_ingestion_hours": 46.314,
+      "projected_runs_per_root": 294912,
+      "raw_run_byte_size": 13916191,
+      "raw_run_file_count": 1392,
+      "residual_seconds_per_run": 0.022446,
+      "rss_before_mib": 30.188,
+      "rss_increment_upper_bound_mib": 73.945,
+      "run_count": 48
+    },
+    "config_hash": "9120115e05a126127ce639169b15a27f9e39c09c7e277301f2e4dedd189de9aa",
+    "execution_command": "uv run python -m scripts.run_ingestion_probe configs/symbolic-calibration-v2.json configs/symbolic-artifact-ingestion-probe-v2.json artifacts/symbolic-artifact-ingestion-probe-v2 --workers 4",
+    "execution_result": {
+      "phase": "calibration",
+      "run_count": 48
+    },
+    "scientific_use": "prohibited; probe metrics were not inspected and cannot tune the protocol"
+  },
+  "public_registration": {
+    "analysis_plan_hash": "aef2100b60636a86f73f871a2b9f99346b2207762b872ec8262a512226a1f6fc",
+    "analysis_registration_hash": "747b53dc6fafbf354c595e20d57269270230a5f9d05a655a7df9da0e4903a1d0",
+    "commit": "3909db8b9913fc0031710b9f4d4803fad00dd0bf",
+    "component_hash": "5f56c6fa65c0598d9cfa35d7425479b6fd21f0ab18f1f5330a101274a34a730f",
+    "main_ci": "https://github.com/Gabriel-Kahen/infinite-rulebook/actions/runs/30548156462",
+    "pull_request": "https://github.com/Gabriel-Kahen/infinite-rulebook/pull/11"
+  },
+  "record_type": "symbolic-v2-operational-preflight",
+  "recorded_at": "2026-07-30T10:59:12-04:00",
+  "schema_version": 1,
+  "scientific_boundary": {
+    "executed_after_public_registration": true,
+    "pilot_executed": false,
+    "registered_calibration_executed": false,
+    "registered_confirmatory_executed": false,
+    "registered_outcomes_inspected": false
+  }
+}
