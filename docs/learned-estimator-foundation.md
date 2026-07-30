@@ -1,0 +1,150 @@
+# Learned-estimator foundation
+
+This module is an engineering and synthetic-calibration foundation for the
+direct behavioral channel estimator in the research plan. It is deliberately
+bounded to small, fully enumerated `FiniteDecisionProblem` instances. It does
+not use symbolic v2 study data, alter the frozen v2 design, or authorize an
+approximate large-instance scientific claim.
+
+The implementation is in `infinite_rulebook.estimators`.
+
+## Reported object
+
+For a finite prior, finite canonical action set, and reward matrix, the
+estimator fits tabular channels on a prespecified nonnegative Lagrange
+multiplier grid. Each fit alternates a Gibbs channel update with a learned
+full-support action reference marginal for a fixed number of deterministic
+steps. There is no random initialization or hidden stopping rule.
+
+For a fitted channel \(q(a\mid\theta)\) and reference \(m(a)\), it reports
+
+\[
+\mathbb E_\Theta D_{\mathrm{KL}}(q(A\mid\Theta)\Vert m(A))
+=
+I(\Theta;A)
++
+D_{\mathrm{KL}}(q(A)\Vert m(A)).
+\]
+
+The code independently evaluates all three terms. The reference quantity is
+therefore an upper bound on that channel's mutual information. In this
+finite-only foundation, the final reward and mutual information are
+deterministically evaluated over the complete channel in floating-point
+arithmetic; no sampled confidence statement is needed or implied. KL ratios
+use the ordinary direct path when representable and a log-difference path when
+division underflows or overflows; weighted subnormal terms are recovered in
+log space when their direct product rounds to zero. A roundoff-scale negative
+raw KL is used for the identity check and reconciled to zero before it becomes
+a public field; a materially negative value fails closed. The public identity
+residual is the exact absolute difference between the two reconciled public KL
+fields and may not exceed the declared reconciliation-roundoff allowance.
+
+For a requested reward \(\rho\):
+
+- the upper endpoint is the floating-point mutual information of a retained,
+  directly re-evaluated feasible channel whose reward clears \(\rho\);
+- the lower endpoint is the best nonnegative bound
+  \(\beta\rho+c_\beta(m)\) over the prespecified multiplier grid, where
+  \(c_\beta(m)\) is the existing global finite-problem Lagrangian certificate;
+- the interval is labeled `certified-partial-identification`;
+- the zero-information region and targets above maximum reward are reported
+  explicitly; and
+- optimizer convergence is only a diagnostic. A lower certificate remains
+  valid when the fixed optimization budget ends early.
+
+Before a channel is retained, one pivot probability per row absorbs any final
+floating-point normalization residual. Every public row must then sum to
+exactly one under `math.fsum`, and a second evaluation of the stored channel
+must reproduce the complete witness exactly. Construction fails closed if
+that serialize-and-re-evaluate contract cannot be met.
+
+Every returned frontier point is validated against its retained witness. The
+upper endpoint must equal the replayed witness information exactly, and the
+witness must clear the requested reward. At the mathematical zero-information
+endpoint, a tiny evaluator residual caused by an inexact stored prior sum is
+retained as a conservative numerical upper endpoint and labeled with an
+informational diagnostic rather than hidden. A residual beyond the declared
+roundoff allowance fails closed.
+
+The exported frozen records provide immutable, canonical, structurally
+validated data-transfer objects. Problem-dependent reward, information, and
+certificate claims are bound and replay-checked by
+`fit_behavioral_channel`, `estimate_behavioral_frontier`, and
+`calibrate_behavioral_estimator`; constructing a record directly does not
+replace those factories or authenticate it against an omitted problem.
+
+The estimator never repairs, smooths, or narrows bounds to make a curve look
+better. A lower certificate that exceeds a feasible witness beyond numerical
+roundoff fails closed.
+
+## Synthetic calibration
+
+`calibrate_behavioral_estimator` compares estimated intervals with the
+certified exact finite solver on named reward grids. Cases are tagged
+`development` or `held-out` before evaluation. The report retains, per point:
+
+- both estimated endpoints and the feasible upper witness;
+- both endpoints of the certified exact envelope;
+- whether the estimate contains that complete envelope;
+- a signed interval for upper-bound excess;
+- normalized achieved-reward overshoot; and
+- exact-solver convergence.
+
+Each split reports the fraction and count of all prespecified grid points whose
+certified exact envelopes are contained, maximum partial-identification width,
+maximum upper excess, and maximum normalized reward overshoot. A point where
+the exact comparator does not converge is not counted as covered; the separate
+exact-convergence count exposes that distinction. The grid fraction is a
+descriptive diagnostic only. Target points and cases need not be independent
+or exchangeable, so no binomial interval or population coverage claim is
+reported. Development-case tuning can bias even the descriptive fraction, and
+the function cannot enforce that an operator refrained from looking at a
+held-out report before changing a later configuration.
+
+```python
+from infinite_rulebook.estimators import (
+    BehavioralEstimatorConfig,
+    CalibrationCase,
+    CalibrationSplit,
+    calibrate_behavioral_estimator,
+)
+from infinite_rulebook.frontier import one_coordinate_problem
+
+config = BehavioralEstimatorConfig(
+    betas=(0.0, 0.5, 1.0, 2.0, 4.0, 8.0),
+    optimizer_steps=128,
+    maximum_states=32,
+    maximum_actions=64,
+)
+report = calibrate_behavioral_estimator(
+    (
+        CalibrationCase(
+            "q4-held-out",
+            CalibrationSplit.HELD_OUT,
+            one_coordinate_problem(q=4, u=1.0, c=1.0),
+            (0.1, 0.5, 0.8),
+        ),
+    ),
+    config=config,
+)
+```
+
+## Scientific boundary and remaining work
+
+The current implementation does **not** provide:
+
+- an autoregressive canonical-rulebook channel;
+- a declared finite projection, maximum index, maximum support, and stopping
+  contract for learned rulebooks;
+- Monte Carlo reward lower bounds or reference-KL upper confidence bounds;
+- retained sampled channels and seed manifests;
+- an \(N\)-convergence study;
+- latent-bottleneck or learned converse estimators;
+- calibrated distractor-leakage, inversion-slope, or scaling-classification
+  gates; or
+- evidence that synthetic coverage transfers to a larger action space.
+
+The configured state and action caps enforce the small finite scope. Larger
+or sampled applications require the missing statistical and artifact
+contracts before they can be called achievable statistical upper bounds.
+Until then, large-instance and asymptotic interpretation is prohibited.
