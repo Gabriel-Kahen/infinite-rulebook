@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, fields
+from dataclasses import FrozenInstanceError, dataclass, field, fields, replace
 
 import pytest
 
@@ -16,7 +16,10 @@ from infinite_rulebook.agents import (
     CurriculumCatalog,
     CurriculumController,
     CurriculumDecision,
+    CurriculumDeploymentRewardContract,
+    CurriculumEstimand,
     CurriculumEvidence,
+    CurriculumEvidenceBasis,
     CurriculumLimits,
     CurriculumReason,
     CurriculumState,
@@ -32,10 +35,30 @@ from infinite_rulebook.agents import (
     useful_targets,
 )
 from infinite_rulebook.artifacts import semantic_hash
+from infinite_rulebook.core.reward import RewardSpec
 from infinite_rulebook.environments.independent import IndependentRulebook
 from infinite_rulebook.orchestration.hashing import (
     canonical_json_bytes,
     scientific_hash,
+)
+
+_TEST_REWARD_SPEC_HASH = semantic_hash(RewardSpec())
+_TEST_SOURCE_HASH = "2" * 64
+_TEST_ESTIMAND = CurriculumEstimand(
+    name="synthetic normalized reward per acquisition epoch",
+    reward_spec_semantic_hash=_TEST_REWARD_SPEC_HASH,
+    deployment_reward_contract=(
+        CurriculumDeploymentRewardContract.FACTORIZED_ADDITIVE_V1
+    ),
+    reward_transform="identity",
+    reward_aggregation="fixed-horizon mean",
+    reward_horizon=1,
+    information_variable="next persistent query observation",
+    information_conditioning="current factorized posterior and active support",
+    confidence_method="simultaneous synthetic exact bounds",
+    confidence_level=0.95,
+    confidence_family="all catalog candidates in one update",
+    data_split="synthetic unit-test data",
 )
 
 
@@ -93,6 +116,33 @@ def _controller(
         catalog,
         policy,  # type: ignore[arg-type]
         CurriculumLimits(support, information),
+        _TEST_ESTIMAND,
+    )
+
+
+def _update(
+    controller: CurriculumController,
+    round_index: int,
+    assessments: tuple[CurriculumAssessment, ...],
+    frontier: FrontierEstimate | None = None,
+    *,
+    estimand: CurriculumEstimand = _TEST_ESTIMAND,
+    active_members: tuple[TargetKey, ...] | None = None,
+    source_scientific_payload_hash: str = _TEST_SOURCE_HASH,
+) -> CurriculumUpdate:
+    return CurriculumUpdate(
+        round_index,
+        assessments,
+        CurriculumEvidenceBasis(
+            estimand,
+            (
+                controller.state.active_members
+                if active_members is None
+                else active_members
+            ),
+            source_scientific_payload_hash,
+        ),
+        frontier,
     )
 
 
@@ -136,6 +186,25 @@ def test_catalog_rejects_stranding_overlap_but_allows_safe_partial_overlap() -> 
     )
 
 
+def test_curriculum_names_are_canonical_and_aliases_collide() -> None:
+    decomposed = _target("e\u0301", 1)
+    state = CurriculumState(
+        probe_counts=(("é", 2),),
+        evidence_counts=(("é", 3),),
+    )
+
+    assert decomposed.name == "é"
+    assert _assessment("e\u0301").target == "é"
+    assert state.probe_count("e\u0301") == 2
+    assert state.evidence_count("e\u0301") == 3
+    with pytest.raises(ValueError, match="names must be unique"):
+        CurriculumCatalog((decomposed, _target("é", 2)))
+    with pytest.raises(ValueError, match="without surrounding whitespace"):
+        _target(" root", 1)
+    with pytest.raises(ValueError, match="keys must be unique"):
+        CurriculumState(probe_counts=(("e\u0301", 1), ("é", 1)))
+
+
 def test_oracle_waits_for_gap_then_expands_exact_hierarchy_deterministically() -> None:
     catalog = CurriculumCatalog(
         (
@@ -154,14 +223,16 @@ def test_oracle_waits_for_gap_then_expands_exact_hierarchy_deterministically() -
     oracle = CurriculumEvidence.ORACLE
 
     held = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (_assessment("root", evidence=oracle),),
             _frontier(oracle, gap=0.1),
         )
     )
     root = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
             (_assessment("root", evidence=oracle),),
             _frontier(oracle, gap=0.01),
@@ -171,7 +242,7 @@ def test_oracle_waits_for_gap_then_expands_exact_hierarchy_deterministically() -
         _assessment("next-b", evidence=oracle, reward=(0.4, 0.4)),
         _assessment("next-a", evidence=oracle, reward=(0.4, 0.4)),
     )
-    child = controller.update(CurriculumUpdate(2, tied, _frontier(oracle, gap=0.0)))
+    child = controller.update(_update(controller, 2, tied, _frontier(oracle, gap=0.0)))
 
     assert held.reason is CurriculumReason.FRONTIER_GAP_OPEN
     assert root.action is CurriculumAction.EXPAND
@@ -191,7 +262,8 @@ def test_oracle_rejects_uncertain_or_nonoracle_inputs() -> None:
 
     with pytest.raises(ValueError, match="oracle estimates must be exact"):
         controller.update(
-            CurriculumUpdate(
+            _update(
+                controller,
                 0,
                 (
                     _assessment(
@@ -222,21 +294,24 @@ def test_estimated_frontier_requires_narrow_bounds_and_low_residual_value() -> N
     )
 
     wide = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (estimate,),
             _frontier(CurriculumEvidence.POSTERIOR, residual=0.05, width=0.1),
         )
     )
     unresolved = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
             (estimate,),
             _frontier(CurriculumEvidence.POSTERIOR, residual=0.2, width=0.01),
         )
     )
     expanded = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             2,
             (estimate,),
             _frontier(CurriculumEvidence.POSTERIOR, residual=0.05, width=0.01),
@@ -251,6 +326,34 @@ def test_estimated_frontier_requires_narrow_bounds_and_low_residual_value() -> N
     assert controller.capabilities.knows_approximate_frontier
 
 
+def test_width_gates_hold_when_any_eligible_candidate_is_wide() -> None:
+    catalog = CurriculumCatalog((_target("narrow", 1), _target("wide", 2)))
+    for policy, frontier in (
+        (
+            EstimatedFrontierPolicy(
+                residual_value_threshold=0.1,
+                bound_width_tolerance=0.1,
+            ),
+            _frontier(CurriculumEvidence.POSTERIOR),
+        ),
+        (MarginalValuePerBitPolicy(bound_width_tolerance=0.1), None),
+    ):
+        controller = _controller(catalog, policy)
+        decision = controller.update(
+            _update(
+                controller,
+                0,
+                (
+                    _assessment("narrow", reward=(0.3, 0.35)),
+                    _assessment("wide", reward=(0.3, 0.5)),
+                ),
+                frontier,
+            )
+        )
+
+        assert decision.reason is CurriculumReason.UNCERTAINTY_TOO_WIDE
+
+
 def test_marginal_value_per_nat_uses_conservative_bounds_not_point_order() -> None:
     catalog = CurriculumCatalog((_target("large", 1), _target("small", 2)))
     controller = _controller(
@@ -258,7 +361,8 @@ def test_marginal_value_per_nat_uses_conservative_bounds_not_point_order() -> No
         MarginalValuePerBitPolicy(minimum_value_per_nat=0.1),
     )
     decision = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (
                 _assessment(
@@ -307,13 +411,39 @@ def test_marginal_value_policy_applies_an_optional_finite_width_gate() -> None:
     )
 
     decision = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (_assessment("root", reward=(0.2, 0.4)),),
         )
     )
 
     assert decision.reason is CurriculumReason.UNCERTAINTY_TOO_WIDE
+
+
+def test_selection_requires_every_structurally_eligible_target() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("alpha", 1), _target("beta", 2))),
+        MarginalValuePerBitPolicy(),
+    )
+
+    with pytest.raises(ValueError, match="every eligible target"):
+        controller.update(
+            _update(
+                controller,
+                0,
+                (_assessment("alpha"),),
+            )
+        )
+
+
+def test_assessment_rejects_an_unrepresentable_value_per_nat() -> None:
+    with pytest.raises(ValueError, match="value per nat must be finite"):
+        _assessment(
+            "root",
+            reward=(1e308, 1e308),
+            information=(5e-324, 5e-324),
+        )
 
 
 def test_support_information_and_hierarchy_limits_fail_closed() -> None:
@@ -328,20 +458,25 @@ def test_support_information_and_hierarchy_limits_fail_closed() -> None:
     )
 
     limited = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (_assessment("root", information=(1.0, 1.0)),),
         )
     )
     child_first = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
-            (_assessment("child", information=(0.1, 0.1)),),
+            (
+                _assessment("root", information=(1.0, 1.0)),
+                _assessment("child", information=(0.1, 0.1)),
+            ),
         )
     )
 
     assert limited.reason is CurriculumReason.BUDGET_OR_SUPPORT_LIMIT
-    assert child_first.reason is CurriculumReason.NO_ELIGIBLE_TARGET
+    assert child_first.reason is CurriculumReason.BUDGET_OR_SUPPORT_LIMIT
     assert controller.state.active_targets == ()
     assert controller.state.planned_information_nats == 0.0
 
@@ -353,10 +488,10 @@ def test_evidence_counts_cannot_regress_across_updates() -> None:
         MarginalValuePerBitPolicy(),
         support=1,
     )
-    controller.update(CurriculumUpdate(0, (_assessment("root", count=2),)))
+    controller.update(_update(controller, 0, (_assessment("root", count=2),)))
 
     with pytest.raises(ValueError, match="cannot decrease"):
-        controller.update(CurriculumUpdate(1, (_assessment("root", count=1),)))
+        controller.update(_update(controller, 1, (_assessment("root", count=1),)))
 
 
 def test_candidate_group_policy_probes_every_group_before_expansion() -> None:
@@ -373,7 +508,8 @@ def test_candidate_group_policy_probes_every_group_before_expansion() -> None:
     discovery = CurriculumEvidence.DISCOVERY
 
     first = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (
                 _assessment("beta", evidence=discovery, probe_nats=0.2),
@@ -382,7 +518,8 @@ def test_candidate_group_policy_probes_every_group_before_expansion() -> None:
         )
     )
     second = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
             (
                 _assessment(
@@ -396,7 +533,8 @@ def test_candidate_group_policy_probes_every_group_before_expansion() -> None:
         )
     )
     expanded = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             2,
             (
                 _assessment(
@@ -430,6 +568,54 @@ def test_candidate_group_policy_probes_every_group_before_expansion() -> None:
     assert not controller.capabilities.knows_target_hierarchy
 
 
+def test_candidate_group_policy_requires_every_inactive_group() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("alpha", 1), _target("beta", 2))),
+        CandidateGroupDiscoveryPolicy(1, 0.1),
+    )
+
+    with pytest.raises(ValueError, match="every inactive candidate group"):
+        controller.update(
+            _update(
+                controller,
+                0,
+                (
+                    _assessment(
+                        "alpha",
+                        evidence=CurriculumEvidence.DISCOVERY,
+                        count=1,
+                    ),
+                ),
+            )
+        )
+
+
+def test_candidate_group_policy_uses_remaining_probes_to_narrow_bounds() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("candidate", 1),)),
+        CandidateGroupDiscoveryPolicy(
+            minimum_evidence=1,
+            bound_width_tolerance=0.1,
+            maximum_probes_per_target=2,
+        ),
+    )
+    wide = _assessment(
+        "candidate",
+        evidence=CurriculumEvidence.DISCOVERY,
+        reward=(0.2, 0.4),
+        probe_nats=0.25,
+        count=1,
+    )
+
+    first = controller.update(_update(controller, 0, (wide,)))
+    second = controller.update(_update(controller, 1, (wide,)))
+    exhausted = controller.update(_update(controller, 2, (wide,)))
+
+    assert first.action is CurriculumAction.PROBE
+    assert second.action is CurriculumAction.PROBE
+    assert exhausted.reason is CurriculumReason.INSUFFICIENT_DISCOVERY_EVIDENCE
+
+
 def test_candidate_group_policy_stops_when_probes_do_not_produce_evidence() -> None:
     catalog = CurriculumCatalog((_target("unknown", 1),))
     controller = _controller(
@@ -447,10 +633,10 @@ def test_candidate_group_policy_stops_when_probes_do_not_produce_evidence() -> N
     )
 
     assert (
-        controller.update(CurriculumUpdate(0, (assessment,))).action
+        controller.update(_update(controller, 0, (assessment,))).action
         is CurriculumAction.PROBE
     )
-    stopped = controller.update(CurriculumUpdate(1, (assessment,)))
+    stopped = controller.update(_update(controller, 1, (assessment,)))
 
     assert stopped.reason is CurriculumReason.INSUFFICIENT_DISCOVERY_EVIDENCE
     assert controller.state.active_targets == ()
@@ -473,7 +659,7 @@ def test_curriculum_acquisition_adapter_respects_active_support_and_query_budget
     catalog = CurriculumCatalog((_target("initial", 1, 2),))
     controller = _controller(catalog, MarginalValuePerBitPolicy())
     policy = CurriculumAcquisitionPolicy(controller)
-    policy.update_curriculum(CurriculumUpdate(0, (_assessment("initial"),)))
+    policy.update_curriculum(_update(controller, 0, (_assessment("initial"),)))
     agent = FactorizedQueryAgent(
         policy,
         epsilon=0.0,
@@ -497,6 +683,42 @@ def test_curriculum_acquisition_adapter_respects_active_support_and_query_budget
     }
     assert TargetKey("reward", 3) not in controller.queryable_members
     assert environment.evaluate(agent.deployment()) == 1.0
+    assert agent.capabilities.knows_relevance_mask
+    assert agent.capabilities.knows_coordinate_factorization
+    assert agent.capabilities.knows_true_posterior_family
+    assert agent.capabilities.knows_approximate_frontier
+
+
+def test_curriculum_acquisition_binds_the_execution_reward_spec() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("initial", 1),)),
+        MarginalValuePerBitPolicy(),
+    )
+    policy = CurriculumAcquisitionPolicy(controller)
+    policy.update_curriculum(_update(controller, 0, (_assessment("initial"),)))
+    agent = FactorizedQueryAgent(policy, q=3, epsilon=0.0)
+
+    with pytest.raises(ValueError, match="reward spec does not match"):
+        agent.select_train_action(agent.acquisition_context(useful_targets(1)))
+
+
+def test_curriculum_acquisition_rejects_an_external_reward_contract() -> None:
+    with pytest.raises(ValueError, match="requires identity reward"):
+        replace(_TEST_ESTIMAND, reward_transform="clipped")
+
+    estimand = replace(
+        _TEST_ESTIMAND,
+        deployment_reward_contract=CurriculumDeploymentRewardContract.EXTERNAL,
+    )
+    controller = CurriculumController(
+        CurriculumCatalog((_target("initial", 1),)),
+        MarginalValuePerBitPolicy(),
+        CurriculumLimits(4, 4.0),
+        estimand,
+    )
+
+    with pytest.raises(ValueError, match="factorized additive"):
+        CurriculumAcquisitionPolicy(controller)
 
 
 def test_multi_member_discovery_probe_preserves_one_query_budget() -> None:
@@ -516,7 +738,7 @@ def test_multi_member_discovery_probe_preserves_one_query_budget() -> None:
         probe_nats=0.25,
     )
     assert (
-        policy.update_curriculum(CurriculumUpdate(0, (assessment,))).action
+        policy.update_curriculum(_update(controller, 0, (assessment,))).action
         is CurriculumAction.PROBE
     )
     agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1)
@@ -527,41 +749,70 @@ def test_multi_member_discovery_probe_preserves_one_query_budget() -> None:
     assert len(probed.targets) == 1
     assert probed.targets[0] in candidates[1:]
     assert (
-        policy.update_curriculum(CurriculumUpdate(1, (assessment,))).action
+        policy.update_curriculum(_update(controller, 1, (assessment,))).action
         is CurriculumAction.HOLD
     )
     after_probe = agent.select_train_action(agent.acquisition_context(candidates))
     assert after_probe.targets == ()
 
 
+def test_repeated_discovery_probe_remains_executable_after_zero_entropy() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("candidate", 1),)),
+        CandidateGroupDiscoveryPolicy(
+            minimum_evidence=2,
+            bound_width_tolerance=0.1,
+            maximum_probes_per_target=2,
+        ),
+    )
+    policy = CurriculumAcquisitionPolicy(controller)
+    agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1)
+    assessment = _assessment(
+        "candidate",
+        evidence=CurriculumEvidence.DISCOVERY,
+        probe_nats=0.25,
+    )
+    candidates = useful_targets(1)
+
+    for round_index in range(2):
+        decision = policy.update_curriculum(
+            _update(controller, round_index, (assessment,))
+        )
+        action = agent.select_train_action(agent.acquisition_context(candidates))
+        agent.observe(ObservationBatch(action, (1,)))
+        assert decision.action is CurriculumAction.PROBE
+        assert len(action.targets) == 1
+
+    assert controller.state.probe_counts == (("candidate", 2),)
+    assert controller.state.planned_information_nats == 0.5
+
+
 def test_discovery_probe_temporarily_excludes_unrelated_active_support() -> None:
     catalog = CurriculumCatalog((_target("active", 1), _target("candidate", 2, 3)))
-    controller = _controller(
+    state = CurriculumState(
+        next_round=1,
+        active_targets=("active",),
+        active_members=(TargetKey("reward", 1),),
+        planned_information_nats=1.0,
+        decisions=(_expansion_decision(0, "active", 1),),
+    )
+    controller = CurriculumController(
         catalog,
         CandidateGroupDiscoveryPolicy(1, 0.1),
+        CurriculumLimits(16, 16.0),
+        _TEST_ESTIMAND,
+        state,
     )
     policy = CurriculumAcquisitionPolicy(controller)
     agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1, seed=0)
     candidates = useful_targets(3)
 
-    expanded = policy.update_curriculum(
-        CurriculumUpdate(
-            0,
-            (
-                _assessment(
-                    "active",
-                    evidence=CurriculumEvidence.DISCOVERY,
-                    count=1,
-                ),
-            ),
-        )
-    )
-    assert expanded.action is CurriculumAction.EXPAND
     active_action = agent.select_train_action(agent.acquisition_context(candidates))
     agent.observe(ObservationBatch(active_action, (1,)))
 
     probed = policy.update_curriculum(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
             (
                 _assessment(
@@ -583,6 +834,35 @@ def test_discovery_probe_temporarily_excludes_unrelated_active_support() -> None
     assert probe_action.targets[0].key in controller.queryable_members
 
 
+def test_discovery_probe_does_not_affect_deployment_before_expansion() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("candidate", 1),)),
+        CandidateGroupDiscoveryPolicy(1, 0.1),
+    )
+    policy = CurriculumAcquisitionPolicy(controller)
+    agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1)
+    probing = _assessment(
+        "candidate",
+        evidence=CurriculumEvidence.DISCOVERY,
+        probe_nats=0.25,
+    )
+    policy.update_curriculum(_update(controller, 0, (probing,)))
+    action = agent.select_train_action(agent.acquisition_context(useful_targets(1)))
+    agent.observe(ObservationBatch(action, (1,)))
+
+    assert agent.deployment().support == ()
+
+    expansion = _assessment(
+        "candidate",
+        evidence=CurriculumEvidence.DISCOVERY,
+        count=1,
+    )
+    decision = policy.update_curriculum(_update(controller, 1, (expansion,)))
+
+    assert decision.action is CurriculumAction.EXPAND
+    assert agent.deployment().support == (1,)
+
+
 def test_discovery_probe_fails_when_no_candidate_member_is_exposed() -> None:
     catalog = CurriculumCatalog((_target("candidate", 2, 3),))
     controller = _controller(
@@ -591,7 +871,8 @@ def test_discovery_probe_fails_when_no_candidate_member_is_exposed() -> None:
     )
     policy = CurriculumAcquisitionPolicy(controller)
     policy.update_curriculum(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (
                 _assessment(
@@ -604,34 +885,58 @@ def test_discovery_probe_fails_when_no_candidate_member_is_exposed() -> None:
     )
     agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1)
 
-    with pytest.raises(ValueError, match="requires a selected candidate"):
+    with pytest.raises(ValueError, match="omits curriculum members"):
         agent.select_train_action(agent.acquisition_context(useful_targets(1)))
 
 
-def test_pending_action_is_revalidated_after_a_curriculum_probe_update() -> None:
-    catalog = CurriculumCatalog((_target("active", 1), _target("candidate", 2)))
+def test_discovery_probe_rejects_partial_candidate_exposure() -> None:
     controller = _controller(
-        catalog,
+        CurriculumCatalog((_target("candidate", 1, 2),)),
         CandidateGroupDiscoveryPolicy(1, 0.1),
     )
     policy = CurriculumAcquisitionPolicy(controller)
     policy.update_curriculum(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
             (
                 _assessment(
-                    "active",
+                    "candidate",
                     evidence=CurriculumEvidence.DISCOVERY,
-                    count=1,
+                    probe_nats=0.25,
                 ),
             ),
         )
     )
     agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1)
+
+    with pytest.raises(ValueError, match="omits curriculum members"):
+        agent.select_train_action(agent.acquisition_context(useful_targets(1)))
+
+
+def test_pending_action_is_revalidated_after_a_curriculum_probe_update() -> None:
+    catalog = CurriculumCatalog((_target("active", 1), _target("candidate", 2)))
+    state = CurriculumState(
+        next_round=1,
+        active_targets=("active",),
+        active_members=(TargetKey("reward", 1),),
+        planned_information_nats=1.0,
+        decisions=(_expansion_decision(0, "active", 1),),
+    )
+    controller = CurriculumController(
+        catalog,
+        CandidateGroupDiscoveryPolicy(1, 0.1),
+        CurriculumLimits(16, 16.0),
+        _TEST_ESTIMAND,
+        state,
+    )
+    policy = CurriculumAcquisitionPolicy(controller)
+    agent = FactorizedQueryAgent(policy, epsilon=0.0, query_budget=1)
     context = agent.acquisition_context(useful_targets(2))
     pending = agent.select_train_action(context)
     policy.update_curriculum(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
             (
                 _assessment(
@@ -683,9 +988,126 @@ def test_controller_rejects_a_policy_that_underprices_an_expansion() -> None:
 
     with pytest.raises(ValueError, match="differs from assessment"):
         controller.update(
-            CurriculumUpdate(
+            _update(
+                controller,
                 0,
                 (_assessment("root", information=(1.0, 1.0)),),
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _PartialActivePolicy:
+    action: CurriculumAction
+    capabilities: CapabilityManifest = field(
+        default_factory=lambda: CapabilityManifest(
+            knows_approximate_frontier=True,
+            knows_reward_parameters=True,
+        )
+    )
+
+    def decide(
+        self,
+        catalog: CurriculumCatalog,
+        state: object,
+        update: CurriculumUpdate,
+        limits: object,
+    ) -> CurriculumDecision:
+        del catalog, state, limits
+        assessment = update.assessments[0]
+        return CurriculumDecision(
+            update.round_index,
+            self.action,
+            (
+                CurriculumReason.EXPANSION_SELECTED
+                if self.action is CurriculumAction.EXPAND
+                else CurriculumReason.DISCOVERY_PROBE
+            ),
+            target=assessment.target,
+            score=assessment.conservative_value_per_nat,
+            planned_information_nats=(
+                assessment.information_nats_upper
+                if self.action is CurriculumAction.EXPAND
+                else assessment.probe_information_nats
+            ),
+            support_added=1 if self.action is CurriculumAction.EXPAND else 0,
+        )
+
+
+@pytest.mark.parametrize(
+    ("action", "evidence", "message"),
+    (
+        (
+            CurriculumAction.EXPAND,
+            CurriculumEvidence.POSTERIOR,
+            "every eligible target",
+        ),
+        (
+            CurriculumAction.PROBE,
+            CurriculumEvidence.DISCOVERY,
+            "every inactive candidate group",
+        ),
+    ),
+)
+def test_controller_rejects_partial_custom_active_decisions(
+    action: CurriculumAction,
+    evidence: CurriculumEvidence,
+    message: str,
+) -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("alpha", 1), _target("beta", 2))),
+        _PartialActivePolicy(action),
+    )
+    assessment = _assessment(
+        "alpha",
+        evidence=evidence,
+        probe_nats=0.25,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        controller.update(_update(controller, 0, (assessment,)))
+
+
+@dataclass(frozen=True, slots=True)
+class _PosteriorProbePolicy:
+    capabilities: CapabilityManifest = field(
+        default_factory=lambda: CapabilityManifest(
+            knows_approximate_frontier=True,
+            knows_reward_parameters=True,
+        )
+    )
+
+    def decide(
+        self,
+        catalog: CurriculumCatalog,
+        state: object,
+        update: CurriculumUpdate,
+        limits: object,
+    ) -> CurriculumDecision:
+        del catalog, state, limits
+        assessment = update.assessments[0]
+        return CurriculumDecision(
+            update.round_index,
+            CurriculumAction.PROBE,
+            CurriculumReason.DISCOVERY_PROBE,
+            target=assessment.target,
+            score=assessment.conservative_value_per_nat,
+            planned_information_nats=assessment.probe_information_nats,
+        )
+
+
+def test_controller_requires_discovery_evidence_for_a_probe() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("root", 1),)),
+        _PosteriorProbePolicy(),
+    )
+
+    with pytest.raises(ValueError, match="require discovery evidence"):
+        controller.update(
+            _update(
+                controller,
+                0,
+                (_assessment("root", probe_nats=0.5),),
             )
         )
 
@@ -740,7 +1162,8 @@ def test_controller_binds_evidence_to_valid_declared_capabilities() -> None:
     controller = _controller(catalog, _OracleConsumerWithoutPrivileges())
     with pytest.raises(ValueError, match="exact-frontier capability"):
         controller.update(
-            CurriculumUpdate(
+            _update(
+                controller,
                 0,
                 (
                     _assessment(
@@ -751,6 +1174,48 @@ def test_controller_binds_evidence_to_valid_declared_capabilities() -> None:
                 frontier=_frontier(CurriculumEvidence.ORACLE),
             )
         )
+
+
+def test_controller_binds_updates_to_estimand_and_active_support() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("root", 1),)),
+        MarginalValuePerBitPolicy(),
+    )
+    other_estimand = CurriculumEstimand(
+        name=_TEST_ESTIMAND.name,
+        reward_spec_semantic_hash=_TEST_REWARD_SPEC_HASH,
+        deployment_reward_contract=_TEST_ESTIMAND.deployment_reward_contract,
+        reward_transform=_TEST_ESTIMAND.reward_transform,
+        reward_aggregation=_TEST_ESTIMAND.reward_aggregation,
+        reward_horizon=_TEST_ESTIMAND.reward_horizon,
+        information_variable=_TEST_ESTIMAND.information_variable,
+        information_conditioning=_TEST_ESTIMAND.information_conditioning,
+        confidence_method=_TEST_ESTIMAND.confidence_method,
+        confidence_level=_TEST_ESTIMAND.confidence_level,
+        confidence_family=_TEST_ESTIMAND.confidence_family,
+        data_split="different synthetic split",
+    )
+
+    with pytest.raises(ValueError, match="estimand does not match"):
+        controller.update(
+            _update(
+                controller,
+                0,
+                (_assessment("root"),),
+                estimand=other_estimand,
+            )
+        )
+    with pytest.raises(ValueError, match="basis does not match active support"):
+        controller.update(
+            _update(
+                controller,
+                0,
+                (_assessment("root"),),
+                active_members=(TargetKey("reward", 99),),
+            )
+        )
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        CurriculumEvidenceBasis(_TEST_ESTIMAND, (), "not-a-digest")
 
 
 def test_decision_reasons_and_scores_are_auditable() -> None:
@@ -797,7 +1262,45 @@ def test_decision_reasons_and_scores_are_auditable() -> None:
         WrongScorePolicy(),
     )
     with pytest.raises(ValueError, match="score differs from assessment"):
-        controller.update(CurriculumUpdate(0, (_assessment("root"),)))
+        controller.update(_update(controller, 0, (_assessment("root"),)))
+
+
+def test_decision_score_is_a_canonical_float() -> None:
+    integer_score = CurriculumDecision(
+        0,
+        CurriculumAction.EXPAND,
+        CurriculumReason.EXPANSION_SELECTED,
+        target="root",
+        score=1,
+        planned_information_nats=1.0,
+        support_added=1,
+    )
+    float_score = CurriculumDecision(
+        0,
+        CurriculumAction.EXPAND,
+        CurriculumReason.EXPANSION_SELECTED,
+        target="root",
+        score=1.0,
+        planned_information_nats=1.0,
+        support_added=1,
+    )
+    negative_zero = CurriculumDecision(
+        0,
+        CurriculumAction.EXPAND,
+        CurriculumReason.EXPANSION_SELECTED,
+        target="root",
+        score=-0.0,
+        planned_information_nats=1.0,
+        support_added=1,
+    )
+
+    assert isinstance(integer_score.score, float)
+    assert scientific_hash(
+        integer_score,
+        domain="curriculum-decision",
+    ) == scientific_hash(float_score, domain="curriculum-decision")
+    assert negative_zero.score is not None
+    assert negative_zero.score.hex() == "0x0.0p+0"
 
 
 def test_replay_state_requires_complete_decision_and_information_history() -> None:
@@ -815,6 +1318,24 @@ def test_replay_state_requires_complete_decision_and_information_history() -> No
                 ),
             ),
         )
+
+
+def test_controller_configuration_and_state_are_read_only() -> None:
+    controller = _controller(
+        CurriculumCatalog((_target("root", 1),)),
+        MarginalValuePerBitPolicy(),
+    )
+    stable_hash = hash(controller)
+    controller.update(_update(controller, 0, (_assessment("root"),)))
+    assert hash(controller) == stable_hash
+    for name, value in (
+        ("catalog", CurriculumCatalog((_target("replacement", 2),))),
+        ("policy", OracleFrontierPolicy(0.1)),
+        ("limits", CurriculumLimits(100, 100.0)),
+        ("state", CurriculumState(active_targets=("ghost",))),
+    ):
+        with pytest.raises(FrozenInstanceError):
+            setattr(controller, name, value)
 
 
 def test_replay_state_rejects_scale_dependent_information_understatement() -> None:
@@ -845,13 +1366,18 @@ def test_full_history_residual_enforces_large_hard_information_limit() -> None:
         information=1e16,
     )
     first = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             0,
-            (_assessment("first", information=(1e16, 1e16)),),
+            (
+                _assessment("first", information=(1e16, 1e16)),
+                _assessment("second", reward=(-1.0, -1.0)),
+            ),
         )
     )
     second = controller.update(
-        CurriculumUpdate(
+        _update(
+            controller,
             1,
             (_assessment("second", information=(1.0, 1.0)),),
         )
@@ -894,6 +1420,7 @@ def test_full_history_residual_enforces_large_hard_information_limit() -> None:
             catalog,
             MarginalValuePerBitPolicy(),
             CurriculumLimits(2, 1e16),
+            _TEST_ESTIMAND,
             over_limit_state,
         )
 
@@ -932,6 +1459,41 @@ def test_restored_state_rejects_duplicate_expansion_history() -> None:
             catalog,
             MarginalValuePerBitPolicy(),
             CurriculumLimits(4, 4.0),
+            _TEST_ESTIMAND,
+            state,
+        )
+
+
+def test_restored_state_rejects_probe_history_above_policy_limit() -> None:
+    catalog = CurriculumCatalog((_target("candidate", 1),))
+    decisions = tuple(
+        CurriculumDecision(
+            round_index,
+            CurriculumAction.PROBE,
+            CurriculumReason.DISCOVERY_PROBE,
+            target="candidate",
+            score=1.0,
+            planned_information_nats=0.25,
+        )
+        for round_index in range(2)
+    )
+    state = CurriculumState(
+        next_round=2,
+        planned_information_nats=0.5,
+        probe_counts=(("candidate", 2),),
+        decisions=decisions,
+    )
+
+    with pytest.raises(ValueError, match="probe history exceeds"):
+        CurriculumController(
+            catalog,
+            CandidateGroupDiscoveryPolicy(
+                minimum_evidence=1,
+                bound_width_tolerance=0.1,
+                maximum_probes_per_target=1,
+            ),
+            CurriculumLimits(4, 4.0),
+            _TEST_ESTIMAND,
             state,
         )
 
@@ -953,6 +1515,7 @@ def test_restored_state_rejects_child_before_parent() -> None:
             catalog,
             MarginalValuePerBitPolicy(),
             CurriculumLimits(4, 4.0),
+            _TEST_ESTIMAND,
             state,
         )
 
@@ -972,5 +1535,6 @@ def test_restored_state_rejects_wrong_support_delta() -> None:
             catalog,
             MarginalValuePerBitPolicy(),
             CurriculumLimits(4, 4.0),
+            _TEST_ESTIMAND,
             state,
         )

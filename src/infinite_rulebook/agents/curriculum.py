@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from infinite_rulebook.agents.objectives import expected_entropy_reduction
 from infinite_rulebook.agents.protocols import (
+    AcquisitionContext,
     CapabilityManifest,
     QueryAction,
     QueryTarget,
     TargetKey,
 )
+from infinite_rulebook.artifacts import semantic_hash
 from infinite_rulebook.core.reward import RewardSpec
 from infinite_rulebook.posteriors.categorical import CategoricalPosterior
 
@@ -40,11 +43,31 @@ def _real(
     ):
         raise ValueError(f"{name} must be finite")
     result = float(value)
+    if result == 0.0:
+        result = 0.0
     if positive and result <= 0.0:
         raise ValueError(f"{name} must be positive")
     if minimum is not None and result < minimum:
         raise ValueError(f"{name} must be at least {minimum}")
     return result
+
+
+def _name(value: object, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    normalized = unicodedata.normalize("NFC", value)
+    if not normalized or normalized != normalized.strip():
+        raise ValueError(f"{name} must be nonempty without surrounding whitespace")
+    return normalized
+
+
+def _digest(value: object, name: str) -> str:
+    digest = _name(value, name)
+    if len(digest) != 64 or any(
+        character not in "0123456789abcdef" for character in digest
+    ):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return digest
 
 
 def _information_sum(values: tuple[float, ...]) -> float:
@@ -98,6 +121,112 @@ class CurriculumReason(StrEnum):
     BUDGET_OR_SUPPORT_LIMIT = "budget-or-support-limit"
 
 
+class CurriculumDeploymentRewardContract(StrEnum):
+    """Executable deployment-reward contract for an estimand."""
+
+    FACTORIZED_ADDITIVE_V1 = "factorized-query-agent-additive-v1"
+    EXTERNAL = "external"
+
+
+@dataclass(frozen=True, slots=True)
+class CurriculumEstimand:
+    """Pinned reward, information, uncertainty, and data-split semantics."""
+
+    name: str
+    reward_spec_semantic_hash: str
+    deployment_reward_contract: CurriculumDeploymentRewardContract
+    reward_transform: str
+    reward_aggregation: str
+    reward_horizon: int
+    information_variable: str
+    information_conditioning: str
+    confidence_method: str
+    confidence_level: float
+    confidence_family: str
+    data_split: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.deployment_reward_contract,
+            CurriculumDeploymentRewardContract,
+        ):
+            raise TypeError(
+                "deployment_reward_contract must be a "
+                "CurriculumDeploymentRewardContract"
+            )
+        for field_name in (
+            "name",
+            "reward_transform",
+            "reward_aggregation",
+            "information_variable",
+            "information_conditioning",
+            "confidence_method",
+            "confidence_family",
+            "data_split",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _name(getattr(self, field_name), field_name),
+            )
+        if (
+            self.deployment_reward_contract
+            is CurriculumDeploymentRewardContract.FACTORIZED_ADDITIVE_V1
+            and (
+                self.reward_transform != "identity"
+                or self.reward_aggregation
+                not in {"fixed-horizon mean", "fixed-horizon sum"}
+            )
+        ):
+            raise ValueError(
+                "factorized additive deployment requires identity reward and "
+                "fixed-horizon mean or sum aggregation"
+            )
+        object.__setattr__(
+            self,
+            "reward_spec_semantic_hash",
+            _digest(
+                self.reward_spec_semantic_hash,
+                "reward_spec_semantic_hash",
+            ),
+        )
+        _integer(self.reward_horizon, "reward_horizon", minimum=1)
+        confidence_level = _real(
+            self.confidence_level,
+            "confidence_level",
+            positive=True,
+        )
+        if confidence_level > 1.0:
+            raise ValueError("confidence_level must not exceed one")
+        object.__setattr__(self, "confidence_level", confidence_level)
+
+
+@dataclass(frozen=True, slots=True)
+class CurriculumEvidenceBasis:
+    """Auditable source and exact active-support basis for one update."""
+
+    estimand: CurriculumEstimand
+    active_members: tuple[TargetKey, ...]
+    source_scientific_payload_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.estimand, CurriculumEstimand):
+            raise TypeError("estimand must be a CurriculumEstimand")
+        active_members = tuple(self.active_members)
+        if any(not isinstance(member, TargetKey) for member in active_members):
+            raise TypeError("active_members must contain TargetKey instances")
+        if len(set(active_members)) != len(active_members):
+            raise ValueError("active_members must be unique")
+        object.__setattr__(self, "active_members", tuple(sorted(active_members)))
+        object.__setattr__(
+            self,
+            "source_scientific_payload_hash",
+            _digest(
+                self.source_scientific_payload_hash, "source_scientific_payload_hash"
+            ),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CurriculumTarget:
     """A named target increment over stable query identities."""
@@ -107,20 +236,19 @@ class CurriculumTarget:
     parent: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str):
-            raise TypeError("target name must be a string")
-        if not self.name:
-            raise ValueError("target name must not be empty")
+        name = _name(self.name, "target name")
         members = tuple(self.members)
         if not members or any(not isinstance(member, TargetKey) for member in members):
             raise ValueError("target members must be nonempty TargetKey instances")
         if len(set(members)) != len(members):
             raise ValueError("target members must be unique")
+        parent = self.parent
         if self.parent is not None:
-            if not isinstance(self.parent, str):
-                raise TypeError("target parent must be a string or None")
-            if not self.parent or self.parent == self.name:
+            parent = _name(self.parent, "target parent")
+            if parent == name:
                 raise ValueError("target parent must name a different target")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "parent", parent)
         object.__setattr__(self, "members", tuple(sorted(members)))
 
 
@@ -178,6 +306,7 @@ class CurriculumCatalog:
     def target(self, name: str) -> CurriculumTarget:
         """Return one named target or fail closed."""
 
+        name = _name(name, "target name")
         for target in self.targets:
             if target.name == name:
                 return target
@@ -222,10 +351,7 @@ class CurriculumAssessment:
     evidence_count: int = 0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.target, str):
-            raise TypeError("assessment target must be a string")
-        if not self.target:
-            raise ValueError("assessment target must not be empty")
+        target = _name(self.target, "assessment target")
         if not isinstance(self.evidence, CurriculumEvidence):
             raise TypeError("assessment evidence must be CurriculumEvidence")
         lower_reward = _real(self.marginal_reward_lower, "marginal_reward_lower")
@@ -244,6 +370,7 @@ class CurriculumAssessment:
             raise ValueError("marginal reward bounds are reversed")
         if upper_information < lower_information:
             raise ValueError("information bounds are reversed")
+        object.__setattr__(self, "target", target)
         object.__setattr__(self, "marginal_reward_lower", lower_reward)
         object.__setattr__(self, "marginal_reward_upper", upper_reward)
         object.__setattr__(self, "information_nats_lower", lower_information)
@@ -258,6 +385,8 @@ class CurriculumAssessment:
             ),
         )
         _integer(self.evidence_count, "evidence_count")
+        if not math.isfinite(self.conservative_value_per_nat):
+            raise ValueError("conservative value per nat must be finite")
 
     @property
     def reward_bound_width(self) -> float:
@@ -274,6 +403,7 @@ class CurriculumUpdate:
 
     round_index: int
     assessments: tuple[CurriculumAssessment, ...]
+    evidence_basis: CurriculumEvidenceBasis
     frontier: FrontierEstimate | None = None
 
     def __post_init__(self) -> None:
@@ -286,6 +416,8 @@ class CurriculumUpdate:
             raise TypeError("assessments must contain CurriculumAssessment records")
         if len({assessment.target for assessment in assessments}) != len(assessments):
             raise ValueError("an update may assess each target at most once")
+        if not isinstance(self.evidence_basis, CurriculumEvidenceBasis):
+            raise TypeError("evidence_basis must be a CurriculumEvidenceBasis")
         if self.frontier is not None and not isinstance(
             self.frontier,
             FrontierEstimate,
@@ -356,11 +488,10 @@ class CurriculumDecision:
             }:
                 raise ValueError("hold decision reason is incompatible with its action")
         else:
-            if not isinstance(self.target, str) or not self.target:
-                raise ValueError("active decisions require a target")
+            target = _name(self.target, "decision target")
             if self.score is None:
                 raise ValueError("active decisions require a score")
-            _real(self.score, "score")
+            object.__setattr__(self, "score", _real(self.score, "score"))
             if information <= 0.0:
                 raise ValueError("active decisions require positive information cost")
             if self.action is CurriculumAction.EXPAND and self.support_added < 1:
@@ -374,6 +505,7 @@ class CurriculumDecision:
             )
             if self.reason is not expected_reason:
                 raise ValueError("decision reason is incompatible with its action")
+            object.__setattr__(self, "target", target)
         object.__setattr__(self, "planned_information_nats", information)
 
 
@@ -391,10 +523,11 @@ class CurriculumState:
 
     def __post_init__(self) -> None:
         _integer(self.next_round, "next_round")
-        if len(set(self.active_targets)) != len(self.active_targets):
+        active_targets = tuple(
+            _name(name, "active target name") for name in self.active_targets
+        )
+        if len(set(active_targets)) != len(active_targets):
             raise ValueError("active target names must be unique")
-        if any(not isinstance(name, str) or not name for name in self.active_targets):
-            raise ValueError("active target names must be nonempty strings")
         if any(not isinstance(member, TargetKey) for member in self.active_members):
             raise TypeError("active members must be TargetKey instances")
         if len(set(self.active_members)) != len(self.active_members):
@@ -431,27 +564,24 @@ class CurriculumState:
         )
         if reconstructed_information != self.planned_information_nats:
             raise ValueError("planned information must match decision history")
-        object.__setattr__(self, "active_targets", tuple(sorted(self.active_targets)))
+        object.__setattr__(self, "active_targets", tuple(sorted(active_targets)))
         object.__setattr__(self, "active_members", tuple(sorted(self.active_members)))
         object.__setattr__(self, "decisions", decisions)
 
     def probe_count(self, target: str) -> int:
-        return dict(self.probe_counts).get(target, 0)
+        return dict(self.probe_counts).get(_name(target, "target name"), 0)
 
     def evidence_count(self, target: str) -> int:
-        return dict(self.evidence_counts).get(target, 0)
+        return dict(self.evidence_counts).get(_name(target, "target name"), 0)
 
 
 def _validated_counts(
     values: tuple[tuple[str, int], ...],
     name: str,
 ) -> tuple[tuple[str, int], ...]:
-    pairs = tuple(values)
-    if any(
-        not isinstance(key, str) or not key or _integer(value, name) < 0
-        for key, value in pairs
-    ):
-        raise ValueError(f"{name} must contain nonnegative named counts")
+    pairs = tuple(
+        (_name(key, f"{name} key"), _integer(value, name)) for key, value in values
+    )
     if len({key for key, _ in pairs}) != len(pairs):
         raise ValueError(f"{name} keys must be unique")
     return tuple(sorted(pairs))
@@ -612,19 +742,19 @@ class EstimatedFrontierPolicy:
             return _hold(update, CurriculumReason.UNCERTAINTY_TOO_WIDE)
         if frontier.residual_value_upper > self.residual_value_threshold:
             return _hold(update, CurriculumReason.RESIDUAL_VALUE_OPEN)
-        narrow = tuple(
-            assessment
+        _require_complete_selection(catalog, state, assessments)
+        if any(
+            assessment.reward_bound_width > self.bound_width_tolerance
             for assessment in assessments
-            if assessment.reward_bound_width <= self.bound_width_tolerance
-        )
-        if not narrow and assessments:
+            if _structurally_eligible(catalog, state, assessment)
+        ):
             return _hold(update, CurriculumReason.UNCERTAINTY_TOO_WIDE)
         return _select_expansion(
             catalog,
             state,
             update,
             limits,
-            narrow,
+            assessments,
             self.minimum_value_per_nat,
         )
 
@@ -664,20 +794,20 @@ class MarginalValuePerBitPolicy:
         limits: CurriculumLimits,
     ) -> CurriculumDecision:
         assessments = _assessments(update, CurriculumEvidence.POSTERIOR)
-        narrow = tuple(
-            assessment
+        _require_complete_selection(catalog, state, assessments)
+        if any(
+            self.bound_width_tolerance is not None
+            and assessment.reward_bound_width > self.bound_width_tolerance
             for assessment in assessments
-            if self.bound_width_tolerance is None
-            or assessment.reward_bound_width <= self.bound_width_tolerance
-        )
-        if not narrow and assessments:
+            if _structurally_eligible(catalog, state, assessment)
+        ):
             return _hold(update, CurriculumReason.UNCERTAINTY_TOO_WIDE)
         return _select_expansion(
             catalog,
             state,
             update,
             limits,
-            narrow,
+            assessments,
             self.minimum_value_per_nat,
         )
 
@@ -722,20 +852,22 @@ class CandidateGroupDiscoveryPolicy:
             raise ValueError(
                 "candidate-group discovery cannot consume a declared hierarchy"
             )
+        _require_complete_discovery(catalog, state, assessments)
         inactive = tuple(
             assessment
             for assessment in assessments
             if assessment.target not in state.active_targets
         )
-        under_sampled = tuple(
+        unresolved = tuple(
             assessment
             for assessment in inactive
             if assessment.evidence_count < self.minimum_evidence
+            or assessment.reward_bound_width > self.bound_width_tolerance
         )
-        if under_sampled:
+        if unresolved:
             probes = tuple(
                 assessment
-                for assessment in under_sampled
+                for assessment in unresolved
                 if state.probe_count(assessment.target) < self.maximum_probes_per_target
                 and _feasible(
                     catalog,
@@ -749,6 +881,7 @@ class CandidateGroupDiscoveryPolicy:
                 selected = min(
                     probes,
                     key=lambda item: (
+                        item.evidence_count >= self.minimum_evidence,
                         item.evidence_count,
                         state.probe_count(item.target),
                         item.target,
@@ -763,42 +896,38 @@ class CandidateGroupDiscoveryPolicy:
                     selected.conservative_value_per_nat,
                     CurriculumReason.DISCOVERY_PROBE,
                 )
-            reason = (
-                CurriculumReason.INSUFFICIENT_DISCOVERY_EVIDENCE
-                if all(
-                    state.probe_count(item.target) >= self.maximum_probes_per_target
-                    for item in under_sampled
-                )
-                else CurriculumReason.BUDGET_OR_SUPPORT_LIMIT
-            )
+            if all(
+                state.probe_count(item.target) >= self.maximum_probes_per_target
+                for item in unresolved
+            ):
+                reason = CurriculumReason.INSUFFICIENT_DISCOVERY_EVIDENCE
+            else:
+                reason = CurriculumReason.BUDGET_OR_SUPPORT_LIMIT
             return _hold(update, reason)
-        narrow = tuple(
-            assessment
-            for assessment in inactive
-            if assessment.reward_bound_width <= self.bound_width_tolerance
-        )
-        if not narrow and inactive:
-            return _hold(update, CurriculumReason.UNCERTAINTY_TOO_WIDE)
         return _select_expansion(
             catalog,
             state,
             update,
             limits,
-            narrow,
+            inactive,
             self.minimum_value_per_nat,
         )
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class CurriculumController:
     """Fail-closed mutable shell around a pure curriculum policy."""
 
     catalog: CurriculumCatalog
     policy: CurriculumPolicy
     limits: CurriculumLimits
+    estimand: CurriculumEstimand
     state: CurriculumState = field(default_factory=CurriculumState)
 
     def __post_init__(self) -> None:
+        self._validate_configuration()
+
+    def _validate_configuration(self) -> None:
         if not isinstance(self.catalog, CurriculumCatalog):
             raise TypeError("catalog must be a CurriculumCatalog")
         if not isinstance(self.policy, CurriculumPolicy):
@@ -810,6 +939,8 @@ class CurriculumController:
             raise TypeError("curriculum policy must declare a CapabilityManifest")
         if not isinstance(self.limits, CurriculumLimits):
             raise TypeError("limits must be CurriculumLimits")
+        if not isinstance(self.estimand, CurriculumEstimand):
+            raise TypeError("estimand must be a CurriculumEstimand")
         if not isinstance(self.state, CurriculumState):
             raise TypeError("state must be CurriculumState")
         if any(target.parent is not None for target in self.catalog.targets) and not (
@@ -840,8 +971,13 @@ class CurriculumController:
 
         if not isinstance(update, CurriculumUpdate):
             raise TypeError("update must be a CurriculumUpdate")
+        self._validate_configuration()
         if update.round_index != self.state.next_round:
             raise ValueError("curriculum update round does not match state")
+        if update.evidence_basis.estimand != self.estimand:
+            raise ValueError("curriculum update estimand does not match controller")
+        if update.evidence_basis.active_members != self.state.active_members:
+            raise ValueError("curriculum evidence basis does not match active support")
         known = {target.name for target in self.catalog.targets}
         if any(item.target not in known for item in update.assessments):
             raise ValueError("curriculum update contains an unknown target")
@@ -866,7 +1002,7 @@ class CurriculumController:
         )
         if not isinstance(decision, CurriculumDecision):
             raise TypeError("curriculum policy must return CurriculumDecision")
-        self.state = self._transition(update, decision)
+        object.__setattr__(self, "state", self._transition(update, decision))
         return decision
 
     def _transition(
@@ -886,6 +1022,23 @@ class CurriculumController:
             )
             if assessment is None:
                 raise ValueError("active decision target was not assessed")
+            if (
+                decision.action is CurriculumAction.PROBE
+                and assessment.evidence is not CurriculumEvidence.DISCOVERY
+            ):
+                raise ValueError("probe decisions require discovery evidence")
+            if decision.action is CurriculumAction.EXPAND:
+                _require_complete_selection(
+                    self.catalog,
+                    self.state,
+                    update.assessments,
+                )
+            else:
+                _require_complete_discovery(
+                    self.catalog,
+                    self.state,
+                    update.assessments,
+                )
             target = self.catalog.target(decision.target)
             new_members = set(target.members) - active_members
             expected_information = (
@@ -971,6 +1124,10 @@ class CurriculumController:
             raise ValueError("active members do not match decision history")
         if dict(self.state.probe_counts) != probes:
             raise ValueError("probe counts do not match decision history")
+        if isinstance(self.policy, CandidateGroupDiscoveryPolicy) and any(
+            count > self.policy.maximum_probes_per_target for count in probes.values()
+        ):
+            raise ValueError("probe history exceeds the per-target limit")
         decision_costs = tuple(
             decision.planned_information_nats for decision in self.state.decisions
         )
@@ -987,7 +1144,7 @@ class CurriculumController:
             raise ValueError("state counts contain targets outside the catalog")
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class CurriculumAcquisitionPolicy:
     """Expose the controller's bounded support as an information-gain policy."""
 
@@ -996,10 +1153,28 @@ class CurriculumAcquisitionPolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.controller, CurriculumController):
             raise TypeError("controller must be a CurriculumController")
+        if (
+            self.controller.estimand.deployment_reward_contract
+            is not CurriculumDeploymentRewardContract.FACTORIZED_ADDITIVE_V1
+        ):
+            raise ValueError(
+                "CurriculumAcquisitionPolicy requires the factorized additive "
+                "deployment reward contract"
+            )
 
     @property
     def capabilities(self) -> CapabilityManifest:
-        return self.controller.capabilities
+        scheduler = self.controller.capabilities
+        return CapabilityManifest(
+            knows_relevance_mask=True,
+            knows_coordinate_factorization=True,
+            knows_latent_dependency_graph=scheduler.knows_latent_dependency_graph,
+            knows_target_hierarchy=scheduler.knows_target_hierarchy,
+            knows_true_posterior_family=True,
+            knows_exact_frontier=scheduler.knows_exact_frontier,
+            knows_approximate_frontier=scheduler.knows_approximate_frontier,
+            knows_reward_parameters=True,
+        )
 
     def update_curriculum(self, update: CurriculumUpdate) -> CurriculumDecision:
         return self.controller.update(update)
@@ -1023,6 +1198,26 @@ class CurriculumAcquisitionPolicy:
         if not selected or not selected <= allowed:
             raise ValueError("probe decision requires a selected candidate member")
 
+    def validate_context(self, context: AcquisitionContext) -> None:
+        """Require complete exposure of the current curriculum support."""
+
+        if not isinstance(context, AcquisitionContext):
+            raise TypeError("context must be an AcquisitionContext")
+        candidates = {target.key: target for target in context.candidates}
+        required = set(self.controller.queryable_members)
+        missing = required - set(candidates)
+        if missing:
+            raise ValueError("candidate context omits curriculum members")
+        if any(not candidates[key].persistent for key in required):
+            raise ValueError("curriculum members must be exposed as persistent targets")
+
+    def allows_deployment(self, key: TargetKey) -> bool:
+        """Exclude transient probe-only information from deployment."""
+
+        if not isinstance(key, TargetKey):
+            raise TypeError("deployment key must be a TargetKey")
+        return key in self.controller.state.active_members
+
     def score(
         self,
         target: QueryTarget,
@@ -1030,10 +1225,22 @@ class CurriculumAcquisitionPolicy:
         reward_spec: RewardSpec,
         round_index: int,
     ) -> float | None:
-        del reward_spec, round_index
+        if (
+            semantic_hash(reward_spec)
+            != self.controller.estimand.reward_spec_semantic_hash
+        ):
+            raise ValueError("execution reward spec does not match curriculum estimand")
+        del round_index
         if target.key not in self.controller.queryable_members or not target.persistent:
             return None
-        return expected_entropy_reduction(posterior)
+        score = expected_entropy_reduction(posterior)
+        if (
+            self.controller.state.decisions
+            and self.controller.state.decisions[-1].action is CurriculumAction.PROBE
+            and score <= 0.0
+        ):
+            return math.ulp(0.0)
+        return score
 
 
 def _frontier(
@@ -1125,6 +1332,7 @@ def _select_expansion(
     assessments: tuple[CurriculumAssessment, ...],
     minimum_value_per_nat: float,
 ) -> CurriculumDecision:
+    _require_complete_selection(catalog, state, assessments)
     positive = tuple(
         item
         for item in assessments
@@ -1163,6 +1371,43 @@ def _select_expansion(
         selected.conservative_value_per_nat,
         CurriculumReason.EXPANSION_SELECTED,
     )
+
+
+def _require_complete_selection(
+    catalog: CurriculumCatalog,
+    state: CurriculumState,
+    assessments: tuple[CurriculumAssessment, ...],
+) -> None:
+    eligible_names = {
+        target.name
+        for target in catalog.targets
+        if target.name not in state.active_targets
+        and (target.parent is None or target.parent in state.active_targets)
+        and bool(set(target.members) - set(state.active_members))
+    }
+    assessed_names = {assessment.target for assessment in assessments}
+    if not eligible_names <= assessed_names:
+        raise ValueError("selection updates must assess every eligible target")
+
+
+def _require_complete_discovery(
+    catalog: CurriculumCatalog,
+    state: CurriculumState,
+    assessments: tuple[CurriculumAssessment, ...],
+) -> None:
+    inactive_names = {
+        target.name
+        for target in catalog.targets
+        if target.name not in state.active_targets
+    }
+    assessed_inactive_names = {
+        assessment.target
+        for assessment in assessments
+        if assessment.target not in state.active_targets
+        and assessment.evidence is CurriculumEvidence.DISCOVERY
+    }
+    if assessed_inactive_names != inactive_names:
+        raise ValueError("discovery updates must assess every inactive candidate group")
 
 
 def _active_decision(

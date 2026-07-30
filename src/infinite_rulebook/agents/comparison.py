@@ -372,6 +372,7 @@ class FactorizedQueryAgent:
         if context.query_budget > self.query_budget:
             raise ValueError("context query budget exceeds the agent budget")
         self._validate_candidate_metadata(context.candidates)
+        self._validate_policy_context(context)
         if self._pending_action is not None:
             context.validate_action(self._pending_action)
             self._validate_policy_action(self._pending_action)
@@ -415,6 +416,13 @@ class FactorizedQueryAgent:
             if not callable(validator):
                 raise TypeError("policy action validator must be callable")
             validator(action)
+
+    def _validate_policy_context(self, context: AcquisitionContext) -> None:
+        validator = getattr(self.policy, "validate_context", None)
+        if validator is not None:
+            if not callable(validator):
+                raise TypeError("policy context validator must be callable")
+            validator(context)
 
     def observe(self, batch: ObservationBatch) -> None:
         """Apply exactly one bounded P1 batch to persistent target posteriors."""
@@ -469,6 +477,7 @@ class FactorizedQueryAgent:
                 target is None
                 or target.rule_index is None
                 or target.relevance_weight <= 0.0
+                or not self._policy_allows_deployment(key)
             ):
                 continue
             prediction = posterior.deployment(self.reward_spec.profitability_threshold)
@@ -478,6 +487,17 @@ class FactorizedQueryAgent:
             if previous != prediction:
                 raise ValueError("targets disagree about one deployment rule")
         return DeploymentAction(predictions.items())
+
+    def _policy_allows_deployment(self, key: TargetKey) -> bool:
+        validator = getattr(self.policy, "allows_deployment", None)
+        if validator is None:
+            return True
+        if not callable(validator):
+            raise TypeError("policy deployment validator must be callable")
+        allowed = validator(key)
+        if not isinstance(allowed, bool):
+            raise TypeError("policy deployment validator must return a boolean")
+        return allowed
 
     def checkpoint(self) -> AgentCheckpoint:
         """Freeze state without mutating posteriors, schedules, or RNG."""
