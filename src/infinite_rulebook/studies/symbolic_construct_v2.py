@@ -61,7 +61,7 @@ SYMBOLIC_V2_DESIGN_HASH = (
     "a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114"
 )
 SYMBOLIC_V2_COMPONENT_HASH = (
-    "2a23fd8fda928316ba0d7ab5a89acecd425a784ba014cfb3b6e909c2c0b471e4"
+    "5e2f5281634549b824728c17160b2fc39094938388d0c966cad6de8ae32d3529"
 )
 
 PAIRED_PATH_ABSOLUTE_TOLERANCE = 1e-12
@@ -104,7 +104,7 @@ S4 = "alea-over-ind-prediction-error-novelty"
 S5 = "ind-over-red-useful-information"
 S5_EQUIVALENCE = "ind-red-terminal-hidden-reward-equivalence"
 LEGACY_D6_REPLICATION = "legacy-d6-terminal-hidden-reward-replication"
-SECONDARY_D12 = "trivia-d12-terminal-hidden-reward-load-sweep"
+SECONDARY_D12 = "trivia-d12-terminal-hidden-reward-descriptive-comparison"
 
 PRIMARY_MINIMUM_EFFECTS = {
     S1: 0.25,
@@ -252,6 +252,9 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
             "name": "post_query_mean_hidden_expected_reward",
             "source": "post_query_hidden_expected_reward",
             "checkpoint_zero": "absent",
+            "source_checkpoint_t_positive": (
+                "equals the authenticated post-query training-event reward at round t"
+            ),
             "checkpoint_t_positive": (
                 "math.fsum(authenticated post-query hidden rewards for rounds "
                 "1 through t) divided by t"
@@ -278,7 +281,9 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
             "checkpoint": config.horizon,
             "left": _selector_payload(relevant_d12),
             "right": _selector_payload(total_d12),
-            "role": "registered-descriptive-load-sweep",
+            "alternative": "greater",
+            "paired_by": ["environment_replica", "algorithm_replica"],
+            "role": "registered-descriptive-paired-contrast",
             "family_membership": "outside-primary-holm",
             "may_rescue_compound_s2": False,
         },
@@ -289,6 +294,9 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
             "public_decompositions": 6,
             "alea_persistent_information_zero": 6,
             "aggregate_metric_derivations": 1,
+            "aggregate_metric_coverage": (
+                "all-exact-registered-condition-agent-groups"
+            ),
             "detail_chunk_records": COMPACT_CANARY_DETAIL_CHUNK_RECORDS,
             "raw_roots_remain_authoritative": True,
         },

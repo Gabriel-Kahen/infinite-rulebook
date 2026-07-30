@@ -88,10 +88,10 @@ def test_v2_plan_has_six_exact_primaries_and_no_scope_reduction() -> None:
         PRIMARY_MINIMUM_EFFECTS
     )
     assert plan.scientific_hash == (
-        "4a1b5eedc783218ad6216d4d5b07784da04c76d7ef2b94b6e981fb3d9fbde962"
+        "7ca9738ff424dce05cb92383e7a560b5c860d56635680289590143a0fbef29fc"
     )
     assert plan.registration_hash == (
-        "ec63359455b31e27289a7a2f9183a790424fcb04be25c56a450fe19553d95867"
+        "e19c78286dae4482006ea02af658f0bdcf7d26b7f4026ceddde65cb8e8cc1439"
     )
     by_name = {contrast.name: contrast for contrast in plan.contrasts}
     assert by_name[S2_EARLY].metric == ("post_query_mean_hidden_expected_reward")
@@ -126,10 +126,20 @@ def test_v2_component_binds_compound_non_rescue_and_compact_evidence() -> None:
     assert legacy["may_rescue_compound_s2"] is False
     secondary = component["d12_secondary"]
     assert secondary["name"] == SECONDARY_D12
-    assert secondary["role"] == "registered-descriptive-load-sweep"
+    assert secondary["role"] == "registered-descriptive-paired-contrast"
+    assert secondary["paired_by"] == [
+        "environment_replica",
+        "algorithm_replica",
+    ]
     assert secondary["may_rescue_compound_s2"] is False
+    assert component["post_query_metric"]["source_checkpoint_t_positive"] == (
+        "equals the authenticated post-query training-event reward at round t"
+    )
     compact = component["compact_canaries"]
     assert compact["gate_count"] == 27
+    assert compact["aggregate_metric_coverage"] == (
+        "all-exact-registered-condition-agent-groups"
+    )
     assert compact["detail_chunk_records"] == 4096
     assert component["power"]["rng_stream"] == POWER_RNG_STREAM
     assert component["stage_0_prerequisite"] == {

@@ -67,11 +67,11 @@ broader research program in `docs/research-plan.md`.
 - phase-independent scientific-design hash:
   `a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114`
 - supplemental registration-component hash:
-  `2a23fd8fda928316ba0d7ab5a89acecd425a784ba014cfb3b6e909c2c0b471e4`
+  `5e2f5281634549b824728c17160b2fc39094938388d0c966cad6de8ae32d3529`
 - calibration analysis-plan hash:
-  `4a1b5eedc783218ad6216d4d5b07784da04c76d7ef2b94b6e981fb3d9fbde962`
+  `7ca9738ff424dce05cb92383e7a560b5c860d56635680289590143a0fbef29fc`
 - calibration analysis-registration hash:
-  `ec63359455b31e27289a7a2f9183a790424fcb04be25c56a450fe19553d95867`
+  `e19c78286dae4482006ea02af658f0bdcf7d26b7f4026ceddde65cb8e8cc1439`
 
 The supplemental component transitively binds the aggregate metric definition,
 compound-S2 rule, D12 role, legacy replication, expanded compact-canary
@@ -128,11 +128,14 @@ the query and posterior update for that round. At checkpoint \(t>0\),
 \texttt{post\_query\_hidden\_expected\_reward}(r).
 \]
 
-The metric is absent at checkpoint 0. Training-event values, the derived
-checkpoint value, adapter state fingerprint, run scientific hashes, exact
-replay, artifact validation, and analysis loading all authenticate it. The
-aggregate canary independently recomputes the metric from the registered
-per-round evidence. V1 payloads, state fingerprints, and artifact hashes remain
+Both values are absent at checkpoint 0. At every checkpoint \(t>0\), the
+checkpoint repeats the current round's authenticated
+`post_query_hidden_expected_reward` and the validator requires exact equality
+with training event \(t\). Training-event values, checkpoint values, the
+adapter state fingerprint, run scientific hashes, exact replay, artifact
+validation, and analysis loading all authenticate them. The aggregate canary
+independently recomputes the mean from the registered per-round checkpoint
+evidence. V1 payloads, state fingerprints, and artifact hashes remain
 byte-identical.
 
 ## Stage-0 operational prerequisite
@@ -189,7 +192,7 @@ load.
 
 ## Registered evidence outside the primary family
 
-### D12 load sweep
+### D12 intermediate-load comparison
 
 The D12 relevant-minus-total terminal hidden-reward comparison is a registered
 descriptive intermediate-load result outside the primary Holm family. It must
