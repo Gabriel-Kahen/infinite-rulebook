@@ -28,17 +28,19 @@ D_{\mathrm{KL}}(q(A)\Vert m(A)).
 
 The code independently evaluates all three terms. The reference quantity is
 therefore an upper bound on that channel's mutual information. In this
-finite-only foundation, the final reward and mutual information are also
-computed exactly from the complete channel; no sampled confidence statement
-is needed or implied. KL ratios use the ordinary direct path when
-representable and a log-difference path when division underflows or overflows;
-weighted subnormal terms are recovered in log space when their direct product
-rounds to zero.
+finite-only foundation, the final reward and mutual information are
+deterministically evaluated over the complete channel in floating-point
+arithmetic; no sampled confidence statement is needed or implied. KL ratios
+use the ordinary direct path when representable and a log-difference path when
+division underflows or overflows; weighted subnormal terms are recovered in
+log space when their direct product rounds to zero. A roundoff-scale negative
+raw KL is retained for the identity check and reconciled to zero before it
+becomes a public field; a materially negative value fails closed.
 
 For a requested reward \(\rho\):
 
-- the upper endpoint is the mutual information of a retained, directly
-  re-evaluated feasible channel whose reward clears \(\rho\);
+- the upper endpoint is the floating-point mutual information of a retained,
+  directly re-evaluated feasible channel whose reward clears \(\rho\);
 - the lower endpoint is the best nonnegative bound
   \(\beta\rho+c_\beta(m)\) over the prespecified multiplier grid, where
   \(c_\beta(m)\) is the existing global finite-problem Lagrangian certificate;
@@ -46,13 +48,28 @@ For a requested reward \(\rho\):
 - the zero-information region and targets above maximum reward are reported
   explicitly; and
 - optimizer convergence is only a diagnostic. A lower certificate remains
-valid when the fixed optimization budget ends early.
+  valid when the fixed optimization budget ends early.
 
 Before a channel is retained, one pivot probability per row absorbs any final
 floating-point normalization residual. Every public row must then sum to
 exactly one under `math.fsum`, and a second evaluation of the stored channel
 must reproduce the complete witness exactly. Construction fails closed if
 that serialize-and-re-evaluate contract cannot be met.
+
+Every returned frontier point is validated against its retained witness. The
+upper endpoint must equal the replayed witness information exactly, and the
+witness must clear the requested reward. At the mathematical zero-information
+endpoint, a tiny evaluator residual caused by an inexact stored prior sum is
+retained as a conservative numerical upper endpoint and labeled with an
+informational diagnostic rather than hidden. A residual beyond the declared
+roundoff allowance fails closed.
+
+The exported frozen records provide immutable, canonical, structurally
+validated data-transfer objects. Problem-dependent reward, information, and
+certificate claims are bound and replay-checked by
+`fit_behavioral_channel`, `estimate_behavioral_frontier`, and
+`calibrate_behavioral_estimator`; constructing a record directly does not
+replace those factories or authenticate it against an omitted problem.
 
 The estimator never repairs, smooths, or narrows bounds to make a curve look
 better. A lower certificate that exceeds a feasible witness beyond numerical

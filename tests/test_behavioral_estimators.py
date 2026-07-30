@@ -10,8 +10,11 @@ import pytest
 from infinite_rulebook.artifacts import semantic_hash
 from infinite_rulebook.estimators import (
     BehavioralEstimatorConfig,
+    BehavioralFrontierEstimate,
     CalibrationCase,
+    CalibrationReport,
     CalibrationSplit,
+    EstimatorError,
     IdentificationStatus,
     calibrate_behavioral_estimator,
     estimate_behavioral_frontier,
@@ -19,6 +22,7 @@ from infinite_rulebook.estimators import (
 )
 from infinite_rulebook.estimators.calibration import _summarize
 from infinite_rulebook.frontier import (
+    ChannelWitness,
     FiniteDecisionProblem,
     one_coordinate_problem,
     solve_frontier,
@@ -49,6 +53,22 @@ def test_reference_kl_identity_and_lagrangian_certificate() -> None:
     assert fit.diagnostics.valid
 
 
+def test_public_kl_fields_reconcile_roundoff_to_nonnegative_values() -> None:
+    fit = fit_behavioral_channel(
+        one_coordinate_problem(),
+        0.0,
+        config=BehavioralEstimatorConfig(
+            betas=(0.0, 1.0),
+            optimizer_steps=2,
+        ),
+    )
+
+    assert fit.direct_reference_kl >= 0.0
+    assert fit.reference_kl_upper_bound >= 0.0
+    assert fit.reference_compression_gap >= 0.0
+    assert fit.reference_identity_residual >= 0.0
+
+
 def test_estimator_is_deterministic_and_hash_stable() -> None:
     problem = FiniteDecisionProblem(
         prior=(0.4, 0.6),
@@ -67,6 +87,114 @@ def test_estimator_is_deterministic_and_hash_stable() -> None:
 
     assert left == right
     assert semantic_hash(left) == semantic_hash(right)
+
+
+def test_signed_zero_has_one_config_and_estimate_state() -> None:
+    problem = FiniteDecisionProblem(
+        (0.8158734926586414, 0.19560785280390003),
+        ((0.0, 1.0), (0.0, -1.0)),
+    )
+    positive = BehavioralEstimatorConfig(
+        betas=(0.0,),
+        optimizer_steps=1,
+        diagnostic_tolerance=1e-30,
+    )
+    negative = BehavioralEstimatorConfig(
+        betas=(-0.0,),
+        optimizer_steps=1,
+        diagnostic_tolerance=1e-30,
+    )
+    target = problem.zero_information_reward + 0.5 * (
+        problem.maximum_reward - problem.zero_information_reward
+    )
+
+    left = estimate_behavioral_frontier(problem, (target,), config=positive)
+    right = estimate_behavioral_frontier(problem, (target,), config=negative)
+
+    assert negative.betas[0].hex() == "0x0.0p+0"
+    assert positive == negative
+    assert semantic_hash(positive) == semantic_hash(negative)
+    assert left == right
+    assert semantic_hash(left) == semantic_hash(right)
+
+
+def test_estimator_evidence_breaks_aliases_and_rejects_forged_state() -> None:
+    source = estimate_behavioral_frontier(
+        one_coordinate_problem(),
+        (0.5,),
+        config=BehavioralEstimatorConfig(
+            betas=(0.0, 1.0),
+            optimizer_steps=2,
+        ),
+    )
+    fits = list(source.fits)
+    points = list(source.points)
+    limitations = list(source.limitations)
+    rebuilt = BehavioralFrontierEstimate(
+        source.problem_semantic_hash,
+        source.config,
+        fits,  # type: ignore[arg-type]
+        points,  # type: ignore[arg-type]
+        limitations,  # type: ignore[arg-type]
+    )
+    before = semantic_hash(rebuilt)
+
+    fits.clear()
+    points.clear()
+    limitations.clear()
+
+    assert rebuilt == source
+    assert semantic_hash(rebuilt) == before
+    assert issubclass(EstimatorError, RuntimeError)
+
+    fit = source.fits[0]
+    fit_rows = [list(row) for row in fit.witness.channel]
+    fit_marginal = list(fit.witness.action_marginal)
+    reference = list(fit.reference_marginal)
+    rebuilt_fit = replace(
+        fit,
+        witness=ChannelWitness(
+            fit_rows,  # type: ignore[arg-type]
+            fit_marginal,  # type: ignore[arg-type]
+            fit.witness.expected_reward,
+            fit.witness.mutual_information,
+        ),
+        reference_marginal=reference,  # type: ignore[arg-type]
+    )
+    fit_hash = semantic_hash(rebuilt_fit)
+    fit_rows[0][0] = 99.0
+    fit_marginal[0] = 99.0
+    reference[0] = 99.0
+    assert rebuilt_fit == fit
+    assert semantic_hash(rebuilt_fit) == fit_hash
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        replace(source, problem_semantic_hash="not-a-digest")
+    with pytest.raises(ValueError, match="upper_bound"):
+        replace(
+            source.points[0],
+            upper_bound=math.nextafter(source.points[0].upper_bound, math.inf),
+        )
+    with pytest.raises(ValueError, match="exactly when a point is partial"):
+        replace(source, fits=())
+    with pytest.raises(ValueError, match="scientific boundary"):
+        replace(source, limitations=("claim transfer is proven",))
+    with pytest.raises(ValueError, match="full-support"):
+        replace(fit, reference_marginal=(1.0, *(0.0 for _ in reference[1:])))
+    with pytest.raises(ValueError, match="certified_objective_gap"):
+        replace(
+            fit,
+            certified_objective_gap=fit.certified_objective_gap + 1.0,
+        )
+    with pytest.raises(ValueError, match="diagnostics"):
+        replace(source.fits[1], converged=True)
+    with pytest.raises(ValueError, match="bound methods"):
+        replace(source.points[0], upper_bound_method="claimed-witness")
+    with pytest.raises(ValueError, match="lower_bound"):
+        replace(
+            source.points[0],
+            lower_bound=source.points[0].upper_bound + 1.0,
+        )
 
 
 @pytest.mark.parametrize(
@@ -110,7 +238,7 @@ def test_weak_grid_reports_partial_identification_without_false_convergence() ->
     assert point.witness.expected_reward >= 0.8
     assert point.upper_bound >= exact.upper_bound
     assert point.interval_width > 0.0
-    assert "exactly-evaluated-feasible" in point.upper_bound_method
+    assert "directly-evaluated-feasible" in point.upper_bound_method
 
 
 def test_retained_mixed_witness_is_exactly_reproducible_and_feasible() -> None:
@@ -165,6 +293,30 @@ def test_zero_information_and_infeasible_targets_are_explicit() -> None:
     assert infeasible.witness is None
     assert math.isinf(infeasible.lower_bound)
     assert math.isinf(infeasible.upper_bound)
+
+
+def test_zero_information_point_retains_constant_witness_roundoff() -> None:
+    problem = FiniteDecisionProblem(
+        (0.8158734926586414, 0.19560785280390003),
+        ((0.0, 1.0), (0.0, -1.0)),
+    )
+
+    point = estimate_behavioral_frontier(
+        problem,
+        (problem.zero_information_reward,),
+    ).points[0]
+
+    assert point.identification is IdentificationStatus.EXACT_ZERO_INFORMATION
+    assert point.witness is not None
+    assert problem.evaluate(point.witness.channel) == point.witness
+    assert point.witness.expected_reward >= point.target_reward
+    assert point.lower_bound == 0.0
+    assert point.upper_bound == point.witness.mutual_information
+    assert point.upper_bound > 0.0
+    assert point.upper_bound <= 64.0 * math.ulp(1.0)
+    assert {diagnostic.code for diagnostic in point.diagnostics.diagnostics} == {
+        "constant-channel-evaluation-roundoff"
+    }
 
 
 def test_all_trivial_targets_skip_pathological_channel_fits() -> None:
@@ -302,6 +454,80 @@ def test_calibration_report_is_deterministic() -> None:
     assert conservative.exact_converged_count == 1
     assert conservative.covered_count == 1
     assert conservative.descriptive_grid_coverage == 0.5
+
+
+def test_calibration_evidence_normalizes_names_and_breaks_aliases() -> None:
+    problem = one_coordinate_problem(2, 1.0, 2.0)
+    composed = CalibrationCase(
+        "é",
+        CalibrationSplit.HELD_OUT,
+        problem,
+        (0.2,),
+    )
+    decomposed = CalibrationCase(
+        "e\u0301",
+        CalibrationSplit.HELD_OUT,
+        problem,
+        (0.2,),
+    )
+
+    assert composed == decomposed
+    assert semantic_hash(composed) == semantic_hash(decomposed)
+    with pytest.raises(ValueError, match="names must be unique"):
+        calibrate_behavioral_estimator(
+            (composed, decomposed),
+            config=BehavioralEstimatorConfig(optimizer_steps=2),
+        )
+
+    report = calibrate_behavioral_estimator(
+        (composed,),
+        config=BehavioralEstimatorConfig(
+            betas=(0.0, 1.0),
+            optimizer_steps=2,
+        ),
+    )
+    points = list(report.points)
+    summaries = list(report.summaries)
+    limitations = list(report.limitations)
+    rebuilt = CalibrationReport(
+        report.config,
+        report.exact_solver_tolerance,
+        report.case_count,
+        points,  # type: ignore[arg-type]
+        summaries,  # type: ignore[arg-type]
+        limitations,  # type: ignore[arg-type]
+    )
+    before = semantic_hash(rebuilt)
+
+    points.clear()
+    summaries.clear()
+    limitations.clear()
+
+    assert rebuilt == report
+    assert semantic_hash(rebuilt) == before
+    with pytest.raises(ValueError, match="case_count"):
+        replace(report, case_count=report.case_count + 1)
+    with pytest.raises(ValueError, match="scientific boundary"):
+        replace(report, limitations=("coverage generalizes",))
+    with pytest.raises(ValueError, match="upper_excess_lower_bound"):
+        replace(
+            report.points[0],
+            upper_excess_lower_bound=math.nextafter(
+                report.points[0].upper_excess_lower_bound,
+                math.inf,
+            ),
+        )
+    with pytest.raises(ValueError, match="coverage"):
+        replace(
+            report.summaries[0],
+            covered_count=0,
+        )
+    forged_coverage = replace(
+        report.points[0],
+        envelope_covered=not report.points[0].envelope_covered,
+    )
+    with pytest.raises(ValueError, match="report tolerance"):
+        replace(report, points=(forged_coverage,))
 
 
 @pytest.mark.parametrize(
