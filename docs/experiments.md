@@ -491,6 +491,12 @@ authorize a registered run. Both capacity benchmarks and the probe must be
 repeated there before calibration, and both capacity benchmarks must be
 repeated again before the selected confirmation, without reducing scope.
 
+The read-only static checks, synthetic capacity recorder, exact command plan,
+and remote-host operating sequence are documented in
+[`symbolic-v2-host-qualification.md`](symbolic-v2-host-qualification.md).
+That tooling cannot invoke a registered study, and a passing operational
+record still requires independent review before calibration.
+
 The exact bounded protocols, estimands, margins, power grids, hard gates, and
 scope exclusions are registered in
 [symbolic-confirmatory-v1.md](symbolic-confirmatory-v1.md) and
