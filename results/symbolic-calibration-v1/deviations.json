@@ -1,0 +1,9 @@
+{
+  "artifact_type": "symbolic-study-deviation-log",
+  "config_hash": "d8fdc37bb0b55fc94b969ee4eef405ce7d3869e2bb8e705fe862d6ff6fd5139c",
+  "deviations": [],
+  "phase": "calibration",
+  "schema_version": 1,
+  "scientific_hash": "04bd0d807b04c376db272646ea54847eadcf89cdeb396612bbd570dc46cce627",
+  "study_contract": "bounded-symbolic-construct-validation.v1"
+}
