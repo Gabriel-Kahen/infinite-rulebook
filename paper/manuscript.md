@@ -16,7 +16,7 @@ Open-ended learning is often evaluated through reward growth, novelty, task
 production, or total information acquisition. Those quantities can move
 independently of the environment information a successful decision actually
 requires. We develop Infinite Rulebook, a stationary symbolic benchmark and
-auditable experimental lifecycle for studying the bit-equivalent: the minimum
+auditable experimental lifecycle for studying the bit-equivalent: the infimum
 mutual information between an environment and a behavioral action needed to
 attain a reward threshold. The benchmark has an analytic positive control,
 certified finite frontier solvers, explicit redundancy and distractor
@@ -24,7 +24,7 @@ interventions, canonical behavioral actions, and immutable scientific
 artifacts. A first publicly registered construct-validation study completed
 calibration but stopped as required when one of six effect-adequacy gates
 failed; no confirmatory outcome was generated. We use that failure to motivate
-a second, publicly frozen pre-data protocol with learning-path and
+a second, publicly registered pre-data protocol with learning-path and
 high-distractor estimands. The present manuscript establishes the measurement
 contract, reports the released stopped result, and fixes the boundary for the
 next study. It does not yet claim v2 effects, asymptotic open-endedness,
@@ -50,6 +50,14 @@ B_\rho
 I(\Theta;A).
 \]
 
+All logarithms and reported information quantities use natural units (nats);
+division by \(\ln 2\) converts them to bits. The historical name
+“bit-equivalent” does not change that implementation unit.
+
+Admissible randomized kernels are supported on finite symbolic actions and
+satisfy \(\mathbb E[\lVert A\rVert_0]<\infty\). This finite expected-support
+condition keeps the additive expected-reward objective well defined.
+
 This is a property of the decision problem and reward semantics, not of an
 agent's parameter count or internal representation. Empirical use is difficult
 because the infimum ranges over behavioral channels, irrelevant information
@@ -59,7 +67,9 @@ frontiers.
 Infinite Rulebook turns those difficulties into interventions and failure
 tests. Independent useful rules, redundant rules, persistent trivia,
 aleatoric novelty, and public reward are changed separately. Exact symbolic
-frontiers anchor the measurement. Learned estimators, adaptive target
+frontiers anchor the measurement. Bounded behavioral-estimator and
+adaptive-curriculum infrastructure now provide non-study engineering
+foundations. Statistical large-instance estimation, evaluated target
 selection, dynamic turnover, and procedural neural transfer remain outward
 extensions rather than substitutes for the anchor.
 
@@ -87,10 +97,12 @@ feasible upper bounds from converse lower bounds.
 
 ### 2.2 Canonical actions
 
-Actions are identified by their finite deployment behavior. Serialization
-order, duplicate indices, comments, unused state, and parameter symmetries do
-not create distinct actions. Program or neural representations require a
-declared behavioral quotient; unresolved equivalence cannot be silently counted
+Current symbolic deployments are finite index-label mappings. Canonicalization
+sorts their non-abstaining entries, while duplicate indices are rejected as
+ambiguous. Serialization order therefore does not create distinct symbolic
+actions. Program or neural representations would require a separately
+implemented behavioral quotient before comments, unused state, or parameter
+symmetries could be excluded; unresolved equivalence cannot be silently counted
 as capability.
 
 ### 2.3 Acquisition is not evaluation
@@ -153,7 +165,7 @@ minimizes \(rJ_q(p)/g(p)\) subject to
 \(r/g(p)\) is at most one. At \(q=4,u=c=1\), its initial slope is \(\log 3\).
 Independent coordinates tensorize, and the countably infinite finite-support
 benchmark has \(B_\infty(\rho)=\rho\log3\) for every finite nonnegative
-\(\rho\).
+\(\rho\) over the finite expected-support kernel class.
 
 The implementation compares analytic, tensorized, exhaustive finite, and
 certified Blahut--Arimoto paths. Frontier artifacts retain feasible witnesses,
@@ -203,6 +215,9 @@ Five of six registered effect-adequacy records passed. The
 `relevant-over-total-trivia-hidden-reward` record did not: its simultaneous
 median interval was \([0,2/3]\), which did not lie at or above the registered
 minimum effect \(0.25\). Its independent favorable-sign count was \(58/128\).
+These were calibration design-adequacy gates, not confirmatory effect
+findings; the registered analysis marked calibration interpretation
+ineligible.
 
 The protocol therefore selected no confirmatory environment count, created no
 seal, and produced no confirmatory outcomes. This is the completed registered
@@ -232,16 +247,18 @@ decomposition, persistent-information, and aggregate-metric identities. A
 distribution-free split chooses the smallest candidate satisfying all
 registered power targets, or stops without a seal.
 
-The complete frozen specification is
+The complete registered specification is
 [`docs/symbolic-confirmatory-v2.md`](../docs/symbolic-confirmatory-v2.md).
 
 ### 7.3 Operational boundary
 
 A post-registration ingestion probe passed execution, artifact validation, and
-authenticated loading. The local 32-GiB-class workstation passed the E192
-analysis benchmark but failed E768 because the equal-reserve and no-swap
-requirements were not met. It is not authorized to execute registered v2
-calibration or confirmation. This is an operational result, not study evidence.
+authenticated loading. The local 32-GiB-class workstation passed the synthetic
+in-memory E192 analysis-capacity benchmark but failed E768 because the
+equal-reserve and no-swap requirements were not met. These capacity benchmarks
+do not exercise raw-artifact loading or full report generation. The workstation
+is not authorized to execute registered v2 calibration or confirmation. This
+is an operational result, not study evidence.
 
 ## 8. Version 2 results
 
@@ -252,17 +269,23 @@ confirmatory result exists. This section may be populated only from the
 authenticated registered report and must retain unfavorable and stopped
 outcomes.
 
-## 9. Planned partial-identification and algorithmic extensions
+## 9. Implemented foundations and planned extensions
 
 The exact symbolic frontier is the calibration anchor for approximate
-behavioral and latent estimators. Approximate points must retain feasible
-channel witnesses, distinguish upper from lower bounds, and report coverage and
-width on held-out exact families.
+behavioral and latent estimators. The current bounded behavioral estimator
+retains feasible upper witnesses and certified lower bounds for small,
+fully-enumerated finite problems, together with descriptive synthetic
+calibration diagnostics. It does not provide statistical large-instance
+coverage, a learned converse, or evidence for v2.
 
-Adaptive curricula will separately evaluate oracle scheduling, estimated
-frontier-following, marginal value per bit, and target discovery. Reward and
-action semantics, ephemeral turnover, and procedural neural composition remain
-independent workstreams with their own gates. None is evidence for v2.
+The current adaptive-curriculum infrastructure implements deterministic
+oracle, estimated-frontier, marginal-value-per-information, and
+candidate-discovery scheduling over caller-supplied evidence. It does not
+generate candidates, validate the supplied estimators, or report curriculum
+effects. Later studies will evaluate those policies under separately
+registered gates. Reward and action semantics, ephemeral turnover, and
+procedural neural composition remain independent workstreams. None is evidence
+for v2.
 
 ## 10. Limitations
 

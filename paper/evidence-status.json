@@ -1,26 +1,55 @@
 {
   "schema_version": 1,
   "manuscript": "paper/manuscript.md",
+  "evidence_map": "paper/evidence-map.md",
+  "evidence_map_sha256": "27115cf2198aca04d9f700bf37c54f5eebb7b416c381f92ab5d71190cced315c",
   "studies": {
     "symbolic-v1": {
       "status": "calibration_stopped",
       "release": "v0.1.0",
+      "release_commit": "af4d0587c071fd451d6f4ef450676a7e0566563e",
+      "release_manifest": "results/symbolic-calibration-v1/release-manifest.json",
+      "release_manifest_sha256": "42da03348145d166ea0b748e3a2cc79b0c973619f51ccc4de066b46d75b77fea",
+      "release_scientific_hash": "e48c6194ce5cb63ce9d504e3a5b4efa7ef3e96f647b7e3c30eef10db48975d32",
       "confirmatory_generated": false
     },
     "symbolic-v2": {
       "status": "pre_data",
       "registration_commit": "3909db8b9913fc0031710b9f4d4803fad00dd0bf",
       "operational_record_commit": "c9b6297b63b572d9e6d106de4add1dae436c00d3",
-      "manuscript_sha256": "9cec252720ef468b4cdf54461af076cd9cd72efd1f7b4641f2e820c74140b135",
+      "approved_execution_commit": "c9b6297b63b572d9e6d106de4add1dae436c00d3",
+      "manuscript_sha256": "1e2671762c439a198cf9af7a4c4069e9e97cc81960ee6f2340cec0a5fea499db",
       "required_marker": "**PRE-DATA — intentionally blank.**",
       "results_section": {
         "heading": "## 8. Version 2 results",
-        "next_heading": "## 9. Planned partial-identification and algorithmic extensions",
+        "next_heading": "## 9. Implemented foundations and planned extensions",
         "allowed_body": "**PRE-DATA — intentionally blank.**\n\nNo v2 effect estimate, hypothesis decision, selected sample size, seal, or\nconfirmatory result exists. This section may be populated only from the\nauthenticated registered report and must retain unfavorable and stopped\noutcomes."
       },
       "forbidden_result_roots": [
+        "artifacts/symbolic-calibration-v2-serial",
+        "artifacts/symbolic-calibration-v2-parallel",
+        "evidence/symbolic-calibration-v2-reproducibility.json",
         "results/symbolic-calibration-v2",
+        "configs/symbolic-confirmatory-v2.json",
+        "configs/symbolic-confirmatory-analysis-v2.json",
+        "configs/symbolic-confirmatory-canaries-v2.json",
+        "configs/symbolic-confirmatory-supplemental-v2.json",
+        "artifacts/symbolic-confirmatory-v2-serial",
+        "artifacts/symbolic-confirmatory-v2-parallel",
+        "evidence/symbolic-confirmatory-v2-reproducibility.json",
         "results/symbolic-confirmatory-v2"
+      ],
+      "frozen_registration_paths": [
+        "configs/symbolic-artifact-ingestion-probe-v2.json",
+        "configs/symbolic-calibration-analysis-v2.json",
+        "configs/symbolic-calibration-canaries-v2.json",
+        "configs/symbolic-calibration-supplemental-v2.json",
+        "configs/symbolic-calibration-v2.json",
+        "docs/symbolic-confirmatory-v2.md"
+      ],
+      "frozen_operational_record_paths": [
+        "benchmarks/symbolic-v2-operational-preflight.json",
+        "docs/symbolic-v2-operational-preflight.md"
       ]
     }
   }
