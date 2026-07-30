@@ -91,6 +91,16 @@ The stopped result is preserved in the
 The evidence-bearing publication inventory and reconstruction instructions are
 in the [v0.1.0 release note](docs/releases/v0.1.0.md).
 
+The ambitious v2 follow-on retains the original panel and adds TRIVIA D12/D24,
+eight fixed algorithm replicas, authenticated post-query reward trajectories,
+compact chunk-authenticated canaries, and registered supplemental evidence.
+Its exact design and registration identities are in the
+[v2 protocol](docs/symbolic-confirmatory-v2.md). No v2 pilot, ingestion probe,
+calibration, freeze, confirmatory execution, or outcome analysis preceded this
+registration. After the registration merge, the exact capacity benchmarks and
+disjoint-seed ingestion probe in [the execution guide](docs/experiments.md)
+must pass before calibration is authorized.
+
 ## Research scope
 
 The full plan continues through learned frontier bounds, distractor controls,
