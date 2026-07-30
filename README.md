@@ -125,6 +125,14 @@ The initial
 restricted to deterministic calibration on small synthetic finite problems;
 it makes no v2 outcome or large-instance claim.
 
+## Manuscript workspace
+
+The result-safe paper scaffold is in [paper/manuscript.md](paper/manuscript.md).
+Its [evidence map](paper/evidence-map.md) separates released, registered,
+operational, pre-data, and future claims. A machine-readable status boundary
+keeps the v2 results section explicitly empty until authenticated registered
+evidence exists.
+
 ## License
 
 MIT

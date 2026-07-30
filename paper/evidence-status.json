@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "manuscript": "paper/manuscript.md",
+  "studies": {
+    "symbolic-v1": {
+      "status": "calibration_stopped",
+      "release": "v0.1.0",
+      "confirmatory_generated": false
+    },
+    "symbolic-v2": {
+      "status": "pre_data",
+      "registration_commit": "3909db8b9913fc0031710b9f4d4803fad00dd0bf",
+      "operational_record_commit": "c9b6297b63b572d9e6d106de4add1dae436c00d3",
+      "manuscript_sha256": "9cec252720ef468b4cdf54461af076cd9cd72efd1f7b4641f2e820c74140b135",
+      "required_marker": "**PRE-DATA — intentionally blank.**",
+      "results_section": {
+        "heading": "## 8. Version 2 results",
+        "next_heading": "## 9. Planned partial-identification and algorithmic extensions",
+        "allowed_body": "**PRE-DATA — intentionally blank.**\n\nNo v2 effect estimate, hypothesis decision, selected sample size, seal, or\nconfirmatory result exists. This section may be populated only from the\nauthenticated registered report and must retain unfavorable and stopped\noutcomes."
+      },
+      "forbidden_result_roots": [
+        "results/symbolic-calibration-v2",
+        "results/symbolic-confirmatory-v2"
+      ]
+    }
+  }
+}
