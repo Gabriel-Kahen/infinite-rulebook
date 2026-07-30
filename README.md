@@ -113,6 +113,10 @@ benchmark. See [docs/research-plan.md](docs/research-plan.md) for definitions,
 gates, and falsification criteria. The finite numerical contract is in
 [docs/finite-solver.md](docs/finite-solver.md), and the information/artifact
 contract is in [docs/information-metrics.md](docs/information-metrics.md).
+The initial
+[learned-estimator foundation](docs/learned-estimator-foundation.md) is
+restricted to deterministic calibration on small synthetic finite problems;
+it makes no v2 outcome or large-instance claim.
 
 ## License
 
