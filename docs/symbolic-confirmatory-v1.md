@@ -318,11 +318,12 @@ zero-information ledger invariant are exact.
 ### Canary evidence
 
 - Canary-plan scientific hash:
-  **[GENERATED EVIDENCE: fill from checked-in plan]**
+  `15c56506f14341ca941d631aa632b472290e9c3ac4896a2e033ed6236a471ba9`.
 - Calibration canary-report scientific hash and decision:
-  **[GENERATED EVIDENCE: fill after validation]**
+  `cdff9672ead1cd3853844dbb1aaa7ac8fe7a04109affab9428a8e676887b41f4`;
+  passed, with all 20 registered canaries passing.
 - Maximum observed decomposition residual:
-  **[GENERATED EVIDENCE: fill after validation]**
+  exactly `0.0`.
 
 ## Power calibration and confirmatory seed count
 
@@ -424,18 +425,84 @@ false stop; it is not evidence that the corresponding effect is absent.
 ### Power evidence
 
 - Calibration dataset scientific hash:
-  **[GENERATED EVIDENCE]**
+  `eac4823bf31745572c74e75b5f98978ed84471f5e602e2ce1076e0e43fcf366e`.
 - Minimum-effect registration hash:
-  **[GENERATED EVIDENCE]**
+  no standalone digest was defined. The public registration commit is
+  `d96573f795bbe5831ebca05b897393b6f226a1b3`; the exact registered map is
+  preserved in `results/symbolic-calibration-v1/power.json` and bound by the
+  power-report hash below.
 - Power-simulation seed-bank identity:
-  **[GENERATED EVIDENCE]**
+  seed `bounded-symbolic-power-v1`, stream
+  `analysis.cluster-power.v1`, registered by commit
+  `d96573f795bbe5831ebca05b897393b6f226a1b3`.
 - Power report scientific hash:
-  **[GENERATED EVIDENCE]**
+  `c3dc9d3ce47f01941c62e29e8b52c51c44438bb2520c49aa7cd9483b211f8ef5`.
 - Selected \(E_\mathrm{confirm}\):
-  **[GENERATED EVIDENCE]**
+  none. The registered effect-adequacy gate failed, so all candidate counts
+  were ineligible and `selected_environment_replicas` is `null`.
 - Expected confirmatory run count
   \(36\times E_\mathrm{confirm}\times3\):
-  **[GENERATED EVIDENCE]**
+  not defined; confirmatory execution was prohibited before a count could be
+  frozen.
+
+### Post-calibration disposition (outcome record)
+
+This subsection was added after calibration solely to record the observed
+outcome and operational history. It does not amend the preregistered design,
+analysis, gates, or release requirements above and below.
+
+Calibration v1 completed 20,736 registered runs on each of the serial and
+parallel sides. Exact paired reproducibility passed with scientific hash
+`d46ce211946bb9c867504a31cedc66c96b0033d08c4d3dbf3dd39c7c65eaf8dd`;
+the calibration evidence hash is
+`367ed44965060742db9a61739ed231200936cdfcf63ac7ba537f5c3ac4da9c01`.
+The Stage-0 prerequisite, all 20 canaries, and all raw/release authentication
+checks passed, and the formal deviation log is empty.
+
+The design nevertheless failed its preregistered freeze gate. Five of six
+effect-adequacy records passed. The directional
+`relevant-over-total-trivia-hidden-reward` record failed because its
+simultaneous distribution-free median interval was
+\([0.0, 0.6666666666666666]\), which did not lie at or above the registered
+minimum effect of 0.25. Its independent held-out favorable-sign count was
+58/128, so merely increasing the environment-replica grid could not rescue the
+registered directional design. Consequently no candidate was selected,
+`freeze_eligible` is false, no confirmatory seal was created, and no
+confirmatory outcome was generated.
+
+Authenticated execution and reporting bind code commit
+`5738f699ec45b72d027081174f5d1f275cad93a6`, analysis-source hash
+`305191365ada2ca7881ca5d7ced79b7a2b75559b1ba2f436cc34eb867cb89317`,
+dependency-lock hash
+`58c85106b9d520ea2bbb1783244de8888648207cfb583f9079adf6732454e415`,
+and environment digest
+`f8d7f34aa897050b35aba33a5ba29dda08063395522cf0cf42449d7eb028ccb6`.
+The recorded dirty-tree digest
+`66399679e4d7c55a762eb9b4482b137e57581d595fe699c794b3734e02a3d5ff`
+is the empty-diff sentinel.
+
+Two host-power interruptions are recorded here as operator-reported
+administrative history. The intermediate count and partial-publication state
+were observed contemporaneously but are not fields in an authenticated study
+artifact; they do not enter any scientific hash, gate, exclusion, or result.
+The calibration invocation was reported interrupted after 738 serial run trees
+had finalized, with one further tree partially published. The registered
+receipt-bound `--resume` path was reported to reauthenticate those trees,
+recover the partial publication, and continue with the same roots and
+four-worker declaration. The final authenticated evidence binds invocation
+identity
+`383a726257f67cf1ca548b5fdf08e0bfb96e1b6243d51f4711b6c02b6fede48c`,
+serial receipt
+`adcea8c3eeda22b698b453c350c905dd4f3c8659fbc713d043547196577dc106`,
+and parallel receipt
+`8ffe849cfed4718312fc8d068554048be7c358abd89e45109ac1cd65a90a56df`.
+An operator-reported later reset interrupted only deterministic report
+construction after raw execution and exact paired authentication had
+completed; the empty transaction was discarded and the report was rebuilt
+from the same immutable roots and evidence. The authenticated final artifacts
+show no change to a scientific setting, seed bank, exclusion, artifact, or
+analysis rule. Under the registered recovery contract these were operational
+interruptions, not formal deviations.
 
 ## Frozen confirmatory design
 
@@ -489,25 +556,28 @@ depends on prior registration and immutable execution, not secrecy.
 ### Frozen values
 
 - Confirmatory config path and scientific hash:
-  **[GENERATED EVIDENCE]**
+  not generated; calibration v1 was not freeze-eligible.
 - Analysis-plan path, registration hash, and code version:
-  **[GENERATED EVIDENCE]**
+  not frozen for confirmation; calibration v1 was not freeze-eligible.
 - Calibration-evidence hash:
-  **[GENERATED EVIDENCE]**
+  calibration evidence exists as
+  `367ed44965060742db9a61739ed231200936cdfcf63ac7ba537f5c3ac4da9c01`,
+  but it was not attached to a confirmatory seal.
 - Confirmatory-training seed-bank identity:
-  **[GENERATED EVIDENCE]**
+  not generated; calibration v1 was not freeze-eligible.
 - Fixed algorithm seed-bank identity:
-  **[GENERATED EVIDENCE]**
+  not sealed for confirmation; calibration v1 was not freeze-eligible.
 - Confirmatory-evaluation seed-bank identity:
-  **[GENERATED EVIDENCE]**
+  not generated; calibration v1 was not freeze-eligible.
 - Decomposition tolerance:
-  **[GENERATED EVIDENCE]**
+  not frozen for confirmation; calibration v1 was not freeze-eligible.
 - S5 late-reward equivalence margin and provenance:
-  **[GENERATED EVIDENCE]**
+  registered in the analysis plan, but not attached to a confirmatory seal.
 - Minimum practical effects:
-  **[GENERATED EVIDENCE]**
+  preserved in the calibration power report, but not attached to a
+  confirmatory seal.
 - Final seal hash:
-  **[GENERATED EVIDENCE]**
+  not generated; the failed freeze gate prohibited sealing.
 
 ## Hard execution and interpretation gates
 
@@ -584,25 +654,27 @@ with the same prominence as favorable results.
 ### Confirmatory evidence
 
 - Confirmatory dataset scientific hash:
-  **[GENERATED EVIDENCE]**
+  not generated; confirmatory execution was prohibited by the failed
+  calibration freeze gate.
 - Valid run trees / expected run trees:
-  **[GENERATED EVIDENCE]**
+  not applicable; no confirmatory run trees were generated.
 - Confirmatory canary-report hash and decision:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - Registered-analysis report hash:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - S1 result:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - S2 result:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - S3 result:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - S4 telemetry result:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - S5 reward-match decision and superiority result:
-  **[GENERATED EVIDENCE]**
+  not generated.
 - Deviations:
-  **[GENERATED EVIDENCE: “none” or a complete versioned account]**
+  no confirmatory phase occurred. Calibration formal deviations: none;
+  operational power-loss recovery is documented above.
 
 ## Outputs and public release
 
@@ -624,6 +696,28 @@ ordinary Git history, but its manifests and scientific hashes must be checked
 in. Publication requires code review, passing continuous integration, an
 independent artifact-integrity review, and an independent scientific-protocol
 review. A tagged release should identify the exact merge commit and seal hash.
+
+### Post-calibration administrative publication record
+
+This paragraph was added after calibration and does not modify the requirements
+above. The failed freeze gate made the sealed config, frozen confirmatory
+plans, freeze report, confirmatory report, confirmatory summary, and seal hash
+ineligible to exist. The stopped v1 publication therefore preserves every
+artifact generated through calibration, explicitly records each prohibited
+artifact as not generated, and identifies the exact merge commit,
+calibration-evidence hash, failed gate, and absence of a seal. It is a
+calibration-stopped outcome release, not the successful end-to-end release
+described by the normative checklist.
+
+The checked-in publication inventory and raw-archive reconstruction procedure
+are recorded in `docs/releases/v0.1.0.md`; the release tag and hosting metadata
+identify the exact reviewed merge commit.
+
+The authenticated raw archives intentionally retain the original operational
+`python_executable` value,
+`/home/gabe/Documents/info paper/.venv/bin/python`. This discloses a local
+username and workspace path but no credential. It was not sanitized because
+editing finalized raw trees would invalidate their recorded hashes.
 
 ## Deliberate scope exclusions
 

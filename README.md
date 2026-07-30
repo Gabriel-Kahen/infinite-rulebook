@@ -74,6 +74,23 @@ hash, validation, and execution contracts. The bounded symbolic
 construct-validation protocol is
 [docs/symbolic-confirmatory-v1.md](docs/symbolic-confirmatory-v1.md).
 
+### Registered study status
+
+Symbolic construct-validation v1 completed its public Stage-0 and registered
+calibration lifecycle. Exact serial/parallel reproduction, all 20 canaries,
+raw-artifact authentication, and the deviation gate passed. Five of six
+effect-adequacy gates passed; the
+`relevant-over-total-trivia-hidden-reward` gate did not. The fail-closed
+protocol therefore selected no confirmatory sample size, created no seal, and
+ran no confirmatory outcomes.
+
+The stopped result is preserved in the
+[calibration summary](results/symbolic-calibration-v1/summary.json),
+[power report](results/symbolic-calibration-v1/power.json), and
+[protocol disposition](docs/symbolic-confirmatory-v1.md#post-calibration-disposition-outcome-record).
+The evidence-bearing publication inventory and reconstruction instructions are
+in the [v0.1.0 release note](docs/releases/v0.1.0.md).
+
 ## Research scope
 
 The full plan continues through learned frontier bounds, distractor controls,
