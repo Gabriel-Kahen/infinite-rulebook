@@ -1,0 +1,3693 @@
+"""Read-only host checks and synthetic capacity evidence for symbolic v2."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import platform
+import resource
+import secrets
+import shlex
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from collections.abc import Mapping, Sequence
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
+from pathlib import Path
+from typing import Any
+
+from infinite_rulebook.orchestration.config import load_experiment_config
+from infinite_rulebook.orchestration.hashing import is_sha256, scientific_hash
+from infinite_rulebook.orchestration.jsonio import parse_json_strict
+from infinite_rulebook.studies.symbolic_registry import registered_symbolic_study
+
+GIB = 1024**3
+MIB = 1024**2
+APPROVED_V2_EXECUTION_COMMITS = ("c9b6297b63b572d9e6d106de4add1dae436c00d3",)
+MINIMUM_PHYSICAL_MEMORY_BYTES = 64 * GIB
+REFERENCE_PAIR_RAW_BYTES = 171_002_155_008
+REFERENCE_PAIR_RAW_FILES = 17_104_896
+V2_CALIBRATION_CONFIG_HASH = (
+    "c0f4cf5bf09e6b516379c0fec26ccd4a8780d8b6d52226093ef5a96cc0437508"
+)
+V2_PROBE_CONFIG_HASH = (
+    "9120115e05a126127ce639169b15a27f9e39c09c7e277301f2e4dedd189de9aa"
+)
+V2_E192_DATASET_HASH = (
+    "f8eb1d5d130f283959c469049ea5ec1e53dbfc053e656e0c4817ae8c1534d1ee"
+)
+V2_E768_DATASET_HASH = (
+    "b4de258dc8e72d78e5324c072dbfc7fab19f4534d40aaf6175c3e596873cf58a"
+)
+V2_PROBE_DATASET_HASH = (
+    "881f1c3ac959baedb22ab961ad35aaa2654ec092407da725de79fe858265a043"
+)
+V2_PROJECTED_RUNS = 294_912
+V2_PROBE_RAW_RUN_FILES = 1_392
+MAXIMUM_RECORD_AGE = timedelta(hours=24)
+MAXIMUM_CLOCK_SKEW = timedelta(minutes=5)
+DEFAULT_CAPACITY_TIMEOUT_SECONDS = 2 * 60 * 60
+DEFAULT_PROBE_TIMEOUT_SECONDS = 24 * 60 * 60
+MAXIMUM_SAMPLE_INTERVAL_SECONDS = 1.0
+
+_STATIC_RECORD_TYPE = "symbolic-v2-host-static-qualification"
+_CAPACITY_RECORD_TYPE = "symbolic-v2-capacity-qualification"
+_PROBE_EXECUTION_RECORD_TYPE = "symbolic-v2-probe-execution-qualification"
+_PROBE_BENCHMARK_RECORD_TYPE = "symbolic-v2-probe-benchmark-qualification"
+_ASSESSMENT_RECORD_TYPE = "symbolic-v2-host-qualification-assessment"
+
+_PRECREATED_PROBE_ROOT_BOOTSTRAP = """
+import os
+import runpy
+import sys
+
+descriptor = int(sys.argv.pop(1))
+repository = sys.argv.pop(1)
+sys.path.insert(0, repository)
+os.fchdir(descriptor)
+target = os.fspath(sys.argv[3])
+original_lexists = os.path.lexists
+calls = 0
+
+def allow_precreated_root_once(path):
+    global calls
+    if calls == 0 and os.fspath(path) == target:
+        calls = 1
+        os.path.lexists = original_lexists
+        return False
+    return original_lexists(path)
+
+os.path.lexists = allow_precreated_root_once
+try:
+    runpy.run_module("scripts.run_ingestion_probe", run_name="__main__")
+except SystemExit:
+    if calls != 1:
+        raise RuntimeError("probe runner did not validate the anchored root")
+    raise
+finally:
+    os.path.lexists = original_lexists
+""".strip()
+
+_ANCHORED_PROBE_BENCHMARK_BOOTSTRAP = """
+import os
+import runpy
+import sys
+
+descriptor = int(sys.argv.pop(1))
+repository = sys.argv.pop(1)
+sys.path.insert(0, repository)
+os.fchdir(descriptor)
+runpy.run_module("scripts.benchmark_artifact_ingestion", run_name="__main__")
+""".strip()
+
+_INJECTION_ENVIRONMENT_NAMES = frozenset(
+    {
+        "GCONV_PATH",
+        "GLIBC_TUNABLES",
+        "LIBPATH",
+        "SHLIB_PATH",
+        "VIRTUAL_ENV",
+    }
+)
+
+_NETWORK_FILESYSTEMS = frozenset(
+    {
+        "9p",
+        "ceph",
+        "cifs",
+        "fuse.sshfs",
+        "gcsfuse",
+        "glusterfs",
+        "lustre",
+        "nfs",
+        "nfs4",
+        "smb3",
+        "sshfs",
+    }
+)
+_NON_STORAGE_FILESYSTEMS = frozenset(
+    {
+        "cgroup",
+        "cgroup2",
+        "devpts",
+        "devtmpfs",
+        "proc",
+        "sysfs",
+        "tmpfs",
+    }
+)
+_CAPACITY_SPECS = {
+    "e192": {
+        "environment_replicas": 192,
+        "observation_count": 958_464,
+        "dataset_hash": V2_E192_DATASET_HASH,
+    },
+    "e768": {
+        "environment_replicas": 768,
+        "observation_count": 3_833_856,
+        "dataset_hash": V2_E768_DATASET_HASH,
+    },
+}
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _record_hash(payload: Mapping[str, Any]) -> str:
+    unsigned = {key: value for key, value in payload.items() if key != "record_hash"}
+    return scientific_hash(unsigned, domain="operations.host-qualification.v1")
+
+
+def _signed(payload: dict[str, Any]) -> dict[str, Any]:
+    result = dict(payload)
+    result["record_hash"] = _record_hash(result)
+    return result
+
+
+def _expect_keys(
+    value: object,
+    *,
+    label: str,
+    keys: frozenset[str],
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    observed = frozenset(value)
+    if observed != keys:
+        missing = sorted(keys - observed)
+        unexpected = sorted(observed - keys)
+        raise ValueError(
+            f"{label} fields do not match schema; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+    return value
+
+
+def _expect_bool(value: object, *, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
+def _expect_int(
+    value: object,
+    *,
+    label: str,
+    minimum: int | None = None,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{label} must be an integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{label} must be at least {minimum}")
+    return value
+
+
+def _expect_number(
+    value: object,
+    *,
+    label: str,
+    minimum: float | None = None,
+    strict_minimum: bool = False,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be a number")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{label} must be finite")
+    if minimum is not None and (
+        result < minimum or (strict_minimum and result == minimum)
+    ):
+        comparator = "greater than" if strict_minimum else "at least"
+        raise ValueError(f"{label} must be {comparator} {minimum}")
+    return result
+
+
+def _expect_string(value: object, *, label: str, nonempty: bool = True) -> str:
+    if not isinstance(value, str) or (nonempty and not value):
+        qualifier = "nonempty " if nonempty else ""
+        raise ValueError(f"{label} must be a {qualifier}string")
+    return value
+
+
+def _expect_sha256(value: object, *, label: str) -> str:
+    if not is_sha256(value):
+        raise ValueError(f"{label} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _parse_timestamp(value: object, *, label: str) -> datetime:
+    text = _expect_string(value, label=label)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise ValueError(f"{label} must be an ISO-8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include a UTC offset")
+    return parsed.astimezone(UTC)
+
+
+def verify_record(payload: object, *, record_type: str | None = None) -> dict[str, Any]:
+    """Validate one operational record without treating it as study evidence."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("qualification record must be a JSON object")
+    if (
+        isinstance(payload.get("schema_version"), bool)
+        or payload.get("schema_version") != 1
+    ):
+        raise ValueError("unsupported qualification record schema")
+    if record_type is not None and payload.get("record_type") != record_type:
+        raise ValueError(f"expected {record_type!r} qualification record")
+    if not is_sha256(payload.get("record_hash")):
+        raise ValueError("qualification record hash is missing or malformed")
+    if payload["record_hash"] != _record_hash(payload):
+        raise ValueError("qualification record hash does not match its payload")
+    validators = {
+        _STATIC_RECORD_TYPE: _validate_static_record,
+        _CAPACITY_RECORD_TYPE: _validate_capacity_record,
+        _PROBE_EXECUTION_RECORD_TYPE: _validate_probe_execution_record,
+        _PROBE_BENCHMARK_RECORD_TYPE: _validate_probe_benchmark_record,
+        _ASSESSMENT_RECORD_TYPE: _validate_assessment_record,
+    }
+    observed_type = payload.get("record_type")
+    validator = validators.get(observed_type)
+    if validator is None:
+        raise ValueError(f"unsupported qualification record type: {observed_type!r}")
+    validator(payload)
+    return payload
+
+
+def _absolute_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _path_within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def validate_output_path(
+    path: Path,
+    *,
+    forbidden_roots: Sequence[Path] = (),
+) -> Path:
+    """Reject qualification outputs that can contaminate bound data roots."""
+
+    target = _absolute_path(path)
+    for root in forbidden_roots:
+        forbidden = Path(root).resolve(strict=False)
+        if _path_within(target, forbidden) or _path_within(
+            target.resolve(strict=False),
+            forbidden,
+        ):
+            raise ValueError(
+                f"qualification output must be outside protected root: {forbidden}"
+            )
+    current = Path(target.anchor)
+    for component in target.parts[1:]:
+        current /= component
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ValueError(f"qualification output path contains a symlink: {current}")
+    return target
+
+
+def _open_directory_nofollow(path: Path) -> int:
+    target = _absolute_path(path)
+    descriptor = os.open(
+        target.anchor,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC,
+    )
+    try:
+        for component in target.parts[1:]:
+            try:
+                child = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+            except FileNotFoundError:
+                os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                child = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _read_record_at(directory_fd: int, name: str) -> str | None:
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=directory_fd,
+        )
+    except FileNotFoundError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("qualification record target must be a regular file")
+        with os.fdopen(descriptor, encoding="utf-8", closefd=False) as stream:
+            return stream.read()
+    finally:
+        os.close(descriptor)
+
+
+def write_record(
+    path: Path,
+    payload: Mapping[str, Any],
+    *,
+    forbidden_roots: Sequence[Path] = (),
+) -> None:
+    """Create one immutable operational JSON record."""
+
+    checked = verify_record(dict(payload))
+    content = (
+        json.dumps(
+            checked,
+            allow_nan=False,
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    target = validate_output_path(path, forbidden_roots=forbidden_roots)
+    directory_fd = _open_directory_nofollow(target.parent)
+    temporary_name = f".{target.name}.{secrets.token_hex(16)}.tmp"
+    try:
+        existing = _read_record_at(directory_fd, target.name)
+        if existing is not None:
+            if existing != content:
+                raise ValueError(
+                    f"refusing to overwrite qualification record: {target}"
+                )
+            return
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.link(
+                temporary_name,
+                target.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            if _read_record_at(directory_fd, target.name) != content:
+                raise ValueError(
+                    f"refusing to overwrite qualification record: {target}"
+                ) from None
+        os.fsync(directory_fd)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        os.close(directory_fd)
+
+
+def _full_git_commit(value: str) -> str:
+    value = _full_git_sha(value, label="execution commit")
+    if value not in APPROVED_V2_EXECUTION_COMMITS:
+        approved = ", ".join(APPROVED_V2_EXECUTION_COMMITS)
+        raise ValueError(
+            f"execution commit is not approved for symbolic v2; expected {approved}"
+        )
+    return value
+
+
+def _full_git_sha(value: object, *, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{label} must be a full lowercase 40-hex Git SHA")
+    return value
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(MIB), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tool_identity() -> dict[str, Any]:
+    repository = Path(__file__).resolve().parents[3]
+    commit = _full_git_sha(
+        _run_text(("git", "rev-parse", "HEAD"), cwd=repository),
+        label="qualification tool commit",
+    )
+    dirty = _run_text(
+        ("git", "status", "--porcelain", "--untracked-files=normal"),
+        cwd=repository,
+    )
+    sources = (
+        Path(__file__).resolve(),
+        repository / "scripts" / "qualify_symbolic_v2_host.py",
+    )
+    source_hash = scientific_hash(
+        {
+            str(source.relative_to(repository)): _sha256_file(source)
+            for source in sources
+        },
+        domain="operations.host-qualification-tool-source.v1",
+    )
+    return {
+        "repository": str(repository),
+        "commit": commit,
+        "worktree_clean": not dirty,
+        "source_hash": source_hash,
+    }
+
+
+def _tool_identity_hash(tool: Mapping[str, Any]) -> str:
+    return scientific_hash(tool, domain="operations.host-qualification-tool.v1")
+
+
+def _machine_boot_identity(
+    *,
+    proc_root: Path,
+    machine_id_path: Path,
+) -> dict[str, str]:
+    machine_id = machine_id_path.read_text(encoding="utf-8").strip()
+    boot_id = (
+        (proc_root / "sys" / "kernel" / "random" / "boot_id")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    if not machine_id or not boot_id:
+        raise ValueError("machine and boot identity values must be nonempty")
+    return {
+        "machine_id_hash": scientific_hash(
+            machine_id,
+            domain="operations.host-machine-id.v1",
+        ),
+        "boot_id_hash": scientific_hash(
+            boot_id,
+            domain="operations.host-boot-id.v1",
+        ),
+    }
+
+
+def _repository_snapshot(
+    repository: Path,
+    *,
+    lock: Path,
+    execution_python: Path,
+) -> dict[str, Any]:
+    status = _run_text(
+        (
+            "git",
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=normal",
+        ),
+        cwd=repository,
+    )
+    lines = status.splitlines()
+    prefix = "# branch.oid "
+    commit_lines = [line for line in lines if line.startswith(prefix)]
+    if len(commit_lines) != 1:
+        raise ValueError("cannot determine checkout commit from atomic status snapshot")
+    commit = _full_git_sha(
+        commit_lines[0].removeprefix(prefix),
+        label="observed execution commit",
+    )
+    changes = tuple(line for line in lines if not line.startswith("# "))
+    return {
+        "commit": commit,
+        "clean": not changes,
+        "status": "\n".join(changes),
+        "uv_lock_sha256": _sha256_file(lock) if lock.is_file() else None,
+        "execution_python_sha256": (
+            _sha256_file(execution_python.resolve())
+            if execution_python.is_file()
+            else None
+        ),
+    }
+
+
+def _command(arguments: Sequence[object]) -> str:
+    return shlex.join(str(argument) for argument in arguments)
+
+
+def _runtime_prefix(
+    uv_path: str,
+    execution_python: str,
+) -> tuple[str, ...]:
+    return (
+        uv_path,
+        "run",
+        "--frozen",
+        "--no-sync",
+        "--python",
+        execution_python,
+        "python",
+    )
+
+
+def _capacity_arguments(
+    stage: str,
+    *,
+    uv_path: str,
+    execution_python: str,
+) -> tuple[str, ...]:
+    if stage not in _CAPACITY_SPECS:
+        raise ValueError("capacity stage must be e192 or e768")
+    arguments = [
+        *_runtime_prefix(uv_path, execution_python),
+        "scripts/benchmark_analysis_scale.py",
+        "--config",
+        "configs/symbolic-calibration-v2.json",
+    ]
+    if stage == "e768":
+        arguments.extend(("--environment-replicas", "768"))
+    arguments.extend(("--metrics", "29", "--positive-checkpoint-metrics", "31"))
+    return tuple(arguments)
+
+
+def _secured_probe_arguments(
+    kind: str,
+    *,
+    uv_path: str,
+    execution_python: str,
+    artifact_descriptor: int | str,
+    repository: Path,
+) -> tuple[str, ...]:
+    runtime = _runtime_prefix(uv_path, execution_python)
+    descriptor = str(artifact_descriptor)
+    if kind == "execution":
+        return (
+            *runtime,
+            "-c",
+            _PRECREATED_PROBE_ROOT_BOOTSTRAP,
+            descriptor,
+            str(repository),
+            str(repository / "configs" / "symbolic-calibration-v2.json"),
+            str(repository / "configs" / "symbolic-artifact-ingestion-probe-v2.json"),
+            ".",
+            "--workers",
+            "4",
+        )
+    if kind == "benchmark":
+        return (
+            *runtime,
+            "-c",
+            _ANCHORED_PROBE_BENCHMARK_BOOTSTRAP,
+            descriptor,
+            str(repository),
+            str(repository / "configs" / "symbolic-artifact-ingestion-probe-v2.json"),
+            ".",
+            "--projected-runs",
+            str(V2_PROJECTED_RUNS),
+            "--budget-multiplier",
+            "2",
+        )
+    raise ValueError("probe step kind must be execution or benchmark")
+
+
+def _external_root(repo_root: Path, candidate: Path, *, label: str) -> Path:
+    root = candidate.resolve(strict=False)
+    if root == repo_root or repo_root in root.parents:
+        raise ValueError(f"{label} must be outside the execution repository")
+    return root
+
+
+def _safe_probe_root(repo_root: Path, probe_root: Path) -> Path:
+    return _external_root(repo_root, probe_root, label="probe root")
+
+
+def build_exact_plan(
+    *,
+    repo_root: Path,
+    execution_commit: str,
+    probe_root: Path,
+    uv_path: Path | None = None,
+    execution_python: Path | None = None,
+) -> dict[str, Any]:
+    """Return the exact registered v2 qualification commands without running them."""
+
+    repository = repo_root.resolve()
+    commit = _full_git_commit(execution_commit)
+    probe = _safe_probe_root(repository, probe_root)
+    located_uv = shutil.which("uv") if uv_path is None else str(uv_path)
+    if located_uv is None:
+        raise ValueError("uv executable is required to build a qualification plan")
+    uv = (
+        Path(located_uv).resolve(strict=True)
+        if uv_path is None
+        else _absolute_path(Path(located_uv))
+    )
+    if not uv.is_absolute() or (
+        uv_path is None and (not uv.is_file() or not os.access(uv, os.X_OK))
+    ):
+        raise ValueError("uv executable must be an absolute executable file")
+    python = _absolute_path(
+        repository / ".venv" / "bin" / "python"
+        if execution_python is None
+        else execution_python
+    )
+    return _exact_plan_payload(
+        repository=repository,
+        commit=commit,
+        probe=probe,
+        uv=uv,
+        python=python,
+    )
+
+
+def _exact_plan_payload(
+    *,
+    repository: Path,
+    commit: str,
+    probe: Path,
+    uv: Path,
+    python: Path,
+) -> dict[str, Any]:
+    runtime = _runtime_prefix(str(uv), str(python))
+    probe_execute = (
+        *runtime,
+        "-m",
+        "scripts.run_ingestion_probe",
+        "configs/symbolic-calibration-v2.json",
+        "configs/symbolic-artifact-ingestion-probe-v2.json",
+        str(probe),
+        "--workers",
+        "4",
+    )
+    probe_benchmark = (
+        *runtime,
+        "scripts/benchmark_artifact_ingestion.py",
+        "configs/symbolic-artifact-ingestion-probe-v2.json",
+        str(probe),
+        "--projected-runs",
+        str(V2_PROJECTED_RUNS),
+        "--budget-multiplier",
+        "2",
+    )
+    return {
+        "execution_mode": "print-only",
+        "working_directory": str(repository),
+        "execution_commit": commit,
+        "checkout": [
+            _command(("git", "checkout", "--detach", commit)),
+            _command(("git", "status", "--porcelain", "--untracked-files=normal")),
+        ],
+        "capacity": {
+            "e192": _command(
+                _capacity_arguments(
+                    "e192",
+                    uv_path=str(uv),
+                    execution_python=str(python),
+                )
+            ),
+            "e768": _command(
+                _capacity_arguments(
+                    "e768",
+                    uv_path=str(uv),
+                    execution_python=str(python),
+                )
+            ),
+        },
+        "probe": {
+            "artifact_root": str(probe),
+            "underlying_execute": _command(probe_execute),
+            "underlying_benchmark": _command(probe_benchmark),
+            "qualifying_execute_template": _command(
+                (
+                    "<TOOL_PYTHON>",
+                    "<TOOL_CHECKOUT>/scripts/qualify_symbolic_v2_host.py",
+                    "run-probe",
+                    "--kind",
+                    "execution",
+                    "--host-record",
+                    "<HOST_RECORD>",
+                    "--output",
+                    "<PROBE_EXECUTION_RECORD>",
+                )
+            ),
+            "qualifying_benchmark_template": _command(
+                (
+                    "<TOOL_PYTHON>",
+                    "<TOOL_CHECKOUT>/scripts/qualify_symbolic_v2_host.py",
+                    "run-probe",
+                    "--kind",
+                    "benchmark",
+                    "--host-record",
+                    "<HOST_RECORD>",
+                    "--probe-execution-record",
+                    "<PROBE_EXECUTION_RECORD>",
+                    "--output",
+                    "<PROBE_BENCHMARK_RECORD>",
+                )
+            ),
+        },
+        "order_before_calibration": [
+            "static-host-inspection",
+            "e192",
+            "e768",
+            "probe-execute",
+            "probe-benchmark",
+            "independent-review",
+        ],
+        "repeat_before_selected_confirmation": ["e192", "e768"],
+    }
+
+
+def _read_key_values(path: Path) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        key = fields[0].removesuffix(":")
+        value = int(fields[1])
+        if len(fields) > 2 and fields[2] == "kB":
+            value *= 1024
+        values[key] = value
+    return values
+
+
+def _decode_mount_field(value: str) -> str:
+    for encoded, decoded in (
+        ("\\040", " "),
+        ("\\011", "\t"),
+        ("\\012", "\n"),
+        ("\\134", "\\"),
+    ):
+        value = value.replace(encoded, decoded)
+    return value
+
+
+def _mount_for(path: Path, mountinfo: Path) -> dict[str, str]:
+    target = path.resolve()
+    candidates: list[tuple[int, dict[str, str]]] = []
+    for line in mountinfo.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        try:
+            separator = fields.index("-")
+        except ValueError:
+            continue
+        mount_point = Path(_decode_mount_field(fields[4]))
+        if target != mount_point and mount_point not in target.parents:
+            continue
+        candidates.append(
+            (
+                len(mount_point.parts),
+                {
+                    "device": _decode_mount_field(fields[separator + 2]),
+                    "mount_options": fields[5],
+                    "mount_point": str(mount_point),
+                    "type": fields[separator + 1],
+                },
+            )
+        )
+    if not candidates:
+        raise ValueError(f"cannot resolve mount for storage root: {target}")
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def _block_is_solid_state(device: str, sys_class_block: Path) -> bool | None:
+    name = Path(os.path.realpath(device)).name
+    if name.startswith("nvme"):
+        return True
+    node = sys_class_block / name
+    if not node.exists():
+        return None
+    partition = node / "partition"
+    if partition.exists():
+        resolved = node.resolve()
+        node = sys_class_block / resolved.parent.name
+    rotational = node / "queue" / "rotational"
+    if rotational.is_file():
+        return rotational.read_text(encoding="utf-8").strip() == "0"
+    slaves = node / "slaves"
+    if slaves.is_dir():
+        values = [
+            _block_is_solid_state(f"/dev/{child.name}", sys_class_block)
+            for child in slaves.iterdir()
+        ]
+        known = [value for value in values if value is not None]
+        return all(known) if known and len(known) == len(values) else None
+    return None
+
+
+def _run_text(arguments: Sequence[str], *, cwd: Path | None = None) -> str:
+    result = subprocess.run(
+        arguments,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if len(result.stdout) > MIB or len(result.stderr) > MIB:
+        raise ValueError("qualification identity command output exceeded 1 MiB")
+    return result.stdout.strip()
+
+
+def _requirement(
+    name: str,
+    *,
+    passed: bool,
+    observed: object,
+    required: object,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "passed": passed,
+        "observed": observed,
+        "required": required,
+    }
+
+
+def _python_version_supported(value: str | None) -> bool:
+    if value is None:
+        return False
+    try:
+        major, minor, *_ = (int(part) for part in value.split("."))
+    except ValueError:
+        return False
+    return (3, 11) <= (major, minor) < (4, 0)
+
+
+def _host_identity_hash(
+    *,
+    execution: Mapping[str, Any],
+    host_identity: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    host: Mapping[str, Any],
+    storage: Mapping[str, Any],
+) -> str:
+    return scientific_hash(
+        {
+            "execution_commit": execution["observed_commit"],
+            "host_identity": host_identity,
+            "host": {
+                "physical_memory_bytes": host["physical_memory_bytes"],
+                "kernel": runtime["kernel"],
+                "logical_cpu_count": runtime["logical_cpu_count"],
+            },
+            "runtime": {
+                "execution_python": runtime["execution_python"],
+                "execution_python_path": runtime["execution_python_path"],
+                "execution_python_sha256": runtime["execution_python_sha256"],
+                "uv": runtime["uv"],
+                "uv_path": runtime["uv_path"],
+                "uv_sha256": runtime["uv_sha256"],
+            },
+            "storage": {
+                key: storage[key]
+                for key in (
+                    "device",
+                    "mount_point",
+                    "storage_root",
+                    "type",
+                )
+            },
+        },
+        domain="operations.host-identity.v2",
+    )
+
+
+def _static_requirements(
+    *,
+    execution: Mapping[str, Any],
+    tool: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    host_identity: Mapping[str, Any],
+    host: Mapping[str, Any],
+    storage: Mapping[str, Any],
+    registered_inputs: Mapping[str, Any],
+    probe_storage: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        _requirement(
+            "execution-commit",
+            passed=execution["observed_commit"] == execution["expected_commit"],
+            observed=execution["observed_commit"],
+            required=execution["expected_commit"],
+        ),
+        _requirement(
+            "clean-worktree",
+            passed=execution["worktree_clean"],
+            observed=execution["status"] or "clean",
+            required="clean",
+        ),
+        _requirement(
+            "linux-runtime",
+            passed=runtime["platform"].startswith("linux"),
+            observed=runtime["platform"],
+            required="linux",
+        ),
+        _requirement(
+            "tool-python",
+            passed=_python_version_supported(runtime["tool_python"]),
+            observed=runtime["tool_python"],
+            required=">=3.11,<4",
+        ),
+        _requirement(
+            "execution-python",
+            passed=(
+                _python_version_supported(runtime["execution_python"])
+                and runtime["execution_python_sha256"] is not None
+                and runtime["execution_prefix"]
+                == str(Path(execution["repository"]) / ".venv")
+            ),
+            observed={
+                "path": runtime["execution_python_path"],
+                "prefix": runtime["execution_prefix"],
+                "version": runtime["execution_python"],
+            },
+            required="synced checkout .venv with Python >=3.11,<4",
+        ),
+        _requirement(
+            "uv",
+            passed=(
+                runtime["uv"] is not None
+                and runtime["uv_path"] is not None
+                and runtime["uv_sha256"] is not None
+                and Path(runtime["uv_path"]).is_absolute()
+            ),
+            observed={
+                "path": runtime["uv_path"],
+                "version": runtime["uv"],
+            },
+            required="absolute executable with recorded SHA-256",
+        ),
+        _requirement(
+            "dependency-lock",
+            passed=is_sha256(execution["uv_lock_sha256"]),
+            observed=execution["uv_lock_sha256"] or "missing",
+            required="SHA-256 of checked-in uv.lock",
+        ),
+        _requirement(
+            "execution-environment-synced",
+            passed=runtime["environment_synced"],
+            observed=runtime["environment_synced"],
+            required=True,
+        ),
+        _requirement(
+            "qualification-tool-clean",
+            passed=tool["worktree_clean"],
+            observed=tool["worktree_clean"],
+            required=True,
+        ),
+        _requirement(
+            "qualification-tool-source",
+            passed=is_sha256(tool["source_hash"]),
+            observed=tool["source_hash"],
+            required="SHA-256-bound reviewed tool sources",
+        ),
+        _requirement(
+            "host-machine-identity",
+            passed=is_sha256(host_identity["machine_id_hash"]),
+            observed=host_identity["machine_id_hash"],
+            required="hashed machine identity",
+        ),
+        _requirement(
+            "host-boot-identity",
+            passed=is_sha256(host_identity["boot_id_hash"]),
+            observed=host_identity["boot_id_hash"],
+            required="hashed boot identity",
+        ),
+        _requirement(
+            "physical-memory",
+            passed=host["physical_memory_bytes"] >= MINIMUM_PHYSICAL_MEMORY_BYTES,
+            observed=host["physical_memory_bytes"],
+            required=MINIMUM_PHYSICAL_MEMORY_BYTES,
+        ),
+        _requirement(
+            "local-filesystem",
+            passed=storage["local_filesystem"],
+            observed=storage["type"],
+            required="local non-pseudo filesystem",
+        ),
+        _requirement(
+            "ssd-or-nvme",
+            passed=storage["solid_state"] is True,
+            observed=storage["solid_state"],
+            required=True,
+        ),
+        _requirement(
+            "read-write-mount",
+            passed=storage["read_write_mount"],
+            observed=storage["mount_options"],
+            required="rw",
+        ),
+        _requirement(
+            "available-storage",
+            passed=storage["available_bytes"] >= storage["required_bytes"],
+            observed=storage["available_bytes"],
+            required=storage["required_bytes"],
+        ),
+        _requirement(
+            "declared-storage-margin",
+            passed=storage["additional_storage_bytes"] > 0,
+            observed=storage["additional_storage_bytes"],
+            required="positive bytes for reports, staging, and recovery",
+        ),
+        _requirement(
+            "available-inodes",
+            passed=storage["available_inodes"] >= storage["required_inodes"],
+            observed=storage["available_inodes"],
+            required=storage["required_inodes"],
+        ),
+        _requirement(
+            "declared-inode-margin",
+            passed=storage["additional_inodes"] > 0,
+            observed=storage["additional_inodes"],
+            required="positive inodes for reports, staging, and recovery",
+        ),
+        _requirement(
+            "writable-storage-root",
+            passed=storage["writable"],
+            observed=storage["writable"],
+            required=True,
+        ),
+        _requirement(
+            "registered-calibration-config",
+            passed=(
+                registered_inputs["calibration_config_hash"]
+                == V2_CALIBRATION_CONFIG_HASH
+            ),
+            observed=registered_inputs["calibration_config_hash"],
+            required=V2_CALIBRATION_CONFIG_HASH,
+        ),
+        _requirement(
+            "registered-probe-config",
+            passed=registered_inputs["probe_config_hash"] == V2_PROBE_CONFIG_HASH,
+            observed=registered_inputs["probe_config_hash"],
+            required=V2_PROBE_CONFIG_HASH,
+        ),
+        _requirement(
+            "probe-root-absent",
+            passed=not probe_storage["existed_at_inspection"],
+            observed=probe_storage["existed_at_inspection"],
+            required=False,
+        ),
+        _requirement(
+            "probe-on-intended-storage",
+            passed=probe_storage["on_intended_storage"],
+            observed=probe_storage["artifact_root"],
+            required=f"within {storage['storage_root']}",
+        ),
+    ]
+
+
+def inspect_host(
+    *,
+    repo_root: Path,
+    execution_commit: str,
+    storage_root: Path,
+    additional_storage_bytes: int,
+    additional_inodes: int,
+    probe_root: Path | None = None,
+    proc_root: Path = Path("/proc"),
+    sys_class_block: Path = Path("/sys/class/block"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Capture static host evidence; never execute a benchmark or study."""
+
+    repository = repo_root.resolve()
+    commit = _full_git_commit(execution_commit)
+    storage = _external_root(repository, storage_root, label="storage root")
+    margins = (additional_storage_bytes, additional_inodes)
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 1
+        for value in margins
+    ):
+        raise ValueError("storage and inode margins must be positive")
+    required_storage_bytes = REFERENCE_PAIR_RAW_BYTES + additional_storage_bytes
+    required_inodes = REFERENCE_PAIR_RAW_FILES + additional_inodes
+
+    lock = repository / "uv.lock"
+    execution_python = repository / ".venv" / "bin" / "python"
+    snapshot = _repository_snapshot(
+        repository,
+        lock=lock,
+        execution_python=execution_python,
+    )
+    calibration = load_experiment_config(
+        repository / "configs" / "symbolic-calibration-v2.json"
+    )
+    registered_symbolic_study(calibration.name).verify_calibration(calibration)
+    checked_probe = load_experiment_config(
+        repository / "configs" / "symbolic-artifact-ingestion-probe-v2.json"
+    )
+
+    memory = _read_key_values(proc_root / "meminfo")
+    vmstat = _read_key_values(proc_root / "vmstat")
+    mount = _mount_for(storage, proc_root / "self" / "mountinfo")
+    stat = os.statvfs(storage)
+    available_bytes = stat.f_bavail * stat.f_frsize
+    available_inodes = stat.f_favail
+    filesystem_type = mount["type"]
+    local_filesystem = (
+        filesystem_type not in _NETWORK_FILESYSTEMS
+        and filesystem_type not in _NON_STORAGE_FILESYSTEMS
+    )
+    read_write_mount = "rw" in mount["mount_options"].split(",")
+    solid_state = _block_is_solid_state(mount["device"], sys_class_block)
+    located_uv = shutil.which("uv")
+    uv_path = (
+        str(Path(located_uv).resolve(strict=True)) if located_uv is not None else None
+    )
+    uv_version = None if uv_path is None else _run_text((uv_path, "--version"))
+    uv_sha256 = None if uv_path is None else _sha256_file(Path(uv_path))
+    execution_python_version = (
+        _run_text(
+            (
+                str(execution_python),
+                "-c",
+                "import platform; print(platform.python_version())",
+            ),
+            cwd=repository,
+        )
+        if execution_python.is_file() and os.access(execution_python, os.X_OK)
+        else None
+    )
+    execution_prefix = (
+        _run_text(
+            (
+                str(execution_python),
+                "-c",
+                "import sys; print(sys.prefix)",
+            ),
+            cwd=repository,
+        )
+        if execution_python_version is not None
+        else None
+    )
+    environment_synced = False
+    if uv_path is not None and execution_python_version is not None:
+        try:
+            _run_text(
+                (uv_path, "sync", "--frozen", "--all-groups", "--check"),
+                cwd=repository,
+            )
+            environment_synced = (
+                Path(execution_prefix).resolve() == (repository / ".venv").resolve()
+            )
+        except (OSError, subprocess.CalledProcessError):
+            environment_synced = False
+    plan = build_exact_plan(
+        repo_root=repository,
+        execution_commit=commit,
+        probe_root=probe_root or storage / "symbolic-v2-ingestion-probe",
+        uv_path=None if uv_path is None else Path(uv_path),
+        execution_python=execution_python,
+    )
+    storage_writable = os.access(storage, os.W_OK | os.X_OK)
+    planned_probe_root = Path(plan["probe"]["artifact_root"])
+    probe_on_storage = (
+        planned_probe_root == storage or storage in planned_probe_root.parents
+    )
+    runtime_record = {
+        "execution_python": execution_python_version,
+        "execution_python_path": str(execution_python),
+        "execution_python_sha256": snapshot["execution_python_sha256"],
+        "execution_prefix": execution_prefix,
+        "environment_synced": environment_synced,
+        "kernel": platform.platform(),
+        "logical_cpu_count": os.cpu_count(),
+        "platform": sys.platform,
+        "tool_python": platform.python_version(),
+        "uv_path": uv_path,
+        "uv": uv_version,
+        "uv_sha256": uv_sha256,
+    }
+    host_record = {
+        "available_memory_bytes": memory.get("MemAvailable", 0),
+        "physical_memory_bytes": memory.get("MemTotal", 0),
+        "swap_bytes": memory.get("SwapTotal", 0),
+        "vmstat": {
+            "pswpin_pages": vmstat.get("pswpin", 0),
+            "pswpout_pages": vmstat.get("pswpout", 0),
+        },
+    }
+    storage_record = {
+        **mount,
+        "available_bytes": available_bytes,
+        "available_inodes": available_inodes,
+        "additional_storage_bytes": additional_storage_bytes,
+        "additional_inodes": additional_inodes,
+        "local_filesystem": local_filesystem,
+        "paired_raw_reference_bytes": REFERENCE_PAIR_RAW_BYTES,
+        "paired_raw_reference_files": REFERENCE_PAIR_RAW_FILES,
+        "required_bytes": required_storage_bytes,
+        "required_inodes": required_inodes,
+        "solid_state": solid_state,
+        "read_write_mount": read_write_mount,
+        "storage_root": str(storage),
+        "writable": storage_writable,
+    }
+    execution_record = {
+        "expected_commit": commit,
+        "observed_commit": snapshot["commit"],
+        "repository": str(repository),
+        "status": snapshot["status"],
+        "worktree_clean": snapshot["clean"],
+        "uv_lock_sha256": snapshot["uv_lock_sha256"],
+    }
+    tool_record = _tool_identity()
+    tool_hash = _tool_identity_hash(tool_record)
+    machine_identity = _machine_boot_identity(
+        proc_root=proc_root,
+        machine_id_path=machine_id_path,
+    )
+    probe_storage_record = {
+        "artifact_root": str(planned_probe_root),
+        "existed_at_inspection": os.path.lexists(planned_probe_root),
+        "on_intended_storage": probe_on_storage,
+    }
+    registered_inputs = {
+        "calibration_config_hash": calibration.config_hash,
+        "probe_config_hash": checked_probe.config_hash,
+    }
+    requirements = _static_requirements(
+        execution=execution_record,
+        tool=tool_record,
+        runtime=runtime_record,
+        host_identity=machine_identity,
+        host=host_record,
+        storage=storage_record,
+        registered_inputs=registered_inputs,
+        probe_storage=probe_storage_record,
+    )
+    passed = all(item["passed"] for item in requirements)
+    identity_hash = _host_identity_hash(
+        execution=execution_record,
+        host_identity=machine_identity,
+        runtime=runtime_record,
+        host=host_record,
+        storage=storage_record,
+    )
+    payload = {
+        "schema_version": 1,
+        "record_type": _STATIC_RECORD_TYPE,
+        "recorded_at": _utc_now(),
+        "execution": execution_record,
+        "tool": tool_record,
+        "tool_identity_hash": tool_hash,
+        "host_identity": machine_identity,
+        "host_identity_hash": identity_hash,
+        "runtime": runtime_record,
+        "host": host_record,
+        "storage": storage_record,
+        "probe_storage": probe_storage_record,
+        "registered_inputs": registered_inputs,
+        "requirements": requirements,
+        "plan": plan,
+        "decision": {
+            "qualification_steps_executed": False,
+            "registered_execution_authorized": False,
+            "static_prerequisites_passed": passed,
+        },
+        "scientific_boundary": {
+            "creates_study_artifacts": False,
+            "executes_registered_study": False,
+            "inspects_probe_metrics": False,
+            "scientific_use": "prohibited",
+        },
+    }
+    return _signed(payload)
+
+
+def _capacity_decision(
+    stage: str,
+    *,
+    result: Mapping[str, Any],
+    minimum_available_memory_bytes: int,
+    process_major_faults: int,
+    swapout_delta_pages: int,
+    checkout_unchanged: bool = True,
+) -> dict[str, Any]:
+    spec = _CAPACITY_SPECS[stage]
+    expected_integers = {
+        "algorithm_replicas": 8,
+        "checkpoint_count": 13,
+        "checkpoint_zero_metric_count": 29,
+        "positive_checkpoint_metric_count": 31,
+        "environment_replicas": spec["environment_replicas"],
+        "observation_count": spec["observation_count"],
+        "pooled_checkpoint_count": 624,
+    }
+    shape_passed = all(
+        type(result.get(name)) is int and result.get(name) == expected
+        for name, expected in expected_integers.items()
+    ) and (
+        isinstance(result.get("dataset_hash"), str)
+        and result.get("dataset_hash") == spec["dataset_hash"]
+    )
+    maximum_rss = result.get("maximum_rss_mib")
+    valid_rss = (
+        isinstance(maximum_rss, (int, float))
+        and not isinstance(maximum_rss, bool)
+        and math.isfinite(maximum_rss)
+        and maximum_rss > 0
+    )
+    equal_reserve = valid_rss and minimum_available_memory_bytes >= maximum_rss * MIB
+    no_swap_dependence = process_major_faults == 0 and swapout_delta_pages == 0
+    return {
+        "checkout_unchanged_passed": checkout_unchanged,
+        "exact_shape_passed": shape_passed,
+        "equal_physical_reserve_passed": equal_reserve,
+        "no_swap_dependence_observed": no_swap_dependence,
+        "passed": (
+            checkout_unchanged and shape_passed and equal_reserve and no_swap_dependence
+        ),
+    }
+
+
+def _sanitized_environment() -> dict[str, str]:
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(("DYLD_", "LD_", "PYTHON", "UV_"))
+        and name not in _INJECTION_ENVIRONMENT_NAMES
+    }
+
+
+def _terminate_and_reap(process: subprocess.Popen[str]) -> None:
+    if process.poll() is None:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+    else:
+        process.wait(timeout=10)
+
+
+def _run_bounded_detached_json(
+    arguments: Sequence[str],
+    *,
+    cwd: Path,
+    storage: Path,
+    timeout_seconds: float,
+    label: str,
+    pass_fds: Sequence[int] = (),
+) -> dict[str, Any]:
+    timeout = _expect_number(
+        timeout_seconds,
+        label=f"{label} timeout",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+    started = time.monotonic()
+    timed_out = False
+    output_limit_exceeded = False
+    with (
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8", dir=storage) as stdout,
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8", dir=storage) as stderr,
+    ):
+        process = subprocess.Popen(
+            arguments,
+            cwd=cwd,
+            stdout=stdout,
+            stderr=stderr,
+            env=_sanitized_environment(),
+            text=True,
+            start_new_session=True,
+            pass_fds=tuple(pass_fds),
+        )
+        try:
+            while process.poll() is None:
+                if (
+                    os.fstat(stdout.fileno()).st_size > MIB
+                    or os.fstat(stderr.fileno()).st_size > MIB
+                ):
+                    output_limit_exceeded = True
+                    break
+                elapsed = time.monotonic() - started
+                if elapsed >= timeout:
+                    timed_out = True
+                    break
+                time.sleep(min(0.25, timeout - elapsed))
+        finally:
+            _terminate_and_reap(process)
+        stdout.seek(0, os.SEEK_END)
+        stdout_size = stdout.tell()
+        stdout.seek(0)
+        output = stdout.read(MIB + 1)
+        stderr.seek(0, os.SEEK_END)
+        stderr_size = stderr.tell()
+        stderr.seek(max(0, stderr_size - 4000))
+        error_excerpt = stderr.read()
+    if (
+        process.returncode != 0
+        or timed_out
+        or output_limit_exceeded
+        or stdout_size > MIB
+        or stderr_size > MIB
+    ):
+        detail = error_excerpt[-4000:] if error_excerpt else "no stderr"
+        raise ValueError(f"{label} failed or exceeded its resource limits: {detail}")
+    parsed = parse_json_strict(output, label=f"{label} output")
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{label} output must be a JSON object")
+    return parsed
+
+
+def _snapshot_matches_host(
+    snapshot: Mapping[str, Any],
+    host: Mapping[str, Any],
+) -> bool:
+    return all(
+        (
+            snapshot["commit"] == host["execution"]["expected_commit"],
+            snapshot["clean"] is True,
+            snapshot["uv_lock_sha256"] == host["execution"]["uv_lock_sha256"],
+            snapshot["execution_python_sha256"]
+            == host["runtime"]["execution_python_sha256"],
+        )
+    )
+
+
+def _current_uv_matches_host(host: Mapping[str, Any]) -> bool:
+    located = shutil.which("uv")
+    if located is None:
+        return False
+    resolved = Path(located).resolve(strict=True)
+    return (
+        str(resolved) == host["runtime"]["uv_path"]
+        and _sha256_file(resolved) == host["runtime"]["uv_sha256"]
+    )
+
+
+def _record_is_fresh(record: Mapping[str, Any]) -> bool:
+    timestamp = _parse_timestamp(record["recorded_at"], label="recorded_at")
+    now = datetime.now(UTC)
+    return now - MAXIMUM_RECORD_AGE <= timestamp <= now + MAXIMUM_CLOCK_SKEW
+
+
+def run_capacity_benchmark(
+    *,
+    stage: str,
+    static_record: Mapping[str, Any],
+    acknowledge_e768: bool = False,
+    sample_interval_seconds: float = 0.25,
+    timeout_seconds: float = DEFAULT_CAPACITY_TIMEOUT_SECONDS,
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Run only one synthetic capacity benchmark after static gates pass."""
+
+    host = verify_record(dict(static_record), record_type=_STATIC_RECORD_TYPE)
+    if stage not in _CAPACITY_SPECS:
+        raise ValueError("capacity stage must be e192 or e768")
+    if not isinstance(acknowledge_e768, bool):
+        raise ValueError("E768 acknowledgement must be a boolean")
+    if not host["decision"]["static_prerequisites_passed"]:
+        raise ValueError("static host prerequisites did not pass")
+    if not _record_is_fresh(host):
+        raise ValueError("static host qualification is stale or future-dated")
+    if stage == "e768" and not acknowledge_e768:
+        raise ValueError(
+            "E768 requires explicit synthetic memory-pressure acknowledgement"
+        )
+    interval = _expect_number(
+        sample_interval_seconds,
+        label="sample interval",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+    if interval > MAXIMUM_SAMPLE_INTERVAL_SECONDS:
+        raise ValueError(
+            "sample interval must be at most "
+            f"{MAXIMUM_SAMPLE_INTERVAL_SECONDS:g} second"
+        )
+    timeout = _expect_number(
+        timeout_seconds,
+        label="timeout",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+
+    repository = Path(host["execution"]["repository"])
+    lock = repository / "uv.lock"
+    execution_python = Path(host["runtime"]["execution_python_path"])
+    before_snapshot = _repository_snapshot(
+        repository,
+        lock=lock,
+        execution_python=execution_python,
+    )
+    if not _snapshot_matches_host(before_snapshot, host):
+        raise ValueError("execution checkout changed after static inspection")
+    if not _current_uv_matches_host(host):
+        raise ValueError("uv executable changed after static inspection")
+    if _tool_identity_hash(_tool_identity()) != host["tool_identity_hash"]:
+        raise ValueError("qualification tool source changed after static inspection")
+    if (
+        _machine_boot_identity(
+            proc_root=proc_root,
+            machine_id_path=machine_id_path,
+        )
+        != host["host_identity"]
+    ):
+        raise ValueError("host machine or boot changed after static inspection")
+    command = _capacity_arguments(
+        stage,
+        uv_path=host["runtime"]["uv_path"],
+        execution_python=host["runtime"]["execution_python_path"],
+    )
+    meminfo = proc_root / "meminfo"
+    vmstat_path = proc_root / "vmstat"
+    before_memory = _read_key_values(meminfo)
+    before_vmstat = _read_key_values(vmstat_path)
+    before_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    started_at = _utc_now()
+    started = time.monotonic()
+    minimum_available = before_memory.get("MemAvailable", 0)
+    timed_out = False
+    output_limit_exceeded = False
+    storage = Path(host["storage"]["storage_root"])
+    with (
+        tempfile.TemporaryFile(
+            mode="w+",
+            encoding="utf-8",
+            dir=storage,
+        ) as stdout_file,
+        tempfile.TemporaryFile(
+            mode="w+",
+            encoding="utf-8",
+            dir=storage,
+        ) as stderr_file,
+    ):
+        process = subprocess.Popen(
+            command,
+            cwd=repository,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            env=_sanitized_environment(),
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            while process.poll() is None:
+                current = _read_key_values(meminfo)
+                minimum_available = min(
+                    minimum_available,
+                    current.get("MemAvailable", minimum_available),
+                )
+                if (
+                    os.fstat(stdout_file.fileno()).st_size > MIB
+                    or os.fstat(stderr_file.fileno()).st_size > MIB
+                ):
+                    output_limit_exceeded = True
+                    break
+                elapsed = time.monotonic() - started
+                if elapsed >= timeout:
+                    timed_out = True
+                    break
+                time.sleep(min(interval, timeout - elapsed))
+        finally:
+            _terminate_and_reap(process)
+        stdout_file.seek(0, os.SEEK_END)
+        stdout_size = stdout_file.tell()
+        output_limit_exceeded = output_limit_exceeded or stdout_size > MIB
+        stdout_file.seek(0)
+        stdout = stdout_file.read(MIB + 1)
+        stderr_file.seek(0, os.SEEK_END)
+        stderr_size = stderr_file.tell()
+        output_limit_exceeded = output_limit_exceeded or stderr_size > MIB
+        stderr_file.seek(max(0, stderr_size - 4000))
+        stderr = stderr_file.read()
+
+    after_snapshot = _repository_snapshot(
+        repository,
+        lock=lock,
+        execution_python=execution_python,
+    )
+    checkout_unchanged = after_snapshot == before_snapshot and _snapshot_matches_host(
+        after_snapshot, host
+    )
+    after_memory = _read_key_values(meminfo)
+    after_vmstat = _read_key_values(vmstat_path)
+    after_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    minimum_available = min(
+        minimum_available,
+        after_memory.get("MemAvailable", minimum_available),
+    )
+    process_major_faults = max(0, after_usage.ru_majflt - before_usage.ru_majflt)
+    swapin_delta = max(
+        0,
+        after_vmstat.get("pswpin", 0) - before_vmstat.get("pswpin", 0),
+    )
+    swapout_delta = max(
+        0,
+        after_vmstat.get("pswpout", 0) - before_vmstat.get("pswpout", 0),
+    )
+    result: dict[str, Any] = {}
+    if process.returncode == 0 and not timed_out and not output_limit_exceeded:
+        try:
+            parsed = parse_json_strict(
+                stdout,
+                label=f"symbolic v2 {stage.upper()} capacity output",
+            )
+        except ValueError as error:
+            raise ValueError(
+                "capacity benchmark did not emit one JSON object"
+            ) from error
+        if not isinstance(parsed, dict):
+            raise ValueError("capacity benchmark output must be a JSON object")
+        result = parsed
+    decision = _capacity_decision(
+        stage,
+        result=result,
+        minimum_available_memory_bytes=minimum_available,
+        process_major_faults=process_major_faults,
+        swapout_delta_pages=swapout_delta,
+        checkout_unchanged=checkout_unchanged,
+    )
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    execution_identity = {
+        "commit": host["execution"]["observed_commit"],
+        "repository": host["execution"]["repository"],
+        "uv_lock_sha256": host["execution"]["uv_lock_sha256"],
+        "uv_path": host["runtime"]["uv_path"],
+        "uv_sha256": host["runtime"]["uv_sha256"],
+        "execution_python_path": host["runtime"]["execution_python_path"],
+        "execution_python_sha256": host["runtime"]["execution_python_sha256"],
+    }
+    payload = {
+        "schema_version": 1,
+        "record_type": _CAPACITY_RECORD_TYPE,
+        "recorded_at": _utc_now(),
+        "stage": stage,
+        "execution": execution_identity,
+        "host_identity": host["host_identity"],
+        "host_identity_hash": host["host_identity_hash"],
+        "tool_identity_hash": host["tool_identity_hash"],
+        "static_record_hash": host["record_hash"],
+        "command": _command(command),
+        "started_at": started_at,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "timeout_seconds": timeout,
+        "exit_code": process.returncode,
+        "timed_out": timed_out,
+        "output_limit_exceeded": output_limit_exceeded,
+        "benchmark_result": result,
+        "prelaunch_checkout": before_snapshot,
+        "postrun_checkout": after_snapshot,
+        "host_memory": {
+            "before_available_memory_bytes": before_memory.get("MemAvailable", 0),
+            "after_available_memory_bytes": after_memory.get("MemAvailable", 0),
+            "minimum_available_memory_bytes": minimum_available,
+        },
+        "host_swap": {
+            "page_size_bytes": page_size,
+            "pswpin_delta_pages": swapin_delta,
+            "pswpin_delta_bytes": swapin_delta * page_size,
+            "pswpout_delta_pages": swapout_delta,
+            "pswpout_delta_bytes": swapout_delta * page_size,
+        },
+        "process_major_faults": process_major_faults,
+        "stderr": stderr[-4000:] if stderr else "",
+        "decision": decision,
+        "scientific_boundary": {
+            "synthetic_dataset_only": True,
+            "creates_study_artifacts": False,
+            "executes_registered_study": False,
+            "scientific_use": "prohibited",
+        },
+    }
+    return _signed(payload)
+
+
+_PROBE_EXECUTION_RESULT_KEYS = frozenset(
+    {
+        "artifact_root",
+        "config_hash",
+        "phase",
+        "run_count",
+    }
+)
+_PROBE_BENCHMARK_RESULT_KEYS = frozenset(
+    {
+        "artifact_root",
+        "budget_multiplier",
+        "dataset_hash",
+        "fixed_frontier_cache_copy_seconds",
+        "fixed_frontier_raw_hash_seconds",
+        "fixed_frontier_validation_seconds",
+        "fixed_report_ingestion_seconds",
+        "frontier_tree_count",
+        "inventory_elapsed_seconds",
+        "load_elapsed_seconds",
+        "maximum_rss_mib",
+        "modeled_probe_report_seconds",
+        "marginal_run_load_seconds_per_run",
+        "marginal_run_raw_hash_seconds_per_run",
+        "marginal_run_validation_seconds_per_run",
+        "observation_count",
+        "observed_probe_report_seconds",
+        "operational_budget_hours",
+        "projected_report_ingestion_hours",
+        "projected_runs_per_root",
+        "raw_run_byte_size",
+        "raw_run_file_count",
+        "residual_seconds_per_run",
+        "rss_before_mib",
+        "rss_increment_upper_bound_mib",
+        "run_count",
+    }
+)
+
+
+def _validate_probe_execution_result(value: object) -> dict[str, Any]:
+    result = _expect_keys(
+        value,
+        label="probe execution result",
+        keys=_PROBE_EXECUTION_RESULT_KEYS,
+    )
+    root = Path(_expect_string(result["artifact_root"], label="probe artifact_root"))
+    if not root.is_absolute():
+        raise ValueError("probe artifact_root must be absolute")
+    _expect_sha256(result["config_hash"], label="probe config_hash")
+    _expect_string(result["phase"], label="probe phase")
+    _expect_int(result["run_count"], label="probe run_count", minimum=0)
+    return result
+
+
+def _validate_probe_benchmark_result(value: object) -> dict[str, Any]:
+    result = _expect_keys(
+        value,
+        label="probe benchmark result",
+        keys=_PROBE_BENCHMARK_RESULT_KEYS,
+    )
+    root = Path(_expect_string(result["artifact_root"], label="probe artifact_root"))
+    if not root.is_absolute():
+        raise ValueError("probe artifact_root must be absolute")
+    _expect_sha256(result["dataset_hash"], label="probe dataset_hash")
+    for name in (
+        "frontier_tree_count",
+        "observation_count",
+        "projected_runs_per_root",
+        "raw_run_byte_size",
+        "raw_run_file_count",
+        "run_count",
+    ):
+        _expect_int(result[name], label=f"probe {name}", minimum=0)
+    for name in _PROBE_BENCHMARK_RESULT_KEYS - {
+        "artifact_root",
+        "dataset_hash",
+        "frontier_tree_count",
+        "observation_count",
+        "projected_runs_per_root",
+        "raw_run_byte_size",
+        "raw_run_file_count",
+        "run_count",
+    }:
+        _expect_number(result[name], label=f"probe {name}", minimum=0.0)
+    return result
+
+
+def _probe_execution_shape(
+    result: Mapping[str, Any],
+    expected_artifact_root: str,
+) -> bool:
+    return all(
+        (
+            result["artifact_root"] == expected_artifact_root,
+            result["config_hash"] == V2_PROBE_CONFIG_HASH,
+            result["phase"] == "calibration",
+            type(result["run_count"]) is int,
+            result["run_count"] == 48,
+        )
+    )
+
+
+def _probe_benchmark_shape(
+    result: Mapping[str, Any],
+    expected_artifact_root: str,
+) -> bool:
+    expected_integers = {
+        "frontier_tree_count": 4,
+        "observation_count": 624,
+        "projected_runs_per_root": V2_PROJECTED_RUNS,
+        "raw_run_file_count": V2_PROBE_RAW_RUN_FILES,
+        "run_count": 48,
+    }
+    return all(
+        type(result[name]) is int and result[name] == expected
+        for name, expected in expected_integers.items()
+    ) and all(
+        (
+            result["artifact_root"] == expected_artifact_root,
+            result["dataset_hash"] == V2_PROBE_DATASET_HASH,
+            result["budget_multiplier"] == 2.0,
+        )
+    )
+
+
+def _assert_no_symlink_components(path: Path) -> Path:
+    target = _absolute_path(path)
+    current = Path(target.anchor)
+    for component in target.parts[1:]:
+        current /= component
+        metadata = current.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ValueError(f"path contains a symlinked component: {current}")
+    return target.resolve(strict=True)
+
+
+def _artifact_storage_identity(
+    artifact_root: Path,
+    *,
+    storage_root: Path,
+) -> dict[str, Any]:
+    canonical = _assert_no_symlink_components(artifact_root)
+    storage = _assert_no_symlink_components(storage_root)
+    if not _path_within(canonical, storage):
+        raise ValueError("probe artifact root is outside qualified storage")
+    metadata = canonical.stat()
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("probe artifact root must be a directory")
+    return {
+        "canonical_path": str(canonical),
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+    }
+
+
+def _sha256_descriptor(descriptor: int) -> str:
+    digest = hashlib.sha256()
+    while chunk := os.read(descriptor, MIB):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _build_artifact_manifest(
+    root: Path,
+    *,
+    base_directory_fd: int | None = None,
+) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
+    file_count = 0
+    total_bytes = 0
+    for directory, directory_names, file_names, current_directory_fd in os.fwalk(
+        root,
+        topdown=True,
+        follow_symlinks=False,
+        dir_fd=base_directory_fd,
+    ):
+        directory_names.sort()
+        file_names.sort()
+        relative_directory = Path(directory).relative_to(root)
+        for name in directory_names:
+            metadata = os.stat(
+                name,
+                dir_fd=current_directory_fd,
+                follow_symlinks=False,
+            )
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                raise ValueError("probe artifact tree contains a non-directory entry")
+            entries.append(
+                {
+                    "kind": "directory",
+                    "path": (relative_directory / name).as_posix(),
+                }
+            )
+        for name in file_names:
+            metadata = os.stat(
+                name,
+                dir_fd=current_directory_fd,
+                follow_symlinks=False,
+            )
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("probe artifact tree contains a non-regular file")
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=current_directory_fd,
+            )
+            try:
+                opened = os.fstat(descriptor)
+                if (
+                    opened.st_dev,
+                    opened.st_ino,
+                    opened.st_size,
+                    opened.st_mtime_ns,
+                ) != (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                ):
+                    raise ValueError("probe artifact changed while building manifest")
+                file_hash = _sha256_descriptor(descriptor)
+                after = os.fstat(descriptor)
+                if (after.st_size, after.st_mtime_ns) != (
+                    opened.st_size,
+                    opened.st_mtime_ns,
+                ):
+                    raise ValueError("probe artifact changed while being hashed")
+            finally:
+                os.close(descriptor)
+            relative = (relative_directory / name).as_posix()
+            entries.append(
+                {
+                    "kind": "file",
+                    "path": relative,
+                    "sha256": file_hash,
+                    "size_bytes": metadata.st_size,
+                }
+            )
+            file_count += 1
+            total_bytes += metadata.st_size
+    return {
+        "file_count": file_count,
+        "total_bytes": total_bytes,
+        "manifest_hash": scientific_hash(
+            entries,
+            domain="operations.v2-probe-artifact-manifest.v1",
+        ),
+    }
+
+
+def _artifact_manifest(artifact_root: Path) -> dict[str, Any]:
+    return _build_artifact_manifest(_assert_no_symlink_components(artifact_root))
+
+
+def _artifact_manifest_from_descriptor(directory_fd: int) -> dict[str, Any]:
+    return _build_artifact_manifest(Path("."), base_directory_fd=directory_fd)
+
+
+def _open_existing_directory_nofollow(path: Path) -> int:
+    target = _absolute_path(path)
+    descriptor = os.open(
+        target.anchor,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC,
+    )
+    try:
+        for component in target.parts[1:]:
+            child = os.open(
+                component,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _open_probe_parent(
+    artifact_root: Path,
+    *,
+    storage_root: Path,
+) -> tuple[int, str]:
+    artifact = _absolute_path(artifact_root)
+    storage = _absolute_path(storage_root)
+    try:
+        relative = artifact.relative_to(storage)
+    except ValueError as error:
+        raise ValueError("probe artifact root is outside qualified storage") from error
+    if not relative.parts:
+        raise ValueError("probe artifact root cannot equal qualified storage root")
+    descriptor = _open_existing_directory_nofollow(storage)
+    try:
+        for component in relative.parts[:-1]:
+            try:
+                child = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+            except FileNotFoundError:
+                os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                child = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+            os.close(descriptor)
+            descriptor = child
+        leaf = relative.parts[-1]
+        try:
+            os.stat(leaf, dir_fd=descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return descriptor, leaf
+        raise ValueError("probe artifact root must not already exist")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _same_open_directory(left: int, right: int) -> bool:
+    left_stat = os.fstat(left)
+    right_stat = os.fstat(right)
+    return (
+        stat.S_ISDIR(left_stat.st_mode)
+        and stat.S_ISDIR(right_stat.st_mode)
+        and (left_stat.st_dev, left_stat.st_ino)
+        == (right_stat.st_dev, right_stat.st_ino)
+    )
+
+
+def _assert_current_context(
+    host: Mapping[str, Any],
+    *,
+    proc_root: Path,
+    machine_id_path: Path,
+) -> dict[str, Any]:
+    repository = Path(host["execution"]["repository"])
+    snapshot = _repository_snapshot(
+        repository,
+        lock=repository / "uv.lock",
+        execution_python=Path(host["runtime"]["execution_python_path"]),
+    )
+    if not _snapshot_matches_host(snapshot, host):
+        raise ValueError("execution checkout no longer matches static qualification")
+    if not _current_uv_matches_host(host):
+        raise ValueError("uv executable no longer matches static qualification")
+    if _tool_identity_hash(_tool_identity()) != host["tool_identity_hash"]:
+        raise ValueError("qualification tool no longer matches static qualification")
+    if (
+        _machine_boot_identity(
+            proc_root=proc_root,
+            machine_id_path=machine_id_path,
+        )
+        != host["host_identity"]
+    ):
+        raise ValueError("host machine or boot no longer matches static qualification")
+    return snapshot
+
+
+def verify_current_context(
+    static_record: Mapping[str, Any],
+    *,
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Recheck the checkout, executable, tool, machine, and boot bindings."""
+
+    host = verify_record(dict(static_record), record_type=_STATIC_RECORD_TYPE)
+    _assert_current_context(
+        host,
+        proc_root=proc_root,
+        machine_id_path=machine_id_path,
+    )
+    return host
+
+
+def _bind_probe_result(
+    *,
+    kind: str,
+    static_record: Mapping[str, Any],
+    result: Mapping[str, Any],
+    probe_execution_record: Mapping[str, Any] | None = None,
+    artifact_directory_fd: int | None = None,
+    executed_command: str | None = None,
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Bind one plain probe output to the qualified execution context."""
+
+    host = verify_record(dict(static_record), record_type=_STATIC_RECORD_TYPE)
+    if not host["decision"]["static_prerequisites_passed"]:
+        raise ValueError("static host prerequisites did not pass")
+    if not _record_is_fresh(host):
+        raise ValueError("static host qualification is stale or future-dated")
+    _assert_current_context(
+        host,
+        proc_root=proc_root,
+        machine_id_path=machine_id_path,
+    )
+    artifact_root = Path(result.get("artifact_root", ""))
+    artifact_identity = _artifact_storage_identity(
+        artifact_root,
+        storage_root=Path(host["storage"]["storage_root"]),
+    )
+    secure_artifact_access = artifact_directory_fd is not None
+    if secure_artifact_access != (executed_command is not None):
+        raise ValueError(
+            "secure probe binding requires both an open directory and executed command"
+        )
+    if artifact_directory_fd is None:
+        artifact_manifest = _artifact_manifest(artifact_root)
+    else:
+        if isinstance(artifact_directory_fd, bool) or artifact_directory_fd < 0:
+            raise ValueError("artifact directory descriptor must be nonnegative")
+        opened = os.fstat(artifact_directory_fd)
+        if not stat.S_ISDIR(opened.st_mode) or (
+            opened.st_dev,
+            opened.st_ino,
+        ) != (
+            artifact_identity["device"],
+            artifact_identity["inode"],
+        ):
+            raise ValueError("open artifact directory differs from expected root")
+        artifact_manifest = _artifact_manifest_from_descriptor(artifact_directory_fd)
+    common = {
+        "schema_version": 1,
+        "recorded_at": _utc_now(),
+        "execution_commit": host["execution"]["observed_commit"],
+        "host_identity": host["host_identity"],
+        "host_identity_hash": host["host_identity_hash"],
+        "tool_identity_hash": host["tool_identity_hash"],
+        "static_record_hash": host["record_hash"],
+        "probe_config_hash": host["registered_inputs"]["probe_config_hash"],
+        "expected_artifact_root": host["probe_storage"]["artifact_root"],
+        "artifact_storage_identity": artifact_identity,
+        "artifact_manifest": artifact_manifest,
+        "secure_artifact_access": secure_artifact_access,
+        "executed_command": executed_command,
+        "scientific_boundary": {
+            "creates_study_artifacts": False,
+            "executes_registered_study": False,
+            "inspects_probe_metrics": False,
+            "scientific_use": "prohibited",
+        },
+    }
+    if kind == "execution":
+        checked = _validate_probe_execution_result(dict(result))
+        if probe_execution_record is not None:
+            raise ValueError("execution probe binding cannot name a prior probe record")
+        payload = {
+            **common,
+            "record_type": _PROBE_EXECUTION_RECORD_TYPE,
+            "planned_command": host["plan"]["probe"]["underlying_execute"],
+            "source_result_hash": scientific_hash(
+                checked,
+                domain="operations.v2-probe-execution-result.v1",
+            ),
+            "result": checked,
+            "decision": {
+                "shape_passed": _probe_execution_shape(
+                    checked,
+                    host["probe_storage"]["artifact_root"],
+                )
+                and artifact_manifest["file_count"] > 0
+                and artifact_manifest["total_bytes"] > 0
+                and secure_artifact_access,
+            },
+        }
+    elif kind == "benchmark":
+        checked = _validate_probe_benchmark_result(dict(result))
+        if probe_execution_record is None:
+            raise ValueError("benchmark probe binding requires its execution record")
+        execution = verify_record(
+            dict(probe_execution_record),
+            record_type=_PROBE_EXECUTION_RECORD_TYPE,
+        )
+        for field in (
+            "expected_artifact_root",
+            "host_identity",
+            "host_identity_hash",
+            "tool_identity_hash",
+            "static_record_hash",
+            "probe_config_hash",
+            "secure_artifact_access",
+        ):
+            if execution[field] != common[field]:
+                raise ValueError(f"probe execution {field} binding differs")
+        if execution["artifact_storage_identity"] != artifact_identity:
+            raise ValueError("probe artifact storage identity changed before benchmark")
+        if execution["artifact_manifest"] != artifact_manifest:
+            raise ValueError("probe artifact content changed before benchmark binding")
+        if execution["result"]["artifact_root"] != checked["artifact_root"]:
+            raise ValueError("probe benchmark artifact root differs from execution")
+        payload = {
+            **common,
+            "record_type": _PROBE_BENCHMARK_RECORD_TYPE,
+            "planned_command": host["plan"]["probe"]["underlying_benchmark"],
+            "probe_execution_record_hash": execution["record_hash"],
+            "source_result_hash": scientific_hash(
+                checked,
+                domain="operations.v2-probe-benchmark-result.v1",
+            ),
+            "result": checked,
+            "decision": {
+                "shape_passed": _probe_benchmark_shape(
+                    checked,
+                    host["probe_storage"]["artifact_root"],
+                )
+                and artifact_manifest["file_count"] > 0
+                and artifact_manifest["total_bytes"] > 0
+                and secure_artifact_access,
+            },
+        }
+    else:
+        raise ValueError("probe result kind must be execution or benchmark")
+    return _signed(payload)
+
+
+def bind_probe_result(
+    *,
+    kind: str,
+    static_record: Mapping[str, Any],
+    result: Mapping[str, Any],
+    probe_execution_record: Mapping[str, Any] | None = None,
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Hash-seal imported probe JSON without qualifying its prior path access."""
+
+    return _bind_probe_result(
+        kind=kind,
+        static_record=static_record,
+        result=result,
+        probe_execution_record=probe_execution_record,
+        proc_root=proc_root,
+        machine_id_path=machine_id_path,
+    )
+
+
+def _secured_probe_command_matches(
+    host: Mapping[str, Any],
+    record: Mapping[str, Any],
+    *,
+    kind: str,
+) -> bool:
+    command = record.get("executed_command")
+    if not isinstance(command, str):
+        return False
+    try:
+        arguments = tuple(shlex.split(command))
+    except ValueError:
+        return False
+    runtime = _runtime_prefix(
+        host["runtime"]["uv_path"],
+        host["runtime"]["execution_python_path"],
+    )
+    descriptor_index = len(runtime) + 2
+    if len(arguments) <= descriptor_index or not arguments[descriptor_index].isdigit():
+        return False
+    return arguments == _secured_probe_arguments(
+        kind,
+        uv_path=host["runtime"]["uv_path"],
+        execution_python=host["runtime"]["execution_python_path"],
+        artifact_descriptor=arguments[descriptor_index],
+        repository=Path(host["execution"]["repository"]),
+    )
+
+
+def _probe_execution_for_benchmark(
+    host: Mapping[str, Any],
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    execution = verify_record(
+        dict(record),
+        record_type=_PROBE_EXECUTION_RECORD_TYPE,
+    )
+    expected = {
+        "execution_commit": host["execution"]["observed_commit"],
+        "host_identity": host["host_identity"],
+        "host_identity_hash": host["host_identity_hash"],
+        "tool_identity_hash": host["tool_identity_hash"],
+        "static_record_hash": host["record_hash"],
+        "probe_config_hash": host["registered_inputs"]["probe_config_hash"],
+        "expected_artifact_root": host["probe_storage"]["artifact_root"],
+        "planned_command": host["plan"]["probe"]["underlying_execute"],
+    }
+    if any(execution[name] != value for name, value in expected.items()):
+        raise ValueError("probe execution record differs from the qualified host")
+    if (
+        not execution["secure_artifact_access"]
+        or not execution["decision"]["shape_passed"]
+        or not _secured_probe_command_matches(host, execution, kind="execution")
+        or not _record_is_fresh(execution)
+        or _parse_timestamp(execution["recorded_at"], label="probe recorded_at")
+        < _parse_timestamp(host["recorded_at"], label="static recorded_at")
+    ):
+        raise ValueError("probe execution record is not valid for benchmark launch")
+    return execution
+
+
+def run_probe_step(
+    *,
+    kind: str,
+    static_record: Mapping[str, Any],
+    probe_execution_record: Mapping[str, Any] | None = None,
+    timeout_seconds: float = DEFAULT_PROBE_TIMEOUT_SECONDS,
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Run one probe step through a no-follow descriptor-anchored path."""
+
+    host = verify_record(dict(static_record), record_type=_STATIC_RECORD_TYPE)
+    if not host["decision"]["static_prerequisites_passed"]:
+        raise ValueError("static host prerequisites did not pass")
+    if not _record_is_fresh(host):
+        raise ValueError("static host qualification is stale or future-dated")
+    _assert_current_context(
+        host,
+        proc_root=proc_root,
+        machine_id_path=machine_id_path,
+    )
+    repository = Path(host["execution"]["repository"])
+    storage = Path(host["storage"]["storage_root"])
+    artifact_root = Path(host["probe_storage"]["artifact_root"])
+    if kind == "execution":
+        if probe_execution_record is not None:
+            raise ValueError("execution probe cannot name a prior probe record")
+        parent_fd, leaf = _open_probe_parent(
+            artifact_root,
+            storage_root=storage,
+        )
+        root_fd: int | None = None
+        expected_fd: int | None = None
+        try:
+            os.mkdir(leaf, mode=0o700, dir_fd=parent_fd)
+            root_fd = os.open(
+                leaf,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=parent_fd,
+            )
+            command = _secured_probe_arguments(
+                "execution",
+                uv_path=host["runtime"]["uv_path"],
+                execution_python=host["runtime"]["execution_python_path"],
+                artifact_descriptor=root_fd,
+                repository=repository,
+            )
+            result = _run_bounded_detached_json(
+                command,
+                cwd=repository,
+                storage=storage,
+                timeout_seconds=timeout_seconds,
+                label="symbolic v2 probe execution",
+                pass_fds=(root_fd,),
+            )
+            if result.get("artifact_root") != ".":
+                raise ValueError("probe execution reported an unexpected artifact root")
+            expected_fd = _open_existing_directory_nofollow(artifact_root)
+            if not _same_open_directory(root_fd, expected_fd):
+                raise ValueError("probe root path changed during execution")
+            normalized = {**result, "artifact_root": str(artifact_root)}
+            return _bind_probe_result(
+                kind="execution",
+                static_record=host,
+                result=normalized,
+                artifact_directory_fd=root_fd,
+                executed_command=_command(command),
+                proc_root=proc_root,
+                machine_id_path=machine_id_path,
+            )
+        finally:
+            if expected_fd is not None:
+                os.close(expected_fd)
+            if root_fd is not None:
+                os.close(root_fd)
+            os.close(parent_fd)
+    if kind == "benchmark":
+        if probe_execution_record is None:
+            raise ValueError("benchmark probe requires its execution record")
+        execution = _probe_execution_for_benchmark(host, probe_execution_record)
+        root_fd = _open_existing_directory_nofollow(artifact_root)
+        try:
+            identity = _artifact_storage_identity(
+                artifact_root,
+                storage_root=storage,
+            )
+            opened = os.fstat(root_fd)
+            if (opened.st_dev, opened.st_ino) != (
+                identity["device"],
+                identity["inode"],
+            ) or identity != execution["artifact_storage_identity"]:
+                raise ValueError("probe artifact identity changed before benchmark")
+            if (
+                _artifact_manifest_from_descriptor(root_fd)
+                != execution["artifact_manifest"]
+            ):
+                raise ValueError("probe artifact content changed before benchmark")
+            command = _secured_probe_arguments(
+                "benchmark",
+                uv_path=host["runtime"]["uv_path"],
+                execution_python=host["runtime"]["execution_python_path"],
+                artifact_descriptor=root_fd,
+                repository=repository,
+            )
+            result = _run_bounded_detached_json(
+                command,
+                cwd=repository,
+                storage=storage,
+                timeout_seconds=timeout_seconds,
+                label="symbolic v2 probe benchmark",
+                pass_fds=(root_fd,),
+            )
+            if result.get("artifact_root") != ".":
+                raise ValueError("probe benchmark reported an unexpected artifact root")
+            normalized = {**result, "artifact_root": str(artifact_root)}
+            return _bind_probe_result(
+                kind="benchmark",
+                static_record=host,
+                result=normalized,
+                probe_execution_record=execution,
+                artifact_directory_fd=root_fd,
+                executed_command=_command(command),
+                proc_root=proc_root,
+                machine_id_path=machine_id_path,
+            )
+        finally:
+            os.close(root_fd)
+    raise ValueError("probe step kind must be execution or benchmark")
+
+
+def _fresh_and_ordered(
+    *,
+    host: Mapping[str, Any],
+    e192: Mapping[str, Any],
+    e768: Mapping[str, Any],
+    probe_execution: Mapping[str, Any],
+    probe_benchmark: Mapping[str, Any],
+) -> bool:
+    now = datetime.now(UTC)
+    timestamps = (
+        _parse_timestamp(host["recorded_at"], label="static recorded_at"),
+        _parse_timestamp(e192["started_at"], label="E192 started_at"),
+        _parse_timestamp(e192["recorded_at"], label="E192 recorded_at"),
+        _parse_timestamp(e768["started_at"], label="E768 started_at"),
+        _parse_timestamp(e768["recorded_at"], label="E768 recorded_at"),
+        _parse_timestamp(
+            probe_execution["recorded_at"],
+            label="probe execution recorded_at",
+        ),
+        _parse_timestamp(
+            probe_benchmark["recorded_at"],
+            label="probe benchmark recorded_at",
+        ),
+    )
+    return (
+        all(left <= right for left, right in pairwise(timestamps))
+        and now - MAXIMUM_RECORD_AGE <= timestamps[0]
+        and timestamps[-1] <= now + MAXIMUM_CLOCK_SKEW
+    )
+
+
+def assess_qualification(
+    *,
+    static_record: Mapping[str, Any],
+    e192_record: Mapping[str, Any],
+    e768_record: Mapping[str, Any],
+    probe_execution_result: Mapping[str, Any],
+    probe_benchmark_result: Mapping[str, Any],
+    available_window_hours: float,
+    recovery_margin_hours: float,
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Combine completed operational gates without launching study execution."""
+
+    host = verify_record(dict(static_record), record_type=_STATIC_RECORD_TYPE)
+    e192 = verify_record(dict(e192_record), record_type=_CAPACITY_RECORD_TYPE)
+    e768 = verify_record(dict(e768_record), record_type=_CAPACITY_RECORD_TYPE)
+    probe_execution = verify_record(
+        dict(probe_execution_result),
+        record_type=_PROBE_EXECUTION_RECORD_TYPE,
+    )
+    probe_benchmark = verify_record(
+        dict(probe_benchmark_result),
+        record_type=_PROBE_BENCHMARK_RECORD_TYPE,
+    )
+    window = _expect_number(
+        available_window_hours,
+        label="available runtime window",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+    margin = _expect_number(
+        recovery_margin_hours,
+        label="recovery margin",
+        minimum=0.0,
+    )
+
+    commit = host["execution"]["observed_commit"]
+    try:
+        _assert_current_context(
+            host,
+            proc_root=proc_root,
+            machine_id_path=machine_id_path,
+        )
+        checkout_pinned = True
+    except (OSError, subprocess.SubprocessError, ValueError):
+        checkout_pinned = False
+    static_binding_passed = (
+        e192["static_record_hash"]
+        == e768["static_record_hash"]
+        == probe_execution["static_record_hash"]
+        == probe_benchmark["static_record_hash"]
+        == host["record_hash"]
+    )
+    host_binding_passed = all(
+        record["host_identity_hash"] == host["host_identity_hash"]
+        and record["host_identity"] == host["host_identity"]
+        for record in (e192, e768, probe_execution, probe_benchmark)
+    )
+    tool_binding_passed = all(
+        record["tool_identity_hash"] == host["tool_identity_hash"]
+        for record in (e192, e768, probe_execution, probe_benchmark)
+    )
+    execution_binding_passed = all(
+        (
+            e192["execution"]["commit"] == commit,
+            e768["execution"]["commit"] == commit,
+            probe_execution["execution_commit"] == commit,
+            probe_benchmark["execution_commit"] == commit,
+        )
+    )
+    capacity_passed = all(
+        (
+            e192.get("stage") == "e192",
+            e768.get("stage") == "e768",
+            e192["decision"]["passed"] is True,
+            e768["decision"]["passed"] is True,
+        )
+    )
+    probe_shape_passed = all(
+        (
+            probe_execution["decision"]["shape_passed"],
+            probe_benchmark["decision"]["shape_passed"],
+            probe_benchmark["probe_execution_record_hash"]
+            == probe_execution["record_hash"],
+            probe_execution["artifact_storage_identity"]
+            == probe_benchmark["artifact_storage_identity"],
+            probe_execution["artifact_manifest"]
+            == probe_benchmark["artifact_manifest"],
+            probe_execution["secure_artifact_access"] is True,
+            probe_benchmark["secure_artifact_access"] is True,
+            probe_execution["result"]["artifact_root"]
+            == probe_benchmark["result"]["artifact_root"],
+            probe_execution["probe_config_hash"]
+            == probe_benchmark["probe_config_hash"]
+            == host["registered_inputs"]["probe_config_hash"],
+            probe_execution["planned_command"]
+            == host["plan"]["probe"]["underlying_execute"],
+            probe_benchmark["planned_command"]
+            == host["plan"]["probe"]["underlying_benchmark"],
+            _secured_probe_command_matches(
+                host,
+                probe_execution,
+                kind="execution",
+            ),
+            _secured_probe_command_matches(
+                host,
+                probe_benchmark,
+                kind="benchmark",
+            ),
+        )
+    )
+    budget = probe_benchmark["result"]["operational_budget_hours"]
+    valid_budget = (
+        isinstance(budget, (int, float))
+        and not isinstance(budget, bool)
+        and math.isfinite(budget)
+        and budget > 0
+    )
+    projected = probe_benchmark["result"]["projected_report_ingestion_hours"]
+    consistent_budget = (
+        valid_budget
+        and isinstance(projected, (int, float))
+        and not isinstance(projected, bool)
+        and math.isfinite(projected)
+        and projected > 0
+        and abs(float(budget) - 2.0 * float(projected)) <= 0.002
+    )
+    time_passed = consistent_budget and window >= float(budget) + margin
+    freshness_order_passed = _fresh_and_ordered(
+        host=host,
+        e192=e192,
+        e768=e768,
+        probe_execution=probe_execution,
+        probe_benchmark=probe_benchmark,
+    )
+    passed = all(
+        (
+            host["decision"]["static_prerequisites_passed"],
+            checkout_pinned,
+            static_binding_passed,
+            host_binding_passed,
+            tool_binding_passed,
+            execution_binding_passed,
+            capacity_passed,
+            probe_shape_passed,
+            freshness_order_passed,
+            time_passed,
+        )
+    )
+    payload = {
+        "schema_version": 1,
+        "record_type": _ASSESSMENT_RECORD_TYPE,
+        "recorded_at": _utc_now(),
+        "execution_commit": commit,
+        "host_identity": host["host_identity"],
+        "host_identity_hash": host["host_identity_hash"],
+        "tool_identity_hash": host["tool_identity_hash"],
+        "inputs": {
+            "static_record_hash": host["record_hash"],
+            "e192_record_hash": e192["record_hash"],
+            "e768_record_hash": e768["record_hash"],
+            "probe_execution_record_hash": probe_execution["record_hash"],
+            "probe_benchmark_record_hash": probe_benchmark["record_hash"],
+        },
+        "checks": {
+            "capacity_passed": capacity_passed,
+            "capacity_static_binding_passed": static_binding_passed,
+            "execution_binding_passed": execution_binding_passed,
+            "execution_checkout_pinned": checkout_pinned,
+            "host_binding_passed": host_binding_passed,
+            "input_freshness_order_passed": freshness_order_passed,
+            "probe_budget_consistent": consistent_budget,
+            "probe_shape_passed": probe_shape_passed,
+            "static_prerequisites_passed": host["decision"][
+                "static_prerequisites_passed"
+            ],
+            "time_window_passed": time_passed,
+            "tool_binding_passed": tool_binding_passed,
+        },
+        "runtime": {
+            "available_window_hours": window,
+            "measured_two_times_projection_hours": budget,
+            "recovery_margin_hours": margin,
+            "required_window_hours": (
+                float(budget) + margin if consistent_budget else None
+            ),
+        },
+        "decision": {
+            "qualification_passed": passed,
+            "registered_execution_authorized_by_this_record": False,
+            "next_action": (
+                "Independent review may authorize the separately invoked registered "
+                "calibration."
+                if passed
+                else "Resolve failed operational gates on the intended host; do not "
+                "run the registered study."
+            ),
+        },
+        "scientific_boundary": {
+            "creates_study_artifacts": False,
+            "executes_registered_study": False,
+            "inspects_probe_metrics": False,
+            "scientific_use": "prohibited",
+        },
+    }
+    return _signed(payload)
+
+
+def verify_assessment_bundle(
+    *,
+    assessment_record: Mapping[str, Any],
+    static_record: Mapping[str, Any],
+    e192_record: Mapping[str, Any],
+    e768_record: Mapping[str, Any],
+    probe_execution_record: Mapping[str, Any],
+    probe_benchmark_record: Mapping[str, Any],
+    proc_root: Path = Path("/proc"),
+    machine_id_path: Path = Path("/etc/machine-id"),
+) -> dict[str, Any]:
+    """Verify an assessment against all five records it claims to summarize."""
+
+    assessment = verify_record(
+        dict(assessment_record),
+        record_type=_ASSESSMENT_RECORD_TYPE,
+    )
+    recomputed = assess_qualification(
+        static_record=static_record,
+        e192_record=e192_record,
+        e768_record=e768_record,
+        probe_execution_result=probe_execution_record,
+        probe_benchmark_result=probe_benchmark_record,
+        available_window_hours=assessment["runtime"]["available_window_hours"],
+        recovery_margin_hours=assessment["runtime"]["recovery_margin_hours"],
+        proc_root=proc_root,
+        machine_id_path=machine_id_path,
+    )
+    compared_fields = (
+        "execution_commit",
+        "host_identity",
+        "host_identity_hash",
+        "tool_identity_hash",
+        "inputs",
+        "checks",
+        "runtime",
+        "decision",
+        "scientific_boundary",
+    )
+    if any(assessment[name] != recomputed[name] for name in compared_fields):
+        raise ValueError("assessment does not match its bound qualification records")
+    return assessment
+
+
+_STATIC_BOUNDARY = {
+    "creates_study_artifacts": False,
+    "executes_registered_study": False,
+    "inspects_probe_metrics": False,
+    "scientific_use": "prohibited",
+}
+_CAPACITY_BOUNDARY = {
+    "synthetic_dataset_only": True,
+    "creates_study_artifacts": False,
+    "executes_registered_study": False,
+    "scientific_use": "prohibited",
+}
+_CAPACITY_BENCHMARK_KEYS = frozenset(
+    {
+        "algorithm_replicas",
+        "checkpoint_count",
+        "checkpoint_zero_metric_count",
+        "dataset_elapsed_seconds",
+        "dataset_hash",
+        "environment_replicas",
+        "maximum_rss_mib",
+        "metric_count",
+        "observation_count",
+        "pool_elapsed_seconds",
+        "pooled_checkpoint_count",
+        "positive_checkpoint_metric_count",
+        "rss_before_mib",
+        "rss_increment_upper_bound_mib",
+        "total_elapsed_seconds",
+    }
+)
+
+
+def _validate_host_identity(value: object, *, label: str) -> dict[str, Any]:
+    identity = _expect_keys(
+        value,
+        label=label,
+        keys=frozenset({"machine_id_hash", "boot_id_hash"}),
+    )
+    _expect_sha256(identity["machine_id_hash"], label=f"{label}.machine_id_hash")
+    _expect_sha256(identity["boot_id_hash"], label=f"{label}.boot_id_hash")
+    return identity
+
+
+def _validate_tool_identity(value: object) -> dict[str, Any]:
+    tool = _expect_keys(
+        value,
+        label="tool",
+        keys=frozenset({"repository", "commit", "worktree_clean", "source_hash"}),
+    )
+    repository = Path(_expect_string(tool["repository"], label="tool.repository"))
+    if not repository.is_absolute():
+        raise ValueError("tool.repository must be absolute")
+    _full_git_sha(tool["commit"], label="qualification tool commit")
+    _expect_bool(tool["worktree_clean"], label="tool.worktree_clean")
+    _expect_sha256(tool["source_hash"], label="tool.source_hash")
+    return tool
+
+
+def _validate_static_record(record: Mapping[str, Any]) -> None:
+    _expect_keys(
+        record,
+        label="static qualification record",
+        keys=frozenset(
+            {
+                "schema_version",
+                "record_type",
+                "recorded_at",
+                "execution",
+                "tool",
+                "tool_identity_hash",
+                "host_identity",
+                "host_identity_hash",
+                "runtime",
+                "host",
+                "storage",
+                "probe_storage",
+                "registered_inputs",
+                "requirements",
+                "plan",
+                "decision",
+                "scientific_boundary",
+                "record_hash",
+            }
+        ),
+    )
+    _parse_timestamp(record["recorded_at"], label="static recorded_at")
+    execution = _expect_keys(
+        record["execution"],
+        label="static execution",
+        keys=frozenset(
+            {
+                "expected_commit",
+                "observed_commit",
+                "repository",
+                "status",
+                "worktree_clean",
+                "uv_lock_sha256",
+            }
+        ),
+    )
+    _full_git_commit(execution["expected_commit"])
+    _full_git_sha(execution["observed_commit"], label="observed execution commit")
+    repository = Path(
+        _expect_string(execution["repository"], label="execution.repository")
+    )
+    if not repository.is_absolute():
+        raise ValueError("execution.repository must be absolute")
+    status = _expect_string(
+        execution["status"],
+        label="execution.status",
+        nonempty=False,
+    )
+    clean = _expect_bool(
+        execution["worktree_clean"],
+        label="execution.worktree_clean",
+    )
+    if clean != (status == ""):
+        raise ValueError("execution cleanliness disagrees with recorded status")
+    if execution["uv_lock_sha256"] is not None:
+        _expect_sha256(
+            execution["uv_lock_sha256"],
+            label="execution.uv_lock_sha256",
+        )
+
+    tool = _validate_tool_identity(record["tool"])
+    tool_hash = _expect_sha256(
+        record["tool_identity_hash"],
+        label="tool_identity_hash",
+    )
+    if tool_hash != _tool_identity_hash(tool):
+        raise ValueError("tool identity hash does not match tool fields")
+    host_identity = _validate_host_identity(
+        record["host_identity"],
+        label="host_identity",
+    )
+    _expect_sha256(record["host_identity_hash"], label="host_identity_hash")
+    runtime = _expect_keys(
+        record["runtime"],
+        label="runtime",
+        keys=frozenset(
+            {
+                "execution_python",
+                "execution_python_path",
+                "execution_python_sha256",
+                "execution_prefix",
+                "environment_synced",
+                "kernel",
+                "logical_cpu_count",
+                "platform",
+                "tool_python",
+                "uv",
+                "uv_path",
+                "uv_sha256",
+            }
+        ),
+    )
+    for name in ("execution_python", "execution_prefix"):
+        if runtime[name] is not None:
+            _expect_string(runtime[name], label=f"runtime.{name}")
+    python_path = Path(
+        _expect_string(
+            runtime["execution_python_path"],
+            label="runtime.execution_python_path",
+        )
+    )
+    if not python_path.is_absolute():
+        raise ValueError("runtime.execution_python_path must be absolute")
+    if runtime["execution_python_sha256"] is not None:
+        _expect_sha256(
+            runtime["execution_python_sha256"],
+            label="runtime.execution_python_sha256",
+        )
+    _expect_bool(runtime["environment_synced"], label="runtime.environment_synced")
+    _expect_string(runtime["kernel"], label="runtime.kernel")
+    if runtime["logical_cpu_count"] is not None:
+        _expect_int(
+            runtime["logical_cpu_count"],
+            label="runtime.logical_cpu_count",
+            minimum=1,
+        )
+    _expect_string(runtime["platform"], label="runtime.platform")
+    _expect_string(runtime["tool_python"], label="runtime.tool_python")
+    _expect_string(runtime["uv"], label="runtime.uv")
+    _expect_string(runtime["uv_path"], label="runtime.uv_path")
+    _expect_sha256(runtime["uv_sha256"], label="runtime.uv_sha256")
+    if not Path(runtime["uv_path"]).is_absolute():
+        raise ValueError("runtime.uv_path must be absolute")
+
+    host = _expect_keys(
+        record["host"],
+        label="host",
+        keys=frozenset(
+            {
+                "available_memory_bytes",
+                "physical_memory_bytes",
+                "swap_bytes",
+                "vmstat",
+            }
+        ),
+    )
+    for name in (
+        "available_memory_bytes",
+        "physical_memory_bytes",
+        "swap_bytes",
+    ):
+        _expect_int(host[name], label=f"host.{name}", minimum=0)
+    vmstat = _expect_keys(
+        host["vmstat"],
+        label="host.vmstat",
+        keys=frozenset({"pswpin_pages", "pswpout_pages"}),
+    )
+    for name in vmstat:
+        _expect_int(vmstat[name], label=f"host.vmstat.{name}", minimum=0)
+
+    storage = _expect_keys(
+        record["storage"],
+        label="storage",
+        keys=frozenset(
+            {
+                "device",
+                "mount_options",
+                "mount_point",
+                "type",
+                "available_bytes",
+                "available_inodes",
+                "additional_storage_bytes",
+                "additional_inodes",
+                "local_filesystem",
+                "paired_raw_reference_bytes",
+                "paired_raw_reference_files",
+                "required_bytes",
+                "required_inodes",
+                "solid_state",
+                "read_write_mount",
+                "storage_root",
+                "writable",
+            }
+        ),
+    )
+    for name in ("device", "mount_options", "mount_point", "type", "storage_root"):
+        _expect_string(storage[name], label=f"storage.{name}")
+    if not Path(storage["storage_root"]).is_absolute():
+        raise ValueError("storage.storage_root must be absolute")
+    for name in (
+        "available_bytes",
+        "available_inodes",
+        "additional_storage_bytes",
+        "additional_inodes",
+        "paired_raw_reference_bytes",
+        "paired_raw_reference_files",
+        "required_bytes",
+        "required_inodes",
+    ):
+        _expect_int(storage[name], label=f"storage.{name}", minimum=0)
+    if (
+        storage["paired_raw_reference_bytes"] != REFERENCE_PAIR_RAW_BYTES
+        or storage["paired_raw_reference_files"] != REFERENCE_PAIR_RAW_FILES
+    ):
+        raise ValueError("storage reference constants do not match")
+    if storage["required_bytes"] != (
+        REFERENCE_PAIR_RAW_BYTES + storage["additional_storage_bytes"]
+    ) or storage["required_inodes"] != (
+        REFERENCE_PAIR_RAW_FILES + storage["additional_inodes"]
+    ):
+        raise ValueError("storage requirements do not include declared margins")
+    for name in ("local_filesystem", "read_write_mount", "writable"):
+        _expect_bool(storage[name], label=f"storage.{name}")
+    if storage["solid_state"] is not None:
+        _expect_bool(storage["solid_state"], label="storage.solid_state")
+
+    probe_storage = _expect_keys(
+        record["probe_storage"],
+        label="probe_storage",
+        keys=frozenset(
+            {"artifact_root", "existed_at_inspection", "on_intended_storage"}
+        ),
+    )
+    artifact_root = Path(
+        _expect_string(
+            probe_storage["artifact_root"],
+            label="probe_storage.artifact_root",
+        )
+    )
+    if not artifact_root.is_absolute():
+        raise ValueError("probe_storage.artifact_root must be absolute")
+    for name in ("existed_at_inspection", "on_intended_storage"):
+        _expect_bool(probe_storage[name], label=f"probe_storage.{name}")
+
+    registered = _expect_keys(
+        record["registered_inputs"],
+        label="registered_inputs",
+        keys=frozenset({"calibration_config_hash", "probe_config_hash"}),
+    )
+    for name in registered:
+        _expect_sha256(registered[name], label=f"registered_inputs.{name}")
+    expected_plan = _exact_plan_payload(
+        repository=repository,
+        commit=execution["expected_commit"],
+        probe=artifact_root,
+        uv=Path(runtime["uv_path"]),
+        python=python_path,
+    )
+    if record["plan"] != expected_plan:
+        raise ValueError("static exact plan does not match bound executables and paths")
+    expected_requirements = _static_requirements(
+        execution=execution,
+        tool=tool,
+        runtime=runtime,
+        host_identity=host_identity,
+        host=host,
+        storage=storage,
+        registered_inputs=registered,
+        probe_storage=probe_storage,
+    )
+    if record["requirements"] != expected_requirements:
+        raise ValueError("static requirements are incomplete or inconsistent")
+    expected_host_hash = _host_identity_hash(
+        execution=execution,
+        host_identity=host_identity,
+        runtime=runtime,
+        host=host,
+        storage=storage,
+    )
+    if record["host_identity_hash"] != expected_host_hash:
+        raise ValueError("host identity hash does not match static fields")
+    decision = _expect_keys(
+        record["decision"],
+        label="static decision",
+        keys=frozenset(
+            {
+                "qualification_steps_executed",
+                "registered_execution_authorized",
+                "static_prerequisites_passed",
+            }
+        ),
+    )
+    if decision != {
+        "qualification_steps_executed": False,
+        "registered_execution_authorized": False,
+        "static_prerequisites_passed": all(
+            item["passed"] for item in expected_requirements
+        ),
+    }:
+        raise ValueError("static decision does not match recomputed requirements")
+    if record["scientific_boundary"] != _STATIC_BOUNDARY:
+        raise ValueError("static scientific boundary is invalid")
+
+
+def _validate_checkout_snapshot(
+    value: object,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    snapshot = _expect_keys(
+        value,
+        label=label,
+        keys=frozenset(
+            {
+                "commit",
+                "clean",
+                "status",
+                "uv_lock_sha256",
+                "execution_python_sha256",
+            }
+        ),
+    )
+    _full_git_sha(snapshot["commit"], label=f"{label}.commit")
+    clean = _expect_bool(snapshot["clean"], label=f"{label}.clean")
+    status = _expect_string(
+        snapshot["status"],
+        label=f"{label}.status",
+        nonempty=False,
+    )
+    if clean != (status == ""):
+        raise ValueError(f"{label} cleanliness disagrees with status")
+    for name in ("uv_lock_sha256", "execution_python_sha256"):
+        if snapshot[name] is not None:
+            _expect_sha256(snapshot[name], label=f"{label}.{name}")
+    return snapshot
+
+
+def _validate_capacity_benchmark_result(value: object) -> dict[str, Any]:
+    if value == {}:
+        return {}
+    result = _expect_keys(
+        value,
+        label="capacity benchmark_result",
+        keys=_CAPACITY_BENCHMARK_KEYS,
+    )
+    for name in (
+        "algorithm_replicas",
+        "checkpoint_count",
+        "checkpoint_zero_metric_count",
+        "environment_replicas",
+        "metric_count",
+        "observation_count",
+        "pooled_checkpoint_count",
+        "positive_checkpoint_metric_count",
+    ):
+        _expect_int(result[name], label=f"benchmark_result.{name}", minimum=0)
+    _expect_sha256(result["dataset_hash"], label="benchmark_result.dataset_hash")
+    for name in _CAPACITY_BENCHMARK_KEYS - {
+        "algorithm_replicas",
+        "checkpoint_count",
+        "checkpoint_zero_metric_count",
+        "dataset_hash",
+        "environment_replicas",
+        "metric_count",
+        "observation_count",
+        "pooled_checkpoint_count",
+        "positive_checkpoint_metric_count",
+    }:
+        _expect_number(
+            result[name],
+            label=f"benchmark_result.{name}",
+            minimum=0.0,
+        )
+    return result
+
+
+def _validate_capacity_record(record: Mapping[str, Any]) -> None:
+    _expect_keys(
+        record,
+        label="capacity qualification record",
+        keys=frozenset(
+            {
+                "schema_version",
+                "record_type",
+                "recorded_at",
+                "stage",
+                "execution",
+                "host_identity",
+                "host_identity_hash",
+                "tool_identity_hash",
+                "static_record_hash",
+                "command",
+                "started_at",
+                "elapsed_seconds",
+                "timeout_seconds",
+                "exit_code",
+                "timed_out",
+                "output_limit_exceeded",
+                "benchmark_result",
+                "prelaunch_checkout",
+                "postrun_checkout",
+                "host_memory",
+                "host_swap",
+                "process_major_faults",
+                "stderr",
+                "decision",
+                "scientific_boundary",
+                "record_hash",
+            }
+        ),
+    )
+    recorded = _parse_timestamp(record["recorded_at"], label="capacity recorded_at")
+    started = _parse_timestamp(record["started_at"], label="capacity started_at")
+    if started > recorded + MAXIMUM_CLOCK_SKEW:
+        raise ValueError("capacity started_at follows recorded_at")
+    stage = _expect_string(record["stage"], label="capacity stage")
+    if stage not in _CAPACITY_SPECS:
+        raise ValueError("capacity stage must be e192 or e768")
+    execution = _expect_keys(
+        record["execution"],
+        label="capacity execution",
+        keys=frozenset(
+            {
+                "commit",
+                "repository",
+                "uv_lock_sha256",
+                "uv_path",
+                "uv_sha256",
+                "execution_python_path",
+                "execution_python_sha256",
+            }
+        ),
+    )
+    _full_git_commit(execution["commit"])
+    for name in ("repository", "uv_path", "execution_python_path"):
+        path = Path(_expect_string(execution[name], label=f"execution.{name}"))
+        if not path.is_absolute():
+            raise ValueError(f"execution.{name} must be absolute")
+    for name in ("uv_lock_sha256", "uv_sha256", "execution_python_sha256"):
+        _expect_sha256(execution[name], label=f"execution.{name}")
+    host_identity = _validate_host_identity(
+        record["host_identity"],
+        label="capacity host_identity",
+    )
+    _expect_sha256(record["host_identity_hash"], label="host_identity_hash")
+    _expect_sha256(record["tool_identity_hash"], label="tool_identity_hash")
+    _expect_sha256(record["static_record_hash"], label="static_record_hash")
+    expected_command = _command(
+        _capacity_arguments(
+            stage,
+            uv_path=execution["uv_path"],
+            execution_python=execution["execution_python_path"],
+        )
+    )
+    if record["command"] != expected_command:
+        raise ValueError("capacity command does not match pinned executables and stage")
+    _expect_number(record["elapsed_seconds"], label="elapsed_seconds", minimum=0.0)
+    _expect_number(
+        record["timeout_seconds"],
+        label="timeout_seconds",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+    exit_code = _expect_int(record["exit_code"], label="exit_code")
+    timed_out = _expect_bool(record["timed_out"], label="timed_out")
+    output_limit = _expect_bool(
+        record["output_limit_exceeded"],
+        label="output_limit_exceeded",
+    )
+    result = _validate_capacity_benchmark_result(record["benchmark_result"])
+    if result and (exit_code != 0 or timed_out or output_limit):
+        raise ValueError("failed capacity process cannot retain a benchmark result")
+    before = _validate_checkout_snapshot(
+        record["prelaunch_checkout"],
+        label="prelaunch_checkout",
+    )
+    after = _validate_checkout_snapshot(
+        record["postrun_checkout"],
+        label="postrun_checkout",
+    )
+    if (
+        before["commit"] != execution["commit"]
+        or before["uv_lock_sha256"] != execution["uv_lock_sha256"]
+        or before["execution_python_sha256"] != execution["execution_python_sha256"]
+        or not before["clean"]
+    ):
+        raise ValueError("capacity prelaunch snapshot differs from execution binding")
+    memory = _expect_keys(
+        record["host_memory"],
+        label="host_memory",
+        keys=frozenset(
+            {
+                "before_available_memory_bytes",
+                "after_available_memory_bytes",
+                "minimum_available_memory_bytes",
+            }
+        ),
+    )
+    for name in memory:
+        _expect_int(memory[name], label=f"host_memory.{name}", minimum=0)
+    swap = _expect_keys(
+        record["host_swap"],
+        label="host_swap",
+        keys=frozenset(
+            {
+                "page_size_bytes",
+                "pswpin_delta_pages",
+                "pswpin_delta_bytes",
+                "pswpout_delta_pages",
+                "pswpout_delta_bytes",
+            }
+        ),
+    )
+    for name in swap:
+        _expect_int(swap[name], label=f"host_swap.{name}", minimum=0)
+    if (
+        swap["pswpin_delta_bytes"]
+        != swap["pswpin_delta_pages"] * swap["page_size_bytes"]
+        or swap["pswpout_delta_bytes"]
+        != swap["pswpout_delta_pages"] * swap["page_size_bytes"]
+    ):
+        raise ValueError("capacity swap byte and page deltas disagree")
+    faults = _expect_int(
+        record["process_major_faults"],
+        label="process_major_faults",
+        minimum=0,
+    )
+    stderr = _expect_string(record["stderr"], label="stderr", nonempty=False)
+    if len(stderr) > 4000:
+        raise ValueError("capacity stderr excerpt exceeds 4000 characters")
+    expected_decision = _capacity_decision(
+        stage,
+        result=result,
+        minimum_available_memory_bytes=memory["minimum_available_memory_bytes"],
+        process_major_faults=faults,
+        swapout_delta_pages=swap["pswpout_delta_pages"],
+        checkout_unchanged=before == after and before["clean"] and after["clean"],
+    )
+    if record["decision"] != expected_decision:
+        raise ValueError("capacity decision does not match recomputed evidence")
+    if record["scientific_boundary"] != _CAPACITY_BOUNDARY:
+        raise ValueError("capacity scientific boundary is invalid")
+    del host_identity
+
+
+def _validate_artifact_storage_identity(value: object) -> dict[str, Any]:
+    identity = _expect_keys(
+        value,
+        label="artifact_storage_identity",
+        keys=frozenset({"canonical_path", "device", "inode"}),
+    )
+    path = Path(
+        _expect_string(
+            identity["canonical_path"],
+            label="artifact_storage_identity.canonical_path",
+        )
+    )
+    if not path.is_absolute():
+        raise ValueError("artifact storage canonical path must be absolute")
+    _expect_int(identity["device"], label="artifact_storage_identity.device", minimum=0)
+    _expect_int(identity["inode"], label="artifact_storage_identity.inode", minimum=1)
+    return identity
+
+
+def _validate_artifact_manifest(value: object) -> dict[str, Any]:
+    manifest = _expect_keys(
+        value,
+        label="artifact_manifest",
+        keys=frozenset({"file_count", "total_bytes", "manifest_hash"}),
+    )
+    _expect_int(manifest["file_count"], label="artifact_manifest.file_count", minimum=0)
+    _expect_int(
+        manifest["total_bytes"],
+        label="artifact_manifest.total_bytes",
+        minimum=0,
+    )
+    _expect_sha256(
+        manifest["manifest_hash"],
+        label="artifact_manifest.manifest_hash",
+    )
+    return manifest
+
+
+def _validate_probe_record_common(
+    record: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, bool]:
+    _parse_timestamp(record["recorded_at"], label="probe recorded_at")
+    _full_git_commit(record["execution_commit"])
+    host_identity = _validate_host_identity(
+        record["host_identity"],
+        label="probe host_identity",
+    )
+    _expect_sha256(record["host_identity_hash"], label="host_identity_hash")
+    _expect_sha256(record["tool_identity_hash"], label="tool_identity_hash")
+    _expect_sha256(record["static_record_hash"], label="static_record_hash")
+    _expect_sha256(record["probe_config_hash"], label="probe_config_hash")
+    _expect_string(record["planned_command"], label="planned probe command")
+    if record["executed_command"] is not None:
+        _expect_string(record["executed_command"], label="executed probe command")
+    expected_root = _expect_string(
+        record["expected_artifact_root"],
+        label="expected_artifact_root",
+    )
+    if not Path(expected_root).is_absolute():
+        raise ValueError("expected_artifact_root must be absolute")
+    artifact_identity = _validate_artifact_storage_identity(
+        record["artifact_storage_identity"]
+    )
+    artifact_manifest = _validate_artifact_manifest(record["artifact_manifest"])
+    secure_artifact_access = _expect_bool(
+        record["secure_artifact_access"],
+        label="secure_artifact_access",
+    )
+    if secure_artifact_access != (record["executed_command"] is not None):
+        raise ValueError("probe execution provenance is incomplete")
+    if artifact_identity["canonical_path"] != expected_root:
+        raise ValueError("artifact storage identity differs from expected root")
+    _expect_sha256(record["source_result_hash"], label="source_result_hash")
+    if record["scientific_boundary"] != _STATIC_BOUNDARY:
+        raise ValueError("probe scientific boundary is invalid")
+    return (
+        host_identity,
+        artifact_identity,
+        artifact_manifest,
+        expected_root,
+        secure_artifact_access,
+    )
+
+
+def _validate_probe_execution_record(record: Mapping[str, Any]) -> None:
+    _expect_keys(
+        record,
+        label="probe execution qualification record",
+        keys=frozenset(
+            {
+                "schema_version",
+                "record_type",
+                "recorded_at",
+                "execution_commit",
+                "host_identity",
+                "host_identity_hash",
+                "tool_identity_hash",
+                "static_record_hash",
+                "probe_config_hash",
+                "planned_command",
+                "executed_command",
+                "expected_artifact_root",
+                "artifact_storage_identity",
+                "artifact_manifest",
+                "secure_artifact_access",
+                "source_result_hash",
+                "result",
+                "decision",
+                "scientific_boundary",
+                "record_hash",
+            }
+        ),
+    )
+    (
+        _,
+        _,
+        artifact_manifest,
+        expected_root,
+        secure_artifact_access,
+    ) = _validate_probe_record_common(record)
+    result = _validate_probe_execution_result(record["result"])
+    expected_hash = scientific_hash(
+        result,
+        domain="operations.v2-probe-execution-result.v1",
+    )
+    if record["source_result_hash"] != expected_hash:
+        raise ValueError("probe execution result hash does not match result")
+    if record["decision"] != {
+        "shape_passed": (
+            _probe_execution_shape(result, expected_root)
+            and artifact_manifest["file_count"] > 0
+            and artifact_manifest["total_bytes"] > 0
+            and secure_artifact_access
+        )
+    }:
+        raise ValueError("probe execution decision does not match result")
+
+
+def _validate_probe_benchmark_record(record: Mapping[str, Any]) -> None:
+    _expect_keys(
+        record,
+        label="probe benchmark qualification record",
+        keys=frozenset(
+            {
+                "schema_version",
+                "record_type",
+                "recorded_at",
+                "execution_commit",
+                "host_identity",
+                "host_identity_hash",
+                "tool_identity_hash",
+                "static_record_hash",
+                "probe_config_hash",
+                "planned_command",
+                "executed_command",
+                "expected_artifact_root",
+                "artifact_storage_identity",
+                "artifact_manifest",
+                "secure_artifact_access",
+                "probe_execution_record_hash",
+                "source_result_hash",
+                "result",
+                "decision",
+                "scientific_boundary",
+                "record_hash",
+            }
+        ),
+    )
+    (
+        _,
+        _,
+        artifact_manifest,
+        expected_root,
+        secure_artifact_access,
+    ) = _validate_probe_record_common(record)
+    _expect_sha256(
+        record["probe_execution_record_hash"],
+        label="probe_execution_record_hash",
+    )
+    result = _validate_probe_benchmark_result(record["result"])
+    expected_hash = scientific_hash(
+        result,
+        domain="operations.v2-probe-benchmark-result.v1",
+    )
+    if record["source_result_hash"] != expected_hash:
+        raise ValueError("probe benchmark result hash does not match result")
+    if record["decision"] != {
+        "shape_passed": (
+            _probe_benchmark_shape(result, expected_root)
+            and artifact_manifest["file_count"] > 0
+            and artifact_manifest["total_bytes"] > 0
+            and secure_artifact_access
+        )
+    }:
+        raise ValueError("probe benchmark decision does not match result")
+
+
+def _validate_assessment_record(record: Mapping[str, Any]) -> None:
+    _expect_keys(
+        record,
+        label="host qualification assessment",
+        keys=frozenset(
+            {
+                "schema_version",
+                "record_type",
+                "recorded_at",
+                "execution_commit",
+                "host_identity",
+                "host_identity_hash",
+                "tool_identity_hash",
+                "inputs",
+                "checks",
+                "runtime",
+                "decision",
+                "scientific_boundary",
+                "record_hash",
+            }
+        ),
+    )
+    _parse_timestamp(record["recorded_at"], label="assessment recorded_at")
+    _full_git_commit(record["execution_commit"])
+    _validate_host_identity(record["host_identity"], label="assessment host_identity")
+    _expect_sha256(record["host_identity_hash"], label="host_identity_hash")
+    _expect_sha256(record["tool_identity_hash"], label="tool_identity_hash")
+    inputs = _expect_keys(
+        record["inputs"],
+        label="assessment inputs",
+        keys=frozenset(
+            {
+                "static_record_hash",
+                "e192_record_hash",
+                "e768_record_hash",
+                "probe_execution_record_hash",
+                "probe_benchmark_record_hash",
+            }
+        ),
+    )
+    for name in inputs:
+        _expect_sha256(inputs[name], label=f"assessment inputs.{name}")
+    check_names = frozenset(
+        {
+            "capacity_passed",
+            "capacity_static_binding_passed",
+            "execution_binding_passed",
+            "execution_checkout_pinned",
+            "host_binding_passed",
+            "input_freshness_order_passed",
+            "probe_budget_consistent",
+            "probe_shape_passed",
+            "static_prerequisites_passed",
+            "time_window_passed",
+            "tool_binding_passed",
+        }
+    )
+    checks = _expect_keys(record["checks"], label="assessment checks", keys=check_names)
+    for name in checks:
+        _expect_bool(checks[name], label=f"assessment checks.{name}")
+    runtime = _expect_keys(
+        record["runtime"],
+        label="assessment runtime",
+        keys=frozenset(
+            {
+                "available_window_hours",
+                "measured_two_times_projection_hours",
+                "recovery_margin_hours",
+                "required_window_hours",
+            }
+        ),
+    )
+    _expect_number(
+        runtime["available_window_hours"],
+        label="available_window_hours",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+    _expect_number(
+        runtime["measured_two_times_projection_hours"],
+        label="measured_two_times_projection_hours",
+        minimum=0.0,
+        strict_minimum=True,
+    )
+    _expect_number(
+        runtime["recovery_margin_hours"],
+        label="recovery_margin_hours",
+        minimum=0.0,
+    )
+    if runtime["required_window_hours"] is not None:
+        _expect_number(
+            runtime["required_window_hours"],
+            label="required_window_hours",
+            minimum=0.0,
+            strict_minimum=True,
+        )
+    expected_required_window = (
+        float(runtime["measured_two_times_projection_hours"])
+        + float(runtime["recovery_margin_hours"])
+        if checks["probe_budget_consistent"]
+        else None
+    )
+    if runtime["required_window_hours"] != expected_required_window:
+        raise ValueError("assessment required window does not match runtime values")
+    expected_time_passed = (
+        checks["probe_budget_consistent"]
+        and float(runtime["available_window_hours"]) >= expected_required_window
+    )
+    if checks["time_window_passed"] != expected_time_passed:
+        raise ValueError("assessment time-window check does not match runtime values")
+    decision = _expect_keys(
+        record["decision"],
+        label="assessment decision",
+        keys=frozenset(
+            {
+                "qualification_passed",
+                "registered_execution_authorized_by_this_record",
+                "next_action",
+            }
+        ),
+    )
+    passed = all(checks.values())
+    expected_action = (
+        "Independent review may authorize the separately invoked registered "
+        "calibration."
+        if passed
+        else "Resolve failed operational gates on the intended host; do not run the "
+        "registered study."
+    )
+    if decision != {
+        "qualification_passed": passed,
+        "registered_execution_authorized_by_this_record": False,
+        "next_action": expected_action,
+    }:
+        raise ValueError("assessment decision does not match recomputed checks")
+    if record["scientific_boundary"] != _STATIC_BOUNDARY:
+        raise ValueError("assessment scientific boundary is invalid")

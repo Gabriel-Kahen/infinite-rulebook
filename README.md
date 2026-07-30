@@ -103,7 +103,11 @@ registration. The post-registration
 32-GiB-class workstation. No registered v2 run is authorized there. The
 unchanged workflow must move to a larger, longer-lived host and repeat the
 exact capacity and ingestion gates in
-[the execution guide](docs/experiments.md).
+[the execution guide](docs/experiments.md). The
+[reporting-host runbook](docs/symbolic-v2-host-qualification.md) provides
+read-only static checks, synthetic capacity evidence, and a
+descriptor-anchored disjoint-seed probe gate without invoking a registered
+study.
 
 ## Research scope
 
