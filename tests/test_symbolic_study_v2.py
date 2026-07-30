@@ -28,7 +28,10 @@ from infinite_rulebook.studies.symbolic_construct_v2 import (
     SYMBOLIC_V2_CALIBRATION_MASTER_SEED,
     SYMBOLIC_V2_COMPONENT_HASH,
     SYMBOLIC_V2_DESIGN_HASH,
+    SYMBOLIC_V2_SMOKE_CONFIG_HASH,
+    SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
     build_symbolic_analysis_plan,
+    calibration_evidence_hash_from_hashes,
     registration_component_hash,
     registration_component_payload,
     symbolic_v2_design_hash,
@@ -85,10 +88,10 @@ def test_v2_plan_has_six_exact_primaries_and_no_scope_reduction() -> None:
         PRIMARY_MINIMUM_EFFECTS
     )
     assert plan.scientific_hash == (
-        "287d4c1877b0eaf359389045b64a0adb7955f068c23dfbd37a2cf4586a4d4c4a"
+        "4a1b5eedc783218ad6216d4d5b07784da04c76d7ef2b94b6e981fb3d9fbde962"
     )
     assert plan.registration_hash == (
-        "0df9beb6007949984a13e32df40132516a6c1f6e29b1d0a13ebf9f2aa2ab9fa7"
+        "ec63359455b31e27289a7a2f9183a790424fcb04be25c56a450fe19553d95867"
     )
     by_name = {contrast.name: contrast for contrast in plan.contrasts}
     assert by_name[S2_EARLY].metric == ("post_query_mean_hidden_expected_reward")
@@ -129,6 +132,13 @@ def test_v2_component_binds_compound_non_rescue_and_compact_evidence() -> None:
     assert compact["gate_count"] == 27
     assert compact["detail_chunk_records"] == 4096
     assert component["power"]["rng_stream"] == POWER_RNG_STREAM
+    assert component["stage_0_prerequisite"] == {
+        "role": "operational-not-inferential",
+        "required": True,
+        "config_hash": SYMBOLIC_V2_SMOKE_CONFIG_HASH,
+        "evidence_hash": SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
+        "does_not_replace_v2_adapter_validation": True,
+    }
 
 
 def test_v2_mutations_and_lookalike_designs_fail_closed() -> None:
@@ -152,6 +162,31 @@ def test_v2_mutations_and_lookalike_designs_fail_closed() -> None:
     with pytest.raises(ConfirmatoryFreezeError, match="name, seed"):
         verify_symbolic_calibration_design(
             replace(config, master_seed="lookalike-v2-seed")
+        )
+
+
+def test_v2_calibration_evidence_requires_the_registered_stage_zero() -> None:
+    hashes = {
+        "config_hash": "0" * 64,
+        "analysis_report_hash": "1" * 64,
+        "canary_report_hash": "2" * 64,
+        "power_calibration_hash": "3" * 64,
+        "reproducibility_report_hash": "4" * 64,
+        "raw_serial_inventory_hash": "5" * 64,
+        "raw_parallel_inventory_hash": "6" * 64,
+        "deviation_log_hash": "7" * 64,
+        "smoke_prerequisite_hash": SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
+        "smoke_config_hash": SYMBOLIC_V2_SMOKE_CONFIG_HASH,
+        "smoke_reproducibility_hash": "8" * 64,
+        "smoke_raw_serial_inventory_hash": "9" * 64,
+        "smoke_raw_parallel_inventory_hash": "a" * 64,
+        "analysis_code_hash": "b" * 64,
+        "run_settings_hash": "c" * 64,
+    }
+    assert len(calibration_evidence_hash_from_hashes(**hashes)) == 64
+    with pytest.raises(ValueError, match="Stage-0"):
+        calibration_evidence_hash_from_hashes(
+            **{**hashes, "smoke_prerequisite_hash": "d" * 64}
         )
 
 

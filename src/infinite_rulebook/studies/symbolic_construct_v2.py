@@ -51,11 +51,17 @@ SYMBOLIC_V2_CALIBRATION_MASTER_SEED = "irb-symbolic-calibration-v2"
 SYMBOLIC_V2_CONFIRMATORY_MASTER_SEED = "irb-symbolic-confirmatory-v2"
 SYMBOLIC_V2_ALGORITHM_REPLICAS = 8
 SYMBOLIC_V2_CALIBRATION_ENVIRONMENT_REPLICAS = 192
+SYMBOLIC_V2_SMOKE_CONFIG_HASH = (
+    "fae70beb1e57206d77cf192e437eb9d8baef2fb0f877a29f04181b0412edbec2"
+)
+SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH = (
+    "0ab32994d8c75c4ab36eb8de171f67ec802ae54c09bbb250b773918d5d892249"
+)
 SYMBOLIC_V2_DESIGN_HASH = (
     "a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114"
 )
 SYMBOLIC_V2_COMPONENT_HASH = (
-    "136fd77258d39e119fa0b6c85d4be790ec1eca969ea9ebd82157cc5fff9c3048"
+    "2a23fd8fda928316ba0d7ab5a89acecd425a784ba014cfb3b6e909c2c0b471e4"
 )
 
 PAIRED_PATH_ABSOLUTE_TOLERANCE = 1e-12
@@ -290,6 +296,13 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
             "seed": POWER_SEED,
             "rng_stream": POWER_RNG_STREAM,
             "candidate_environment_counts": list(POWER_CANDIDATE_ENVIRONMENTS),
+        },
+        "stage_0_prerequisite": {
+            "role": "operational-not-inferential",
+            "required": True,
+            "config_hash": SYMBOLIC_V2_SMOKE_CONFIG_HASH,
+            "evidence_hash": SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
+            "does_not_replace_v2_adapter_validation": True,
         },
     }
 
@@ -673,6 +686,11 @@ def calibration_evidence_hash(
     raw_serial_inventory_hash: str,
     raw_parallel_inventory_hash: str,
     deviation_log_hash: str,
+    smoke_prerequisite_hash: str,
+    smoke_config_hash: str,
+    smoke_reproducibility_hash: str,
+    smoke_raw_serial_inventory_hash: str,
+    smoke_raw_parallel_inventory_hash: str,
 ) -> str:
     """Bind the authenticated v2 calibration decision inputs."""
 
@@ -688,6 +706,11 @@ def calibration_evidence_hash(
         raw_serial_inventory_hash=raw_serial_inventory_hash,
         raw_parallel_inventory_hash=raw_parallel_inventory_hash,
         deviation_log_hash=deviation_log_hash,
+        smoke_prerequisite_hash=smoke_prerequisite_hash,
+        smoke_config_hash=smoke_config_hash,
+        smoke_reproducibility_hash=smoke_reproducibility_hash,
+        smoke_raw_serial_inventory_hash=smoke_raw_serial_inventory_hash,
+        smoke_raw_parallel_inventory_hash=smoke_raw_parallel_inventory_hash,
         analysis_code_hash=dict(report.provenance).get("analysis_code_hash"),
         run_settings_hash=report.run_settings_hash,
     )
@@ -703,11 +726,21 @@ def calibration_evidence_hash_from_hashes(
     raw_serial_inventory_hash: str,
     raw_parallel_inventory_hash: str,
     deviation_log_hash: str,
+    smoke_prerequisite_hash: str,
+    smoke_config_hash: str,
+    smoke_reproducibility_hash: str,
+    smoke_raw_serial_inventory_hash: str,
+    smoke_raw_parallel_inventory_hash: str,
     analysis_code_hash: str | None,
     run_settings_hash: str | None,
 ) -> str:
     """Bind every v2 input that can authorize a confirmatory seal."""
 
+    if (
+        smoke_prerequisite_hash != SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH
+        or smoke_config_hash != SYMBOLIC_V2_SMOKE_CONFIG_HASH
+    ):
+        raise ValueError("v2 calibration changed its registered Stage-0 prerequisite")
     return scientific_hash(
         {
             "study_contract": STUDY_CONTRACT,
@@ -721,6 +754,11 @@ def calibration_evidence_hash_from_hashes(
             "raw_serial_inventory_hash": raw_serial_inventory_hash,
             "raw_parallel_inventory_hash": raw_parallel_inventory_hash,
             "deviation_log_hash": deviation_log_hash,
+            "smoke_prerequisite_hash": smoke_prerequisite_hash,
+            "smoke_config_hash": smoke_config_hash,
+            "smoke_reproducibility_hash": smoke_reproducibility_hash,
+            "smoke_raw_serial_inventory_hash": smoke_raw_serial_inventory_hash,
+            "smoke_raw_parallel_inventory_hash": smoke_raw_parallel_inventory_hash,
             "analysis_code_hash": analysis_code_hash,
             "run_settings_hash": run_settings_hash,
         },
@@ -758,6 +796,8 @@ __all__ = [
     "SYMBOLIC_V2_CONFIRMATORY_MASTER_SEED",
     "SYMBOLIC_V2_CONFIRMATORY_NAME",
     "SYMBOLIC_V2_DESIGN_HASH",
+    "SYMBOLIC_V2_SMOKE_CONFIG_HASH",
+    "SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH",
     "build_symbolic_analysis_plan",
     "calibration_evidence_hash",
     "calibration_evidence_hash_from_hashes",

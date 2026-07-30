@@ -67,11 +67,11 @@ broader research program in `docs/research-plan.md`.
 - phase-independent scientific-design hash:
   `a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114`
 - supplemental registration-component hash:
-  `136fd77258d39e119fa0b6c85d4be790ec1eca969ea9ebd82157cc5fff9c3048`
+  `2a23fd8fda928316ba0d7ab5a89acecd425a784ba014cfb3b6e909c2c0b471e4`
 - calibration analysis-plan hash:
-  `287d4c1877b0eaf359389045b64a0adb7955f068c23dfbd37a2cf4586a4d4c4a`
+  `4a1b5eedc783218ad6216d4d5b07784da04c76d7ef2b94b6e981fb3d9fbde962`
 - calibration analysis-registration hash:
-  `0df9beb6007949984a13e32df40132516a6c1f6e29b1d0a13ebf9f2aa2ab9fa7`
+  `ec63359455b31e27289a7a2f9183a790424fcb04be25c56a450fe19553d95867`
 
 The supplemental component transitively binds the aggregate metric definition,
 compound-S2 rule, D12 role, legacy replication, expanded compact-canary
@@ -134,6 +134,27 @@ replay, artifact validation, and analysis loading all authenticate it. The
 aggregate canary independently recomputes the metric from the registered
 per-round evidence. V1 payloads, state fingerprints, and artifact hashes remain
 byte-identical.
+
+## Stage-0 operational prerequisite
+
+V2 retains the fail-closed requirement that calibration be receipt-bound to an
+authenticated Stage-0 prerequisite. It reuses the already-public immutable v1
+Stage-0 record solely because that record tests the common serial/parallel
+workflow, artifact validation, deterministic replay, and six environment
+paths:
+
+- smoke config hash:
+  `fae70beb1e57206d77cf192e437eb9d8baef2fb0f877a29f04181b0412edbec2`;
+  and
+- prerequisite evidence hash:
+  `0ab32994d8c75c4ab36eb8de171f67ec802ae54c09bbb250b773918d5d892249`.
+
+This prerequisite predates v2, is engineering evidence rather than v2
+inferential data, and cannot justify a v2 effect, threshold, sample size, or
+claim. It does not replace v2 adapter golden, resume, replay, aggregate-metric,
+and tamper tests. The supplemental registration component binds this exact
+reuse policy and evidence identity. A different, missing, or invalid
+prerequisite blocks v2 calibration.
 
 ## Six-primary Holm family
 
