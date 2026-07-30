@@ -11,17 +11,21 @@ from infinite_rulebook.analysis.evidence_common import (
     canonical_json,
     count,
     exact_selector,
+    expected_group_map,
     finite,
     identifier,
     parse_artifact,
     record_payload,
     sha256,
+    validate_expected_group_inventory,
 )
 from infinite_rulebook.analysis.models import (
     AnalysisDataset,
     AnalysisError,
     AnalysisPhase,
+    ContrastInterpretation,
     ContrastSpec,
+    ExpectedGroup,
     GroupSelector,
 )
 from infinite_rulebook.analysis.statistics import (
@@ -62,6 +66,7 @@ class SupplementalEvidencePlan:
     legacy_replications: tuple[ContrastSpec, ...]
     descriptive_comparisons: tuple[ContrastSpec, ...]
     interval_alpha: float = 0.05
+    expected_groups: tuple[ExpectedGroup, ...] = ()
 
     def __post_init__(self) -> None:
         identifier("supplemental plan name", self.name)
@@ -80,6 +85,16 @@ class SupplementalEvidencePlan:
                 name,
                 tuple(sorted(values, key=lambda item: item.name)),
             )
+        if any(
+            item.interpretation is not ContrastInterpretation.INFERENTIAL
+            for item in self.legacy_replications
+        ):
+            raise ValueError("legacy replications must retain inferential role")
+        if any(
+            item.interpretation is not ContrastInterpretation.TELEMETRY_ONLY
+            for item in self.descriptive_comparisons
+        ):
+            raise ValueError("descriptive comparisons must be telemetry-only")
         names = tuple(
             item.name
             for values in (
@@ -90,6 +105,22 @@ class SupplementalEvidencePlan:
         )
         if len(set(names)) != len(names):
             raise ValueError("supplemental comparison names must be unique")
+        object.__setattr__(
+            self,
+            "expected_groups",
+            tuple(sorted(self.expected_groups)),
+        )
+        groups = expected_group_map(self.expected_groups)
+        for spec in (*self.legacy_replications, *self.descriptive_comparisons):
+            if (
+                spec.left not in groups
+                or spec.right not in groups
+                or spec.checkpoint not in groups[spec.left].checkpoints
+                or spec.checkpoint not in groups[spec.right].checkpoints
+            ):
+                raise ValueError(
+                    "supplemental selector/checkpoint is outside expected_groups"
+                )
         object.__setattr__(self, "interval_alpha", _alpha(self.interval_alpha))
 
     def _body(self) -> dict[str, Any]:
@@ -243,6 +274,17 @@ class SupplementalEvidenceReport:
             for item in values
         ):
             raise ValueError("supplemental summaries mix interval alpha values")
+        if any(
+            item.specification.interpretation is not ContrastInterpretation.INFERENTIAL
+            for item in self.legacy_replications
+        ):
+            raise ValueError("legacy report entries must retain inferential role")
+        if any(
+            item.specification.interpretation
+            is not ContrastInterpretation.TELEMETRY_ONLY
+            for item in self.descriptive_comparisons
+        ):
+            raise ValueError("descriptive report entries must be telemetry-only")
 
     def _body(self) -> dict[str, Any]:
         return {
@@ -315,6 +357,7 @@ def evaluate_supplemental_evidence(
         raise TypeError("plan must be a SupplementalEvidencePlan")
     if dataset.phase is not plan.phase:
         raise AnalysisError("supplemental plan and dataset phases differ")
+    validate_expected_group_inventory(dataset, plan.expected_groups)
     return SupplementalEvidenceReport(
         dataset.phase,
         dataset.scientific_hash,
@@ -353,6 +396,7 @@ def supplemental_evidence_artifacts(
 _SUPPLEMENTAL_TYPES = (
     SupplementalEvidencePlan,
     ContrastSpec,
+    ExpectedGroup,
     GroupSelector,
     ExactIntervalSummary,
     PairedComparisonSummary,

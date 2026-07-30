@@ -66,21 +66,30 @@ broader research program in `docs/research-plan.md`.
   `c0f4cf5bf09e6b516379c0fec26ccd4a8780d8b6d52226093ef5a96cc0437508`
 - phase-independent scientific-design hash:
   `a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114`
-- supplemental registration-component hash:
-  `5e2f5281634549b824728c17160b2fc39094938388d0c966cad6de8ae32d3529`
+- registration-component hash:
+  `b5ff912ecf7d1c070dccf433d605566d5db9bbc962f524a2409077094f1d8986`
 - calibration analysis-plan hash:
-  `7ca9738ff424dce05cb92383e7a560b5c860d56635680289590143a0fbef29fc`
+  `8ae60a635d6ee10921daa396800892024ce81f11413d5c6f967650bf6bb8e279`
 - calibration analysis-registration hash:
-  `e19c78286dae4482006ea02af658f0bdcf7d26b7f4026ceddde65cb8e8cc1439`
+  `bbc4151bd6dc8171f9343911f9ad047ad02d213976b42d3f92edbea4f79af615`
+- calibration compact-canary-plan hash:
+  `645a509da5f3c66563df8d88796a7a10ca87e817fd0e4549536fd68095e06a9a`
+- calibration supplemental-plan hash:
+  `1856efab9c7d4c0518dbb4004f3915bb9c70bb9376fbc255825bf4451c96c7f8`
 
-The supplemental component transitively binds the aggregate metric definition,
+The registration component transitively binds the aggregate metric definition,
 compound-S2 rule, D12 role, legacy replication, expanded compact-canary
 inventory, power seed, RNG stream, and candidate grid into the ordinary
 analysis registration without changing v1 schemas or hashes.
 
 ## Registered matrix
 
-The calibration config is `configs/symbolic-calibration-v2.json`.
+The exact checked-in registration artifacts are:
+
+- `configs/symbolic-calibration-v2.json`;
+- `configs/symbolic-calibration-analysis-v2.json`;
+- `configs/symbolic-calibration-canaries-v2.json`; and
+- `configs/symbolic-calibration-supplemental-v2.json`.
 
 | Component | Registered value |
 |---|---|
@@ -218,20 +227,22 @@ The v2 canary inventory contains 27 deterministic gates:
 - six `PUBLIC-C` reward decompositions, one for each agent;
 - six exact-zero persistent-information gates for `ALEA`, one for each agent;
   and
-- one aggregate-metric derivation gate across every registered applicable
-  group.
+- one aggregate-metric derivation gate across all 48 exact registered groups.
 
 All exact identities and ledger checks remain mandatory. A single canary
 failure prohibits freezing.
 
-To remain below hosting limits, the checked-in v2 canary report stores
+To remain below hosting limits, each published v2 canary report stores
 per-gate record counts, extrema, tolerances, pass/fail decisions, violation
 counts, and a bounded canonical set of failure examples. Canonical detail
 records are partitioned into chunks of at most 4,096 records. The report stores
 each ordered chunk hash and an inventory/root hash over chunk counts, record
 counts, and ordered hashes rather than embedding every detail record. The raw
 serial and parallel roots remain the authoritative reconstructible evidence.
-Freeze independently recomputes the compact inventory.
+Report construction spools each chunk directly into its transactional output
+directory, retains only one 4,096-record detail buffer, and derives the
+aggregate gate one exact group at a time. Freeze independently recomputes and
+stream-verifies the compact inventory.
 
 ## Design assurance and power
 
@@ -273,7 +284,7 @@ canaries passing and a finite selected candidate may create a seal.
 The seal binds:
 
 - the exact confirmatory config and calibration-evidence hash;
-- the v2 study contract, analysis registration, and supplemental component;
+- the v2 study contract, analysis registration, and registration component;
 - the analysis-source, dependency-lock, and execution-environment hashes;
 - all tolerances, minimum effects, and the S5 equivalence margin; and
 - disjoint seed-bank identities using namespaces `calibration.v2`,
@@ -306,6 +317,11 @@ Before interpretation or release:
 8. the sealed confirmation, if eligible, uses disjoint registered banks; and
 9. public manifests, chunked raw assets, code, lockfile, reports, open tables,
    figures, and unfavorable results receive independent review and passing CI.
+
+Before calibration begins, the intended reporting host must pass the exact v2
+calibration and maximum-candidate memory benchmarks plus the 48-condition
+disjoint-seed artifact-ingestion probe in `docs/experiments.md`. A capacity
+failure changes the host or execution window, never the registered matrix.
 
 Any failed pre-freeze gate publishes a stopped calibration outcome with no
 seal and no confirmatory execution. A failed hypothesis after a valid

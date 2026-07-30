@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from infinite_rulebook.analysis.canaries import (
     ConstantAdditiveMetricCanary,
@@ -52,7 +52,7 @@ from infinite_rulebook.orchestration.freeze import (
     ConfirmatoryFreezeRecord,
     SeedBankIdentities,
 )
-from infinite_rulebook.orchestration.hashing import scientific_hash
+from infinite_rulebook.orchestration.hashing import is_sha256, scientific_hash
 
 STUDY_CONTRACT = "bounded-symbolic-construct-validation.v2"
 SYMBOLIC_V2_CALIBRATION_NAME = "symbolic-construct-calibration-v2"
@@ -72,7 +72,7 @@ SYMBOLIC_V2_DESIGN_HASH = (
     "a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114"
 )
 SYMBOLIC_V2_COMPONENT_HASH = (
-    "c4b62ef502804db29d622a55b055e11749194720b5821ec2495f378a72055fb9"
+    "b5ff912ecf7d1c070dccf433d605566d5db9bbc962f524a2409077094f1d8986"
 )
 
 PAIRED_PATH_ABSOLUTE_TOLERANCE = 1e-12
@@ -313,11 +313,12 @@ def _build_symbolic_canary_plan(
             )
         )
     for agent in config.agents:
-        suffix = "" if agent.kind is AgentKind.REWARD else f"-{agent.kind.value}"
+        public_suffix = "" if agent.kind is AgentKind.REWARD else f"-{agent.kind.value}"
+        alea_suffix = "" if agent.kind is AgentKind.NOVELTY else f"-{agent.kind.value}"
         canaries.extend(
             (
                 ConstantAdditiveMetricCanary(
-                    f"public-reward-decomposition{suffix}",
+                    f"public-reward-decomposition{public_suffix}",
                     _selector(config, EnvironmentKind.PUBLIC_C, agent.kind),
                     total_metric="expected_reward",
                     base_metric="hidden_expected_reward",
@@ -327,7 +328,7 @@ def _build_symbolic_canary_plan(
                     tolerance=PAIRED_PATH_ABSOLUTE_TOLERANCE,
                 ),
                 ExactZeroMetricCanary(
-                    f"alea-has-no-persistent-distractor-information{suffix}",
+                    f"alea-has-no-persistent-distractor-information{alea_suffix}",
                     _selector(config, EnvironmentKind.ALEA, agent.kind),
                     "distractor_information_nats",
                     checkpoints,
@@ -351,6 +352,7 @@ def _build_symbolic_canary_plan(
                 tolerance=AGGREGATE_METRIC_ABSOLUTE_TOLERANCE,
             ),
         ),
+        expected_groups=expected_analysis_groups(config),
     )
 
 
@@ -404,8 +406,10 @@ def _build_symbolic_supplemental_plan(
                 total_d12,
                 config.horizon,
                 Alternative.GREATER,
+                interpretation=ContrastInterpretation.TELEMETRY_ONLY,
             ),
         ),
+        expected_groups=expected_analysis_groups(config),
     )
 
 
@@ -436,20 +440,22 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
         AgentKind.TOTAL_INFORMATION,
         distractor_dimensions=12,
     )
-    canary_plan_hashes = {
-        phase.value: _build_symbolic_canary_plan(
-            config,
-            phase=phase,
-        ).scientific_hash
-        for phase in (AnalysisPhase.CALIBRATION, AnalysisPhase.CONFIRMATORY)
-    }
-    supplemental_plan_hashes = {
-        phase.value: _build_symbolic_supplemental_plan(
-            config,
-            phase=phase,
-        ).scientific_hash
-        for phase in (AnalysisPhase.CALIBRATION, AnalysisPhase.CONFIRMATORY)
-    }
+    registered_calibration = replace(
+        config,
+        name=SYMBOLIC_V2_CALIBRATION_NAME,
+        phase=AnalysisPhase.CALIBRATION.value,
+        master_seed=SYMBOLIC_V2_CALIBRATION_MASTER_SEED,
+        environment_replicas=SYMBOLIC_V2_CALIBRATION_ENVIRONMENT_REPLICAS,
+        confirmatory_freeze=None,
+    )
+    canary_plan_hash = _build_symbolic_canary_plan(
+        registered_calibration,
+        phase=AnalysisPhase.CALIBRATION,
+    ).scientific_hash
+    supplemental_plan_hash = _build_symbolic_supplemental_plan(
+        registered_calibration,
+        phase=AnalysisPhase.CALIBRATION,
+    ).scientific_hash
     return {
         "study_contract": STUDY_CONTRACT,
         "post_query_metric": {
@@ -502,11 +508,19 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
                 "all-exact-registered-condition-agent-groups"
             ),
             "detail_chunk_records": COMPACT_CANARY_DETAIL_CHUNK_RECORDS,
-            "plan_hashes": canary_plan_hashes,
+            "calibration_plan_hash": canary_plan_hash,
+            "confirmatory_inventory_rule": (
+                "same registered gates and exact groups with the sealed selected "
+                "environment-replica count"
+            ),
             "raw_roots_remain_authoritative": True,
         },
         "supplemental_evidence": {
-            "plan_hashes": supplemental_plan_hashes,
+            "calibration_plan_hash": supplemental_plan_hash,
+            "confirmatory_inventory_rule": (
+                "same registered comparisons and exact groups with the sealed "
+                "selected environment-replica count"
+            ),
             "legacy_replication": LEGACY_D6_REPLICATION,
             "descriptive_comparison": SECONDARY_D12,
             "family_membership": "outside-primary-holm",
@@ -1008,6 +1022,31 @@ def calibration_evidence_hash_from_hashes(
 ) -> str:
     """Bind every v2 input that can authorize a confirmatory seal."""
 
+    required_hashes = {
+        "config_hash": config_hash,
+        "analysis_report_hash": analysis_report_hash,
+        "canary_report_hash": canary_report_hash,
+        "canary_detail_root_hash": canary_detail_root_hash,
+        "supplemental_plan_hash": supplemental_plan_hash,
+        "supplemental_report_hash": supplemental_report_hash,
+        "power_calibration_hash": power_calibration_hash,
+        "reproducibility_report_hash": reproducibility_report_hash,
+        "raw_serial_inventory_hash": raw_serial_inventory_hash,
+        "raw_parallel_inventory_hash": raw_parallel_inventory_hash,
+        "deviation_log_hash": deviation_log_hash,
+        "smoke_prerequisite_hash": smoke_prerequisite_hash,
+        "smoke_config_hash": smoke_config_hash,
+        "smoke_reproducibility_hash": smoke_reproducibility_hash,
+        "smoke_raw_serial_inventory_hash": smoke_raw_serial_inventory_hash,
+        "smoke_raw_parallel_inventory_hash": smoke_raw_parallel_inventory_hash,
+    }
+    if any(not is_sha256(value) for value in required_hashes.values()):
+        raise ValueError("v2 calibration evidence requires SHA-256 hash inputs")
+    if any(
+        value is not None and not is_sha256(value)
+        for value in (analysis_code_hash, run_settings_hash)
+    ):
+        raise ValueError("v2 optional provenance identities must be SHA-256 or None")
     if (
         smoke_prerequisite_hash != SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH
         or smoke_config_hash != SYMBOLIC_V2_SMOKE_CONFIG_HASH

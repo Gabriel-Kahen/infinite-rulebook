@@ -12,25 +12,36 @@ from infinite_rulebook.orchestration.config import (
     ExperimentConfig,
     load_experiment_config,
 )
-from infinite_rulebook.studies.symbolic_construct import (
-    verify_symbolic_calibration_design,
+from infinite_rulebook.studies.symbolic_registry import (
+    registered_symbolic_study,
 )
 
-PROBE_NAME = "symbolic-artifact-ingestion-probe-v1"
-PROBE_MASTER_SEED = "irb-symbolic-artifact-ingestion-probe-v1"
-PROBE_ALGORITHM_MASTER_SEED = "irb-symbolic-artifact-ingestion-probe-algorithm-v1"
+_PROBE_IDENTITIES = {
+    1: (
+        "symbolic-artifact-ingestion-probe-v1",
+        "irb-symbolic-artifact-ingestion-probe-v1",
+        "irb-symbolic-artifact-ingestion-probe-algorithm-v1",
+    ),
+    2: (
+        "symbolic-artifact-ingestion-probe-v2",
+        "irb-symbolic-artifact-ingestion-probe-v2",
+        "irb-symbolic-artifact-ingestion-probe-algorithm-v2",
+    ),
+}
 
 
 def build_ingestion_probe(calibration: ExperimentConfig) -> ExperimentConfig:
     """Keep the producer shape while excluding every registered study seed."""
 
-    verify_symbolic_calibration_design(calibration)
+    study = registered_symbolic_study(calibration.name)
+    study.verify_calibration(calibration)
+    name, master_seed, algorithm_master_seed = _PROBE_IDENTITIES[study.version]
     return dataclasses.replace(
         calibration,
-        name=PROBE_NAME,
+        name=name,
         phase="calibration",
-        master_seed=PROBE_MASTER_SEED,
-        algorithm_master_seed=PROBE_ALGORITHM_MASTER_SEED,
+        master_seed=master_seed,
+        algorithm_master_seed=algorithm_master_seed,
         environment_replicas=1,
         algorithm_replicas=1,
         confirmatory_freeze=None,

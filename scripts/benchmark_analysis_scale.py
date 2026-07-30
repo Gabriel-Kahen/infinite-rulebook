@@ -37,12 +37,22 @@ def build_scale_dataset(
     *,
     environment_replicas: int,
     metric_count: int,
+    positive_checkpoint_metric_count: int | None = None,
 ) -> AnalysisDataset:
+    positive_metric_count = (
+        metric_count
+        if positive_checkpoint_metric_count is None
+        else positive_checkpoint_metric_count
+    )
     if environment_replicas < 1 or metric_count < 1:
         raise ValueError("benchmark dimensions must be positive")
+    if positive_metric_count < metric_count:
+        raise ValueError(
+            "positive checkpoint metric count cannot be below round-zero count"
+        )
     metric_names = (
         "expected_reward",
-        *(f"metric_{index:02d}" for index in range(1, metric_count)),
+        *(f"metric_{index:02d}" for index in range(1, positive_metric_count)),
     )
     run_settings_hash = _digest("settings", domain="analysis-scale-benchmark")
     provenance = tuple(
@@ -100,6 +110,9 @@ def build_scale_dataset(
                         domain="analysis-scale-benchmark-cell",
                     )
                     for round_index in experiment.checkpoints.rounds:
+                        checkpoint_metric_count = (
+                            metric_count if round_index == 0 else positive_metric_count
+                        )
                         base = (
                             environment_replica
                             + algorithm_replica / 10
@@ -107,7 +120,9 @@ def build_scale_dataset(
                         )
                         metrics = tuple(
                             (name, base + index / 1_000)
-                            for index, name in enumerate(metric_names)
+                            for index, name in enumerate(
+                                metric_names[:checkpoint_metric_count]
+                            )
                         )
                         observations.append(
                             CheckpointObservation(
@@ -145,6 +160,11 @@ def main() -> int:
     parser.add_argument("--environment-replicas", type=int)
     parser.add_argument("--metrics", type=int, default=29)
     parser.add_argument(
+        "--positive-checkpoint-metrics",
+        type=int,
+        help="metric count at checkpoints after round zero (defaults to --metrics)",
+    )
+    parser.add_argument(
         "--skip-pooling",
         action="store_true",
         help="measure dataset construction only",
@@ -169,6 +189,7 @@ def main() -> int:
         experiment,
         environment_replicas=environment_replicas,
         metric_count=arguments.metrics,
+        positive_checkpoint_metric_count=arguments.positive_checkpoint_metrics,
     )
     dataset_elapsed = time.perf_counter() - started
     pool_started = time.perf_counter()
@@ -185,7 +206,13 @@ def main() -> int:
                 "dataset_elapsed_seconds": round(dataset_elapsed, 3),
                 "environment_replicas": environment_replicas,
                 "maximum_rss_mib": round(maximum_rss, 3),
+                "checkpoint_zero_metric_count": arguments.metrics,
                 "metric_count": arguments.metrics,
+                "positive_checkpoint_metric_count": (
+                    arguments.metrics
+                    if arguments.positive_checkpoint_metrics is None
+                    else arguments.positive_checkpoint_metrics
+                ),
                 "observation_count": len(dataset.observations),
                 "pool_elapsed_seconds": round(pool_elapsed, 3),
                 "pooled_checkpoint_count": len(pools),

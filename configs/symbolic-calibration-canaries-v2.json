@@ -1,0 +1,2682 @@
+{
+  "aggregate_canaries": [
+    {
+      "fields": {
+        "aggregate_metric": "post_query_mean_hidden_expected_reward",
+        "checkpoints": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "name": "post-query-mean-hidden-reward-derivation",
+        "selectors": [
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+              "environment_kind": "ALEA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+              "environment_kind": "ALEA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+              "environment_kind": "ALEA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+              "environment_kind": "ALEA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+              "environment_kind": "ALEA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+              "environment_kind": "ALEA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+              "environment_kind": "RED-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+              "environment_kind": "RED-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+              "environment_kind": "RED-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+              "environment_kind": "RED-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+              "environment_kind": "RED-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+              "environment_kind": "RED-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+              "environment_kind": "IND"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+              "environment_kind": "IND"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+              "environment_kind": "IND"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+              "environment_kind": "IND"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+              "environment_kind": "IND"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+              "environment_kind": "IND"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+              "environment_kind": "MIX"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+              "environment_kind": "MIX"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+              "environment_kind": "MIX"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+              "environment_kind": "MIX"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+              "environment_kind": "MIX"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+              "environment_kind": "MIX"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+              "environment_kind": "PUBLIC-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+              "environment_kind": "PUBLIC-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+              "environment_kind": "PUBLIC-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+              "environment_kind": "PUBLIC-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+              "environment_kind": "PUBLIC-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+              "environment_kind": "PUBLIC-C"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+              "agent_kind": "scheduled",
+              "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+              "agent_kind": "reward",
+              "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+              "agent_kind": "relevant-information",
+              "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+              "agent_kind": "fixed",
+              "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+              "agent_kind": "total-information",
+              "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          },
+          {
+            "fields": {
+              "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+              "agent_kind": "novelty",
+              "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+              "environment_kind": "TRIVIA"
+            },
+            "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+          }
+        ],
+        "source_metric": "post_query_hidden_expected_reward",
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.compact_canaries_v2.AggregateMetricCanary"
+    }
+  ],
+  "artifact_type": "compact-canary-plan.v2",
+  "canaries": [
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "name": "alea-frontier-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.FrontierIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "metric": "distractor_information_nats",
+        "name": "alea-has-no-persistent-distractor-information",
+        "selector": {
+          "fields": {
+            "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+            "agent_kind": "novelty",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ExactZeroMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "metric": "distractor_information_nats",
+        "name": "alea-has-no-persistent-distractor-information-fixed",
+        "selector": {
+          "fields": {
+            "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+            "agent_kind": "fixed",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ExactZeroMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "metric": "distractor_information_nats",
+        "name": "alea-has-no-persistent-distractor-information-relevant-information",
+        "selector": {
+          "fields": {
+            "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+            "agent_kind": "relevant-information",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ExactZeroMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "metric": "distractor_information_nats",
+        "name": "alea-has-no-persistent-distractor-information-reward",
+        "selector": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ExactZeroMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "metric": "distractor_information_nats",
+        "name": "alea-has-no-persistent-distractor-information-scheduled",
+        "selector": {
+          "fields": {
+            "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+            "agent_kind": "scheduled",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ExactZeroMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "metric": "distractor_information_nats",
+        "name": "alea-has-no-persistent-distractor-information-total-information",
+        "selector": {
+          "fields": {
+            "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+            "agent_kind": "total-information",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ExactZeroMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "hidden_expected_reward",
+        "name": "alea-hidden-reward-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "relevant_information_nats",
+        "name": "alea-useful-information-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+            "environment_kind": "ALEA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "hidden_expected_reward",
+        "name": "public-hidden-reward-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "base_metric": "hidden_expected_reward",
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "expected_shift": 0.5,
+        "name": "public-reward-decomposition",
+        "selector": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "shift_metric": "public_reward",
+        "tolerance": 1e-12,
+        "total_metric": "expected_reward"
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ConstantAdditiveMetricCanary"
+    },
+    {
+      "fields": {
+        "base_metric": "hidden_expected_reward",
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "expected_shift": 0.5,
+        "name": "public-reward-decomposition-fixed",
+        "selector": {
+          "fields": {
+            "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+            "agent_kind": "fixed",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "shift_metric": "public_reward",
+        "tolerance": 1e-12,
+        "total_metric": "expected_reward"
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ConstantAdditiveMetricCanary"
+    },
+    {
+      "fields": {
+        "base_metric": "hidden_expected_reward",
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "expected_shift": 0.5,
+        "name": "public-reward-decomposition-novelty",
+        "selector": {
+          "fields": {
+            "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+            "agent_kind": "novelty",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "shift_metric": "public_reward",
+        "tolerance": 1e-12,
+        "total_metric": "expected_reward"
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ConstantAdditiveMetricCanary"
+    },
+    {
+      "fields": {
+        "base_metric": "hidden_expected_reward",
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "expected_shift": 0.5,
+        "name": "public-reward-decomposition-relevant-information",
+        "selector": {
+          "fields": {
+            "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+            "agent_kind": "relevant-information",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "shift_metric": "public_reward",
+        "tolerance": 1e-12,
+        "total_metric": "expected_reward"
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ConstantAdditiveMetricCanary"
+    },
+    {
+      "fields": {
+        "base_metric": "hidden_expected_reward",
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "expected_shift": 0.5,
+        "name": "public-reward-decomposition-scheduled",
+        "selector": {
+          "fields": {
+            "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+            "agent_kind": "scheduled",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "shift_metric": "public_reward",
+        "tolerance": 1e-12,
+        "total_metric": "expected_reward"
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ConstantAdditiveMetricCanary"
+    },
+    {
+      "fields": {
+        "base_metric": "hidden_expected_reward",
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "expected_shift": 0.5,
+        "name": "public-reward-decomposition-total-information",
+        "selector": {
+          "fields": {
+            "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+            "agent_kind": "total-information",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "shift_metric": "public_reward",
+        "tolerance": 1e-12,
+        "total_metric": "expected_reward"
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.ConstantAdditiveMetricCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "relevant_information_nats",
+        "name": "public-useful-information-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+            "environment_kind": "PUBLIC-C"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "name": "trivia-d12-frontier-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.FrontierIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "hidden_expected_reward",
+        "name": "trivia-d12-hidden-reward-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "relevant_information_nats",
+        "name": "trivia-d12-useful-information-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "name": "trivia-d24-frontier-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.FrontierIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "hidden_expected_reward",
+        "name": "trivia-d24-hidden-reward-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "relevant_information_nats",
+        "name": "trivia-d24-useful-information-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "name": "trivia-d6-frontier-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        }
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.FrontierIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "hidden_expected_reward",
+        "name": "trivia-d6-hidden-reward-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    },
+    {
+      "fields": {
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "left": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+            "environment_kind": "IND"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "metric": "relevant_information_nats",
+        "name": "trivia-d6-useful-information-path-is-ind",
+        "right": {
+          "fields": {
+            "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+            "agent_kind": "reward",
+            "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+            "environment_kind": "TRIVIA"
+          },
+          "record_type": "infinite_rulebook.analysis.models.GroupSelector"
+        },
+        "tolerance": 1e-12
+      },
+      "record_type": "infinite_rulebook.analysis.canaries.MetricTrajectoryIdentityCanary"
+    }
+  ],
+  "detail_chunk_record_limit": 4096,
+  "expected_groups": [
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+        "environment_kind": "ALEA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+        "environment_kind": "ALEA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+        "environment_kind": "ALEA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+        "environment_kind": "ALEA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+        "environment_kind": "ALEA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "0571e255ca5409d5fdc04b8035b951573459282ac02764ce19e91c83d0ac159e",
+        "environment_kind": "ALEA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "2368b298b900b57b1d54c5f8b6cf6f1aafdebd9a3e3918411bbbf88109a4b4e3",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "5ca95a6b4f9700722920ec28124de200dbae4fb30b7bfa59f75f005ea550d856",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+        "environment_kind": "RED-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+        "environment_kind": "RED-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+        "environment_kind": "RED-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+        "environment_kind": "RED-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+        "environment_kind": "RED-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "902c5213f3213a557bbb2bd9df3b741a8c3efd100c2335cecaacc657ee51121f",
+        "environment_kind": "RED-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+        "environment_kind": "IND",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+        "environment_kind": "IND",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+        "environment_kind": "IND",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+        "environment_kind": "IND",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+        "environment_kind": "IND",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "9fa14e505d51ff85869dd15e3db54734ef9335f66aa7d8ec9efeec23fac3ce89",
+        "environment_kind": "IND",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+        "environment_kind": "MIX",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+        "environment_kind": "MIX",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+        "environment_kind": "MIX",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+        "environment_kind": "MIX",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+        "environment_kind": "MIX",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "a8c929d9e0938e32593534c794dbee9dbfa04af885890b23bf8621a018c75dd1",
+        "environment_kind": "MIX",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+        "environment_kind": "PUBLIC-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+        "environment_kind": "PUBLIC-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+        "environment_kind": "PUBLIC-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+        "environment_kind": "PUBLIC-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+        "environment_kind": "PUBLIC-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "cf55be90e5670a531c259e88cb530c3de846816a2e1e1d6d027593d497b3026f",
+        "environment_kind": "PUBLIC-C",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "212aac92a1da8532e5972f40437fe5263d519fb358a0ec6fa63c804d134831ac",
+        "agent_kind": "scheduled",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "57ca2562042148839b133aec8c82c555375df8c666bac3d5b85a10d89f557416",
+        "agent_kind": "reward",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "861f07a9aadf16023896b000a1054fb2060a2afb3cffe8500f5257b21f78c8d9",
+        "agent_kind": "relevant-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "8fea8f21b4f9563a2c4e51f291faf1ad5543d2d729678c3d4ad0bbaba7b4198a",
+        "agent_kind": "fixed",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "ddef671b142d3c50802d1df4f8b5c18e676ca9a40bdc91386b8488899c8bef75",
+        "agent_kind": "total-information",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    },
+    {
+      "fields": {
+        "agent_hash": "fded4a0f778fc9e4cf5c1b74df82effac115dfbd5829c7b80e1a579fd7d8aa24",
+        "agent_kind": "novelty",
+        "algorithm_replicas": 8,
+        "checkpoints": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "condition_hash": "e61c92683d8a14921be468029594d802275f6f7b705d60cc66bfce69f5bdc637",
+        "environment_kind": "TRIVIA",
+        "environment_replicas": 192
+      },
+      "record_type": "infinite_rulebook.analysis.models.ExpectedGroup"
+    }
+  ],
+  "failure_example_limit": 8,
+  "name": "bounded-symbolic-construct-validation.v2-compact-canaries-calibration",
+  "phase": "calibration",
+  "schema_version": 1,
+  "scientific_hash": "645a509da5f3c66563df8d88796a7a10ca87e817fd0e4549536fd68095e06a9a"
+}

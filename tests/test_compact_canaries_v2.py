@@ -18,11 +18,16 @@ from infinite_rulebook.analysis.compact_canaries_v2 import (
     CompactCanaryDetailChunk,
     CompactCanaryEvidence,
     CompactCanaryPlan,
+    SpooledCompactCanaryEvidence,
+    compact_canary_artifact_names,
     compact_canary_artifacts,
+    detail_inventory_hash,
     evaluate_compact_canaries,
+    evaluate_compact_canaries_spooled,
     parse_compact_canary_detail_chunk_json,
     parse_compact_canary_plan_json,
     parse_compact_canary_report_json,
+    verify_compact_canary_artifact_directory,
 )
 from infinite_rulebook.analysis.models import (
     Alternative,
@@ -31,7 +36,9 @@ from infinite_rulebook.analysis.models import (
     AnalysisPhase,
     CertifiedFrontier,
     CheckpointObservation,
+    ContrastInterpretation,
     ContrastSpec,
+    ExpectedGroup,
     GroupSelector,
 )
 from infinite_rulebook.analysis.supplemental_v2 import (
@@ -142,6 +149,36 @@ def _all_group_selectors() -> tuple[GroupSelector, ...]:
     )
 
 
+def _expected_groups(
+    *,
+    environments: tuple[str, ...] = (
+        "IND",
+        "ALEA",
+        "PUBLIC-C",
+        "D6",
+        "D12",
+        "D24",
+    ),
+    agents: tuple[str, ...] = ("relevant", "total"),
+    checkpoints: tuple[int, ...] = (0, 1, 2, 3),
+    environment_replicas: int = 2,
+    algorithm_replicas: int = 2,
+) -> tuple[ExpectedGroup, ...]:
+    return tuple(
+        ExpectedGroup(
+            condition_hash=_hash(f"condition:{environment}"),
+            agent_hash=_hash(f"agent:{agent}"),
+            environment_kind=environment,
+            agent_kind=agent,
+            checkpoints=checkpoints,
+            environment_replicas=environment_replicas,
+            algorithm_replicas=algorithm_replicas,
+        )
+        for environment in environments
+        for agent in agents
+    )
+
+
 def _plan() -> CompactCanaryPlan:
     return CompactCanaryPlan(
         "compact-symbolic-canaries.v2",
@@ -188,6 +225,7 @@ def _plan() -> CompactCanaryPlan:
                 1e-12,
             ),
         ),
+        expected_groups=_expected_groups(),
     )
 
 
@@ -255,6 +293,29 @@ def test_compact_v2_evidence_round_trips_without_embedded_detail_stream() -> Non
     )
 
 
+def test_spooled_evaluation_matches_in_memory_without_retaining_details(
+    tmp_path,
+) -> None:
+    expected = evaluate_compact_canaries(_dataset(), _plan())
+    spooled = evaluate_compact_canaries_spooled(_dataset(), _plan(), tmp_path)
+
+    assert isinstance(spooled, SpooledCompactCanaryEvidence)
+    assert not hasattr(spooled, "detail_chunks")
+    assert spooled.report == expected.report
+    assert compact_canary_artifact_names(spooled) == tuple(
+        name for name, _ in compact_canary_artifacts(expected)
+    )
+    verify_compact_canary_artifact_directory(tmp_path, spooled)
+    for name, content in compact_canary_artifacts(expected):
+        assert (tmp_path / name).read_text(encoding="utf-8") == content
+
+    detail_path = tmp_path / compact_canary_artifact_names(spooled)[1]
+    original = detail_path.read_text(encoding="utf-8")
+    detail_path.write_text(original + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="differs"):
+        verify_compact_canary_artifact_directory(tmp_path, spooled)
+
+
 def test_planned_twenty_seven_gate_shape_is_supported() -> None:
     frontier = tuple(
         FrontierIdentityCanary(
@@ -313,6 +374,7 @@ def test_planned_twenty_seven_gate_shape_is_supported() -> None:
         AnalysisPhase.CALIBRATION,
         (*frontier, *paths, *public, *zero),
         aggregate,
+        expected_groups=_expected_groups(),
     )
     evidence = evaluate_compact_canaries(_dataset(), plan)
 
@@ -360,36 +422,36 @@ def test_aggregate_tamper_and_missing_authenticated_history_fail_closed() -> Non
             and item.round_index == 2
         )
     )
-    with pytest.raises(AnalysisError, match="missing authenticated source"):
+    with pytest.raises(AnalysisError, match="replica/checkpoint grid"):
         evaluate_compact_canaries(AnalysisDataset(incomplete), _plan())
 
 
 def test_aggregate_exact_group_inventory_rejects_omission_and_overlap() -> None:
     plan = _plan()
     aggregate = plan.aggregate_canaries[0]
-    omitted = replace(
-        plan,
-        aggregate_canaries=(replace(aggregate, selectors=aggregate.selectors[:-1]),),
-    )
-    with pytest.raises(AnalysisError, match="omits"):
-        evaluate_compact_canaries(_dataset(), omitted)
+    with pytest.raises(ValueError, match="every exact expected group"):
+        replace(
+            plan,
+            aggregate_canaries=(
+                replace(aggregate, selectors=aggregate.selectors[:-1]),
+            ),
+        )
 
     d6 = _selector("D6", "relevant")
     overlapping = GroupSelector(
         condition_hash=d6.condition_hash,
         agent_hash=d6.agent_hash,
     )
-    overlap_plan = replace(
-        plan,
-        aggregate_canaries=(
-            replace(
-                aggregate,
-                selectors=(*aggregate.selectors, overlapping),
+    with pytest.raises(ValueError, match="every exact expected group"):
+        replace(
+            plan,
+            aggregate_canaries=(
+                replace(
+                    aggregate,
+                    selectors=(*aggregate.selectors, overlapping),
+                ),
             ),
-        ),
-    )
-    with pytest.raises(AnalysisError, match="overlap"):
-        evaluate_compact_canaries(_dataset(), overlap_plan)
+        )
 
     with pytest.raises(ValueError, match="unique"):
         replace(
@@ -425,7 +487,7 @@ def test_failures_are_bounded_canonical_examples() -> None:
     assert not result.passed
 
 
-def test_detail_chunks_are_limited_ordered_and_inventory_bound() -> None:
+def test_detail_chunks_are_limited_ordered_and_inventory_bound(tmp_path) -> None:
     observations = tuple(
         _observation("ALEA", "relevant", environment, 0, 0)
         for environment in range(COMPACT_CANARY_DETAIL_LIMIT + 1)
@@ -442,13 +504,27 @@ def test_detail_chunks_are_limited_ordered_and_inventory_bound() -> None:
                 (0,),
             ),
         ),
+        expected_groups=_expected_groups(
+            environments=("ALEA",),
+            agents=("relevant",),
+            checkpoints=(0,),
+            environment_replicas=COMPACT_CANARY_DETAIL_LIMIT + 1,
+            algorithm_replicas=1,
+        ),
     )
     evidence = evaluate_compact_canaries(dataset, plan)
+    spooled = evaluate_compact_canaries_spooled(
+        dataset,
+        plan,
+        tmp_path / "spooled",
+    )
 
     assert tuple(len(chunk.records) for chunk in evidence.detail_chunks) == (
         COMPACT_CANARY_DETAIL_LIMIT,
         1,
     )
+    assert spooled.report == evidence.report
+    assert len(compact_canary_artifact_names(spooled)) == 3
     assert tuple(item.index for item in evidence.report.detail_chunks) == (0, 1)
     with pytest.raises(ValueError, match="4096"):
         CompactCanaryDetailChunk(
@@ -497,23 +573,78 @@ def test_json_parsers_reject_duplicate_keys_reordering_and_tampering() -> None:
     with pytest.raises(AnalysisError, match=r"fields|authenticate|validation"):
         parse_compact_canary_report_json(json.dumps(report_payload))
 
-    forged_result = replace(
-        evidence.report.results[0],
-        minimum_residual=1.0,
-        maximum_residual=1.0,
-        maximum_absolute_error=1.0,
+    with pytest.raises(ValueError, match="violation count"):
+        replace(
+            evidence.report.results[0],
+            minimum_residual=1.0,
+            maximum_residual=1.0,
+            maximum_absolute_error=1.0,
+        )
+
+    frontier = next(
+        detail
+        for chunk in evidence.detail_chunks
+        for detail in chunk.records
+        if detail.kind == "frontier-semantic-identity"
     )
-    forged_report = replace(
-        evidence.report,
-        results=(forged_result, *evidence.report.results[1:]),
-    )
-    with pytest.raises(ValueError, match="summary"):
-        CompactCanaryEvidence(forged_report, evidence.detail_chunks)
+    with pytest.raises(ValueError, match="semantic-hash evidence"):
+        replace(
+            frontier,
+            left_semantic_hash=None,
+            right_semantic_hash=None,
+        )
 
     plan_payload = plan.to_dict()
     plan_payload["schema_version"] = 1.0
     with pytest.raises(AnalysisError, match="schema"):
         parse_compact_canary_plan_json(json.dumps(plan_payload))
+
+
+def test_frontier_details_cannot_authenticate_contradictory_semantic_hashes() -> None:
+    evidence = evaluate_compact_canaries(_dataset(), _plan())
+    chunks = []
+    changed = False
+    for chunk in evidence.detail_chunks:
+        records = []
+        for detail in chunk.records:
+            if not changed and detail.kind == "frontier-semantic-identity":
+                detail = replace(
+                    detail,
+                    right_semantic_hash=_hash("different-frontier"),
+                )
+                changed = True
+            records.append(detail)
+        chunks.append(replace(chunk, records=tuple(records)))
+    assert changed
+    references = tuple(chunk.reference for chunk in chunks)
+    report = replace(
+        evidence.report,
+        detail_chunks=references,
+        detail_root_hash=detail_inventory_hash(references),
+    )
+
+    with pytest.raises(ValueError, match="contradicts semantic hashes"):
+        CompactCanaryEvidence(report, tuple(chunks))
+
+
+def test_compact_and_supplemental_evidence_require_every_registered_replica() -> None:
+    dataset = _dataset()
+    subset = AnalysisDataset(
+        tuple(item for item in dataset.observations if item.environment_replica == 0)
+    )
+    with pytest.raises(AnalysisError, match="replica/checkpoint grid"):
+        evaluate_compact_canaries(subset, _plan())
+    with pytest.raises(AnalysisError, match="replica/checkpoint grid"):
+        evaluate_supplemental_evidence(subset, _supplemental_plan())
+    duplicate = replace(
+        dataset.observations[0],
+        run_hash=_hash("duplicate-grid-cell"),
+    )
+    with pytest.raises(AnalysisError, match="replica/checkpoint grid"):
+        evaluate_compact_canaries(
+            AnalysisDataset((*dataset.observations, duplicate)),
+            _plan(),
+        )
 
 
 def _supplemental_plan() -> SupplementalEvidencePlan:
@@ -540,8 +671,10 @@ def _supplemental_plan() -> SupplementalEvidencePlan:
                 3,
                 Alternative.GREATER,
                 0.0,
+                interpretation=ContrastInterpretation.TELEMETRY_ONLY,
             ),
         ),
+        expected_groups=_expected_groups(),
     )
 
 
@@ -578,18 +711,25 @@ def test_supplemental_evidence_is_exact_and_cannot_enter_or_rescue_holm() -> Non
             replace(plan, name="other-supplemental"),
             report,
         )
-    with pytest.raises(ValueError, match="derive"):
-        supplemental_evidence_artifacts(
-            plan,
-            replace(
-                report,
-                legacy_replications=report.descriptive_comparisons,
-                descriptive_comparisons=report.legacy_replications,
-            ),
+    with pytest.raises(ValueError, match="inferential role"):
+        replace(
+            report,
+            legacy_replications=report.descriptive_comparisons,
+            descriptive_comparisons=report.legacy_replications,
         )
 
 
 def test_supplemental_contract_rejects_inexact_selectors_and_tampering() -> None:
+    with pytest.raises(ValueError, match="telemetry-only"):
+        replace(
+            _supplemental_plan(),
+            descriptive_comparisons=(
+                replace(
+                    _supplemental_plan().descriptive_comparisons[0],
+                    interpretation=ContrastInterpretation.INFERENTIAL,
+                ),
+            ),
+        )
     with pytest.raises(ValueError, match="exact"):
         SupplementalEvidencePlan(
             "bad",
@@ -645,20 +785,19 @@ def test_descriptive_d12_comparison_requires_exact_paired_replica_grid() -> None
             and item.round_index == 3
         )
     )
-    with pytest.raises(AnalysisError, match="unmatched algorithm"):
+    with pytest.raises(AnalysisError, match="replica/checkpoint grid"):
         evaluate_supplemental_evidence(AnalysisDataset(unmatched), plan)
 
-    same_group = replace(
-        plan,
-        descriptive_comparisons=(
-            replace(
-                d12,
-                right=GroupSelector(
-                    condition_hash=d12.left.condition_hash,
-                    agent_hash=d12.left.agent_hash,
+    with pytest.raises(ValueError, match="outside expected_groups"):
+        replace(
+            plan,
+            descriptive_comparisons=(
+                replace(
+                    d12,
+                    right=GroupSelector(
+                        condition_hash=d12.left.condition_hash,
+                        agent_hash=d12.left.agent_hash,
+                    ),
                 ),
             ),
-        ),
-    )
-    with pytest.raises(AnalysisError, match="distinct exact groups"):
-        evaluate_supplemental_evidence(_dataset(), same_group)
+        )

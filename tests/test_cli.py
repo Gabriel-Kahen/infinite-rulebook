@@ -202,6 +202,63 @@ def test_plan_command_writes_and_authenticates_analysis_and_canary_plans(
         main(arguments)
 
 
+def test_v2_plan_command_requires_and_authenticates_supplemental_registration(
+    tmp_path: Path,
+) -> None:
+    analysis_path = tmp_path / "analysis-v2.json"
+    canary_path = tmp_path / "canaries-v2.json"
+    supplemental_path = tmp_path / "supplemental-v2.json"
+    arguments = [
+        "plan",
+        "configs/symbolic-calibration-v2.json",
+        str(analysis_path),
+        str(canary_path),
+        "--supplemental-output",
+        str(supplemental_path),
+    ]
+
+    assert main(arguments) == 0
+    assert main(arguments) == 0
+    config = load_experiment_config("configs/symbolic-calibration-v2.json")
+    expected_analysis = SYMBOLIC_STUDY_V2.build_analysis_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    expected_canaries = SYMBOLIC_STUDY_V2.evidence.build_canary_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    supplemental = SYMBOLIC_STUDY_V2.evidence.supplemental
+    assert supplemental is not None
+    expected_supplemental = supplemental.build_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+
+    assert load_analysis_plan(analysis_path) == expected_analysis
+    SYMBOLIC_STUDY_V2.evidence.verify_canary_plan_json(
+        canary_path.read_text(encoding="utf-8"),
+        expected_canaries,
+    )
+    supplemental.verify_plan_json(
+        supplemental_path.read_text(encoding="utf-8"),
+        expected_supplemental,
+    )
+    with pytest.raises(ValueError, match="requires --supplemental-output"):
+        main(arguments[:4])
+    with pytest.raises(ValueError, match="does not register supplemental"):
+        main(
+            [
+                "plan",
+                "configs/symbolic-calibration-v1.json",
+                str(tmp_path / "analysis-v1.json"),
+                str(tmp_path / "canaries-v1.json"),
+                "--supplemental-output",
+                str(tmp_path / "unexpected.json"),
+            ]
+        )
+
+
 def test_cli_lifecycle_requires_explicit_reproducibility_and_canary_inputs(
     tmp_path: Path,
 ) -> None:

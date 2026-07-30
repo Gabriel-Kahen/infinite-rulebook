@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from infinite_rulebook.analysis import analysis_plan_json, load_analysis_plan
 from infinite_rulebook.analysis.models import AnalysisPhase
 from infinite_rulebook.analysis.power import (
     EnvironmentCluster,
@@ -12,10 +13,15 @@ from infinite_rulebook.analysis.power import (
     calibrate_environment_count,
 )
 from infinite_rulebook.orchestration.config import (
+    AgentKind,
     EnvironmentKind,
     load_experiment_config,
 )
-from infinite_rulebook.orchestration.freeze import ConfirmatoryFreezeError
+from infinite_rulebook.orchestration.freeze import (
+    ConfirmatoryFreezeError,
+    SeedBankIdentities,
+    freeze_experiment_config,
+)
 from infinite_rulebook.studies.symbolic_construct_v2 import (
     LEGACY_D6_REPLICATION,
     POWER_CANDIDATE_ENVIRONMENTS,
@@ -24,9 +30,12 @@ from infinite_rulebook.studies.symbolic_construct_v2 import (
     S2_EARLY,
     S2_LOAD,
     SECONDARY_D12,
+    STUDY_CONTRACT,
     SYMBOLIC_V2_ALGORITHM_MASTER_SEED,
     SYMBOLIC_V2_CALIBRATION_MASTER_SEED,
     SYMBOLIC_V2_COMPONENT_HASH,
+    SYMBOLIC_V2_CONFIRMATORY_MASTER_SEED,
+    SYMBOLIC_V2_CONFIRMATORY_NAME,
     SYMBOLIC_V2_DESIGN_HASH,
     SYMBOLIC_V2_SMOKE_CONFIG_HASH,
     SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
@@ -34,13 +43,26 @@ from infinite_rulebook.studies.symbolic_construct_v2 import (
     build_symbolic_canary_plan,
     build_symbolic_supplemental_plan,
     calibration_evidence_hash_from_hashes,
+    expected_confirmatory_margins,
+    expected_confirmatory_registration,
+    expected_confirmatory_tolerances,
     registration_component_hash,
     registration_component_payload,
     symbolic_v2_design_hash,
     verify_symbolic_calibration_design,
+    verify_symbolic_confirmatory_contract,
 )
 
 _CONFIG = Path(__file__).parents[1] / "configs" / "symbolic-calibration-v2.json"
+_ANALYSIS_PLAN = (
+    Path(__file__).parents[1] / "configs" / "symbolic-calibration-analysis-v2.json"
+)
+_CANARY_PLAN = (
+    Path(__file__).parents[1] / "configs" / "symbolic-calibration-canaries-v2.json"
+)
+_SUPPLEMENTAL_PLAN = (
+    Path(__file__).parents[1] / "configs" / "symbolic-calibration-supplemental-v2.json"
+)
 
 
 def _power_hypothesis() -> PowerHypothesis:
@@ -77,6 +99,27 @@ def test_v2_registration_matches_the_ambitious_matrix() -> None:
     assert trivia_loads == {6, 12, 24}
 
 
+def test_v2_checked_in_registration_artifacts_are_exact_builder_outputs() -> None:
+    config = load_experiment_config(_CONFIG)
+    analysis = build_symbolic_analysis_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    canaries = build_symbolic_canary_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    supplemental = build_symbolic_supplemental_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+
+    assert load_analysis_plan(_ANALYSIS_PLAN) == analysis
+    assert _ANALYSIS_PLAN.read_text(encoding="utf-8") == analysis_plan_json(analysis)
+    assert _CANARY_PLAN.read_text(encoding="utf-8") == canaries.to_json()
+    assert _SUPPLEMENTAL_PLAN.read_text(encoding="utf-8") == supplemental.to_json()
+
+
 def test_v2_plan_has_six_exact_primaries_and_no_scope_reduction() -> None:
     config = load_experiment_config(_CONFIG)
     plan = build_symbolic_analysis_plan(
@@ -90,10 +133,10 @@ def test_v2_plan_has_six_exact_primaries_and_no_scope_reduction() -> None:
         PRIMARY_MINIMUM_EFFECTS
     )
     assert plan.scientific_hash == (
-        "905689632de395d29de90914409cb9326871f0ad168258a86c4b4b9ed743d353"
+        "8ae60a635d6ee10921daa396800892024ce81f11413d5c6f967650bf6bb8e279"
     )
     assert plan.registration_hash == (
-        "94572551c16e12a376b3681c44c307d8b74c4e2733cc5f1848435698924f423f"
+        "bbc4151bd6dc8171f9343911f9ad047ad02d213976b42d3f92edbea4f79af615"
     )
     by_name = {contrast.name: contrast for contrast in plan.contrasts}
     assert by_name[S2_EARLY].metric == ("post_query_mean_hidden_expected_reward")
@@ -143,23 +186,21 @@ def test_v2_component_binds_compound_non_rescue_and_compact_evidence() -> None:
         "all-exact-registered-condition-agent-groups"
     )
     assert compact["detail_chunk_records"] == 4096
-    assert compact["plan_hashes"] == {
-        "calibration": (
-            "c3085463cc4d381799ff2c651ca4b6b315a2d88c003dff631893899928d8004b"
-        ),
-        "confirmatory": (
-            "a7225427cd8bb7a6131a36937a0da4f8c15f8144c3bf27b30c323e9d484cb752"
-        ),
-    }
+    assert compact["calibration_plan_hash"] == (
+        "645a509da5f3c66563df8d88796a7a10ca87e817fd0e4549536fd68095e06a9a"
+    )
+    assert (
+        "sealed selected environment-replica count"
+        in (compact["confirmatory_inventory_rule"])
+    )
     assert component["supplemental_evidence"] == {
-        "plan_hashes": {
-            "calibration": (
-                "08781c94ce05ffae565025b3cd17da2ff3747c6a9c8ec830c77d3cd3375445ca"
-            ),
-            "confirmatory": (
-                "daabfadbbae5739019e15441214c83d4bdd02daba6852abfa7fa2b01cfdf9cd4"
-            ),
-        },
+        "calibration_plan_hash": (
+            "1856efab9c7d4c0518dbb4004f3915bb9c70bb9376fbc255825bf4451c96c7f8"
+        ),
+        "confirmatory_inventory_rule": (
+            "same registered comparisons and exact groups with the sealed "
+            "selected environment-replica count"
+        ),
         "legacy_replication": LEGACY_D6_REPLICATION,
         "descriptive_comparison": SECONDARY_D12,
         "family_membership": "outside-primary-holm",
@@ -190,6 +231,8 @@ def test_v2_evidence_plans_are_exact_and_registration_bound() -> None:
     assert len(canaries.aggregate_canaries) == 1
     aggregate = canaries.aggregate_canaries[0]
     assert len(aggregate.selectors) == 48
+    assert len(canaries.expected_groups) == 48
+    assert len(supplemental.expected_groups) == 48
     assert aggregate.checkpoints == tuple(range(1, 13))
     assert aggregate.source_metric == "post_query_hidden_expected_reward"
     assert aggregate.aggregate_metric == "post_query_mean_hidden_expected_reward"
@@ -198,6 +241,71 @@ def test_v2_evidence_plans_are_exact_and_registration_bound() -> None:
     }
     assert {item.name for item in supplemental.descriptive_comparisons} == {
         SECONDARY_D12
+    }
+
+
+def test_v2_unsuffixed_canary_names_retain_the_registered_agents() -> None:
+    config = load_experiment_config(_CONFIG)
+    plan = build_symbolic_canary_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    by_name = {canary.name: canary for canary in plan.canaries}
+
+    assert by_name["public-reward-decomposition"].selector.agent_kind == (
+        AgentKind.REWARD.value
+    )
+    assert (
+        by_name["alea-has-no-persistent-distractor-information"].selector.agent_kind
+        == AgentKind.NOVELTY.value
+    )
+
+
+def test_v2_component_and_evidence_plans_support_an_actual_sealed_e32_config() -> None:
+    calibration = load_experiment_config(_CONFIG)
+    design = replace(calibration, environment_replicas=32)
+    registration = expected_confirmatory_registration(design)
+    sealed = freeze_experiment_config(
+        design,
+        name=SYMBOLIC_V2_CONFIRMATORY_NAME,
+        confirmatory_master_seed=SYMBOLIC_V2_CONFIRMATORY_MASTER_SEED,
+        calibration_evidence_hash="b" * 64,
+        analysis_contract=STUDY_CONTRACT,
+        analysis_version=registration,
+        analysis_code_hash="a" * 64,
+        dependency_lock_hash="c" * 64,
+        environment_digest="d" * 64,
+        seed_banks=SeedBankIdentities.bind(
+            calibration_master_seed=SYMBOLIC_V2_CALIBRATION_MASTER_SEED,
+            confirmatory_master_seed=SYMBOLIC_V2_CONFIRMATORY_MASTER_SEED,
+            algorithm_master_seed=SYMBOLIC_V2_ALGORITHM_MASTER_SEED,
+            calibration_namespace="calibration.v2",
+            confirmatory_namespace="confirmatory.v2",
+            algorithm_namespace="algorithm.v2",
+            evaluation_namespace="evaluation.v2",
+        ),
+        tolerances=expected_confirmatory_tolerances(design),
+        margins=expected_confirmatory_margins(),
+    )
+
+    verify_symbolic_confirmatory_contract(
+        sealed,
+        analysis_code_hash="a" * 64,
+        dependency_lock_hash="c" * 64,
+        environment_digest="d" * 64,
+    )
+    assert registration_component_hash(sealed) == SYMBOLIC_V2_COMPONENT_HASH
+    canaries = build_symbolic_canary_plan(
+        sealed,
+        phase=AnalysisPhase.CONFIRMATORY,
+    )
+    supplemental = build_symbolic_supplemental_plan(
+        sealed,
+        phase=AnalysisPhase.CONFIRMATORY,
+    )
+    assert {group.environment_replicas for group in canaries.expected_groups} == {32}
+    assert {group.environment_replicas for group in supplemental.expected_groups} == {
+        32
     }
 
 
@@ -251,6 +359,16 @@ def test_v2_calibration_evidence_requires_the_registered_stage_zero() -> None:
     with pytest.raises(ValueError, match="Stage-0"):
         calibration_evidence_hash_from_hashes(
             **{**hashes, "smoke_prerequisite_hash": "d" * 64}
+        )
+    with pytest.raises(ValueError, match="SHA-256 hash inputs"):
+        calibration_evidence_hash_from_hashes(**{**hashes, "config_hash": "not-a-hash"})
+    with pytest.raises(ValueError, match="optional provenance"):
+        calibration_evidence_hash_from_hashes(
+            **{**hashes, "analysis_code_hash": "not-a-hash"}
+        )
+    with pytest.raises(ValueError, match="record count"):
+        calibration_evidence_hash_from_hashes(
+            **{**hashes, "canary_detail_record_count": 0}
         )
 
 

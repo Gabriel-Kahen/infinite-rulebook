@@ -4,18 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
 from infinite_rulebook.analysis.canaries import evaluate_canaries
 from infinite_rulebook.analysis.compact_canaries_v2 import (
     CompactCanaryEvidence,
+    compact_canary_artifact_names,
     compact_canary_artifacts,
     compact_canary_results_csv,
     evaluate_compact_canaries,
+    evaluate_compact_canaries_spooled,
     parse_compact_canary_detail_chunk_json,
     parse_compact_canary_plan_json,
     parse_compact_canary_report_json,
+    verify_compact_canary_artifact_directory,
 )
 from infinite_rulebook.analysis.models import AnalysisPhase
 from infinite_rulebook.analysis.supplemental_v2 import (
@@ -77,6 +81,9 @@ class SymbolicEvidenceDesign:
     verify_canary_artifacts: Callable[[Mapping[str, str], Any], None]
     canary_results_csv: Callable[[Any], str]
     canary_binding_fields: Callable[[Any], dict[str, object]]
+    canary_artifact_names: Callable[[Any], tuple[str, ...]]
+    verify_canary_artifact_directory: Callable[[Path, Any], None]
+    evaluate_canaries_to_directory: Callable[[Any, Any, Path], Any] | None = None
     supplemental: SymbolicSupplementalDesign | None = None
 
     def calibration_hash_fields(
@@ -247,6 +254,10 @@ def _v1_canary_artifacts(evidence: Any) -> tuple[tuple[str, str], ...]:
     return (("canaries.json", evidence.to_json()),)
 
 
+def _v1_canary_artifact_names(evidence: Any) -> tuple[str, ...]:
+    return tuple(name for name, _ in _v1_canary_artifacts(evidence))
+
+
 def _verify_v1_canary_artifacts(
     contents: Mapping[str, str],
     evidence: Any,
@@ -259,6 +270,23 @@ def _verify_v1_canary_artifacts(
         != evidence.to_dict()
     ):
         raise ValueError("v1 canary report is noncanonical")
+
+
+def _verify_v1_canary_artifact_directory(
+    directory: Path,
+    evidence: Any,
+) -> None:
+    names = _v1_canary_artifact_names(evidence)
+    paths = tuple(directory / name for name in names)
+    if any(path.is_symlink() or not path.is_file() for path in paths):
+        raise ValueError("v1 canary artifacts must be regular files")
+    _verify_v1_canary_artifacts(
+        {
+            name: path.read_text(encoding="utf-8")
+            for name, path in zip(names, paths, strict=True)
+        },
+        evidence,
+    )
 
 
 def _verify_v2_canary_plan(content: str, expected: Any) -> None:
@@ -314,6 +342,8 @@ V1_EVIDENCE = SymbolicEvidenceDesign(
     verify_canary_artifacts=_verify_v1_canary_artifacts,
     canary_results_csv=canary_results_csv,
     canary_binding_fields=lambda evidence: {},
+    canary_artifact_names=_v1_canary_artifact_names,
+    verify_canary_artifact_directory=_verify_v1_canary_artifact_directory,
 )
 
 V2_EVIDENCE = SymbolicEvidenceDesign(
@@ -328,6 +358,9 @@ V2_EVIDENCE = SymbolicEvidenceDesign(
         "canary_detail_root_hash": evidence.report.detail_root_hash,
         "canary_detail_record_count": evidence.report.detail_record_count,
     },
+    canary_artifact_names=compact_canary_artifact_names,
+    verify_canary_artifact_directory=(verify_compact_canary_artifact_directory),
+    evaluate_canaries_to_directory=evaluate_compact_canaries_spooled,
     supplemental=SymbolicSupplementalDesign(
         build_plan=v2.build_symbolic_supplemental_plan,
         verify_plan_json=_verify_v2_supplemental_plan,

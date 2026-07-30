@@ -5,16 +5,23 @@ from dataclasses import replace
 import pytest
 
 from infinite_rulebook.orchestration.config import load_experiment_config
+from scripts.benchmark_analysis_scale import build_scale_dataset
 from scripts.benchmark_artifact_ingestion import project_report_ingestion
 from scripts.generate_ingestion_probe import build_ingestion_probe
 
 
-def test_ingestion_probe_preserves_production_shape_and_uses_disjoint_seeds() -> None:
-    calibration = load_experiment_config("configs/symbolic-calibration-v1.json")
+@pytest.mark.parametrize(("version", "run_count"), ((1, 36), (2, 48)))
+def test_ingestion_probe_preserves_production_shape_and_uses_disjoint_seeds(
+    version: int,
+    run_count: int,
+) -> None:
+    calibration = load_experiment_config(
+        f"configs/symbolic-calibration-v{version}.json"
+    )
 
     probe = build_ingestion_probe(calibration)
     checked_in = load_experiment_config(
-        "configs/symbolic-artifact-ingestion-probe-v1.json"
+        f"configs/symbolic-artifact-ingestion-probe-v{version}.json"
     )
 
     assert checked_in == probe
@@ -22,7 +29,7 @@ def test_ingestion_probe_preserves_production_shape_and_uses_disjoint_seeds() ->
     assert probe.master_seed != calibration.master_seed
     assert probe.algorithm_master_seed != calibration.algorithm_master_seed
     assert probe.environment_replicas == probe.algorithm_replicas == 1
-    assert len(probe.cells()) == 36
+    assert len(probe.cells()) == run_count
     for name in (
         "environments",
         "agents",
@@ -40,6 +47,33 @@ def test_ingestion_probe_rejects_a_nonregistered_source_design() -> None:
 
     with pytest.raises(ValueError):
         build_ingestion_probe(replace(calibration, horizon=11))
+
+
+def test_scale_benchmark_models_v2_positive_checkpoint_metrics() -> None:
+    calibration = replace(
+        load_experiment_config("configs/symbolic-calibration-v2.json"),
+        algorithm_replicas=1,
+    )
+    dataset = build_scale_dataset(
+        calibration,
+        environment_replicas=1,
+        metric_count=29,
+        positive_checkpoint_metric_count=31,
+    )
+
+    assert {
+        len(item.metrics) for item in dataset.observations if item.round_index == 0
+    } == {29}
+    assert {
+        len(item.metrics) for item in dataset.observations if item.round_index > 0
+    } == {31}
+    with pytest.raises(ValueError, match="cannot be below"):
+        build_scale_dataset(
+            calibration,
+            environment_replicas=1,
+            metric_count=31,
+            positive_checkpoint_metric_count=29,
+        )
 
 
 def test_ingestion_projection_does_not_scale_fixed_frontier_work() -> None:

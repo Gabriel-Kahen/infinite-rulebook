@@ -11,10 +11,10 @@ Each cell has named seed streams for the environment, persistent distractors,
 aleatoric observations, query noise, algorithm choices, deployment, evaluation,
 and frontier computation. Random choices must use semantic coordinates rather
 than consume a shared sequential generator. Matched conditions and agents share
-the corresponding tapes for a replica. The registered symbolic study uses
+the corresponding tapes for a replica. Each registered symbolic study uses
 distinct phase masters for environment-side streams and one preregistered,
-shared three-seed algorithm/deployment nuisance bank across calibration and
-confirmation.
+shared algorithm/deployment nuisance bank across calibration and confirmation:
+three fixed replicas in v1 and eight in v2.
 
 Run the small foundation pilot with:
 
@@ -93,7 +93,7 @@ analysis-source hash, dependency-lock hash, execution-environment digest,
 disjoint seed-bank identities, tolerances, and margins all validate. Execution
 checks all three current provenance hashes against the frozen values.
 
-The bounded symbolic lifecycle is:
+The v1 bounded symbolic lifecycle is:
 
 ```bash
 uv run infinite-rulebook reproduce \
@@ -160,12 +160,69 @@ uv run infinite-rulebook report \
   evidence/symbolic-confirmatory-v1-reproducibility.json
 ```
 
+The v2 lifecycle adds compact chunk-authenticated canaries and an exact
+supplemental plan/report outside the primary Holm family. The `plan` command
+below is the only v2 lifecycle command permitted before the registration
+artifacts merge publicly. After that public registration point, run:
+
+```bash
+uv run infinite-rulebook plan \
+  configs/symbolic-calibration-v2.json \
+  configs/symbolic-calibration-analysis-v2.json \
+  configs/symbolic-calibration-canaries-v2.json \
+  --supplemental-output \
+  configs/symbolic-calibration-supplemental-v2.json
+uv run infinite-rulebook reproduce \
+  configs/symbolic-calibration-v2.json \
+  artifacts/symbolic-calibration-v2-serial \
+  artifacts/symbolic-calibration-v2-parallel \
+  evidence/symbolic-calibration-v2-reproducibility.json \
+  --smoke-evidence evidence/pilot-smoke-final-prerequisite.json \
+  --workers 4
+uv run infinite-rulebook report \
+  configs/symbolic-calibration-v2.json \
+  configs/symbolic-calibration-analysis-v2.json \
+  configs/symbolic-calibration-canaries-v2.json \
+  artifacts/symbolic-calibration-v2-parallel \
+  results/symbolic-calibration-v2 \
+  --supplemental-plan \
+  configs/symbolic-calibration-supplemental-v2.json \
+  --reproducibility-report \
+  evidence/symbolic-calibration-v2-reproducibility.json \
+  --smoke-evidence evidence/pilot-smoke-final-prerequisite.json
+uv run infinite-rulebook freeze \
+  configs/symbolic-calibration-v2.json \
+  results/symbolic-calibration-v2/summary.json \
+  configs/symbolic-confirmatory-v2.json \
+  configs/symbolic-confirmatory-analysis-v2.json \
+  configs/symbolic-confirmatory-canaries-v2.json \
+  --output-supplemental-plan \
+  configs/symbolic-confirmatory-supplemental-v2.json
+uv run infinite-rulebook reproduce \
+  configs/symbolic-confirmatory-v2.json \
+  artifacts/symbolic-confirmatory-v2-serial \
+  artifacts/symbolic-confirmatory-v2-parallel \
+  evidence/symbolic-confirmatory-v2-reproducibility.json \
+  --workers 4
+uv run infinite-rulebook report \
+  configs/symbolic-confirmatory-v2.json \
+  configs/symbolic-confirmatory-analysis-v2.json \
+  configs/symbolic-confirmatory-canaries-v2.json \
+  artifacts/symbolic-confirmatory-v2-parallel \
+  results/symbolic-confirmatory-v2 \
+  --supplemental-plan \
+  configs/symbolic-confirmatory-supplemental-v2.json \
+  --reproducibility-report \
+  evidence/symbolic-confirmatory-v2-reproducibility.json
+```
+
 If Stage 0 encounters a non-invalidating engineering anomaly, record each one
 with a separate `--anomaly "..."` argument on `smoke-evidence`. An invalid
 smoke run must be repaired and rerun; it is not converted into a passing
-prerequisite by an anomaly entry. The prerequisite is required only on the two
-calibration commands above. The calibration report binds it into calibration
-evidence, and `freeze` binds that evidence into the confirmatory seal;
+prerequisite by an anomaly entry. The prerequisite is required on each
+calibration `reproduce` and `report` invocation above. The calibration report
+binds it into calibration evidence, and `freeze` binds that evidence into the
+confirmatory seal;
 confirmatory `reproduce` and `report` therefore reject `--smoke-evidence`
 rather than accepting an independent replacement.
 
@@ -275,14 +332,14 @@ with gzip, and extracting the tar recreates the portable raw root.
 
 ## Analysis scale envelope
 
-The retained in-memory analysis dataset is intentionally sized and measured
-before the registered run:
+The retained in-memory analysis dataset must be sized and measured before a
+registered run. The historical measurements below are v1-only:
 
 ```bash
 uv run python scripts/benchmark_analysis_scale.py
 ```
 
-On the reference Python 3.11 Linux run, the exact calibration shape—192
+On the v1 reference Python 3.11 Linux run, the exact calibration shape—192
 environment replicas, three algorithm replicas, six environments, six agents,
 13 checkpoints, and 29 metrics—constructed, model-validated, sorted, and
 scientifically hashed 269,568 synthetic observations in 100.075 seconds. The
@@ -295,28 +352,64 @@ I/O, artifact authentication, `load_run_trees`, bootstrap/statistical
 reporting, or output writes, so it is an in-memory analysis benchmark rather
 than an end-to-end runtime estimate.
 
-The largest registered confirmation candidate, 512 environment replicas,
+The largest v1 confirmation candidate, 512 environment replicas,
 contains 718,848 observations. The measured maximum-shape run constructed and
 hashed that dataset in 273.404 seconds and pooled all checkpoints in 24.782
-seconds; peak RSS was 2,510.97 MiB from a 29.71 MiB baseline. Run
-calibration/confirmation reporting with at least 8 GiB of available RAM and
-16 GiB recommended. Re-run the benchmark with `--environment-replicas 512` on
-the intended reporting host if the calibration selects that upper candidate.
-These are operational capacity requirements, not changes to the registered
-scientific scope.
+seconds; peak RSS was 2,510.97 MiB from a 29.71 MiB baseline. The former
+8-GiB minimum and 16-GiB recommendation apply only to v1 and must not be used
+to provision v2.
+
+V2 calibration contains 73,728 runs and 958,464 observations. Its largest
+registered candidate contains 294,912 runs and 3,833,856 observations. Round
+zero has 29 metrics; every positive checkpoint has 31 because v2 adds the
+authenticated post-query reward and its cumulative mean. The compact-canary
+inventory contains exactly \(992EA\) detail records: 1,523,712 at calibration
+and 6,094,848 at the largest candidate.
+
+The production v2 evaluator writes each canonical 4,096-record detail chunk
+directly into the transactional report directory and retains only the bounded
+buffer, report summaries, and chunk references. It also derives the aggregate
+metric one exact group at a time instead of indexing all 48 groups
+simultaneously. This removes the projected 0.92-GiB calibration and 3.68-GiB
+maximum detail JSON from the Python heap; those bytes still require output
+disk. The retained observation dataset remains the dominant memory cost.
+
+Before the first v2 calibration run, and again before executing a selected
+confirmation count, the intended reporting host must complete both exact-shape
+benchmarks:
+
+```bash
+uv run python scripts/benchmark_analysis_scale.py \
+  --config configs/symbolic-calibration-v2.json \
+  --metrics 29 \
+  --positive-checkpoint-metrics 31
+uv run python scripts/benchmark_analysis_scale.py \
+  --config configs/symbolic-calibration-v2.json \
+  --environment-replicas 768 \
+  --metrics 29 \
+  --positive-checkpoint-metrics 31
+```
+
+Until those measurements are recorded, use a reporting host with at least
+64 GiB RAM, local SSD/NVMe space for both raw roots plus reports, and no swap
+dependence. The measured peak RSS must leave at least an equal amount of
+physical RAM free for loading, validation, statistics, and OS cache. A failed
+capacity gate moves the unchanged workflow to a larger or longer-lived host;
+it never reduces replicas, checkpoints, metrics, verification, or scientific
+scope.
 
 Artifact authentication is the remaining operational risk. A report
 deliberately makes three content passes while inventorying each of the two raw
-roots, then validates and loads the selected root. At the largest registered
-candidate this is up to 55,296 runs per root, roughly 3.3 million raw files
-before repeated reads, and potentially tens of hours on local storage. This
-redundancy is retained because it detects mutation across each authenticated
+roots, then validates and loads the selected root. V1 reached 55,296 runs per
+root at its largest candidate; v2 reaches 294,912. This can mean many millions
+of raw files and a multi-day report on insufficient storage. The redundant
+passes are retained because they detect mutation across each authenticated
 snapshot.
 
-After the public registration commit and before calibration, generate the
-checked-in disjoint-seed performance probe with the exact 36-condition,
-horizon-12, 13-checkpoint producer shape, then measure it on the intended
-filesystem:
+After the public registration commit and before calibration, run the
+checked-in disjoint-seed performance probe matching the intended study's full
+condition, horizon, checkpoint, and v1/v2 adapter shape, then measure it on the
+intended filesystem. V1 uses 36 conditions; v2 uses 48:
 
 ```bash
 uv run python -m scripts.run_ingestion_probe \
@@ -328,6 +421,16 @@ uv run python scripts/benchmark_artifact_ingestion.py \
   configs/symbolic-artifact-ingestion-probe-v1.json \
   artifacts/symbolic-artifact-ingestion-probe-v1 \
   --projected-runs 55296 \
+  --budget-multiplier 2
+uv run python -m scripts.run_ingestion_probe \
+  configs/symbolic-calibration-v2.json \
+  configs/symbolic-artifact-ingestion-probe-v2.json \
+  artifacts/symbolic-artifact-ingestion-probe-v2 \
+  --workers 4
+uv run python scripts/benchmark_artifact_ingestion.py \
+  configs/symbolic-artifact-ingestion-probe-v2.json \
+  artifacts/symbolic-artifact-ingestion-probe-v2 \
+  --projected-runs 294912 \
   --budget-multiplier 2
 ```
 
@@ -342,7 +445,7 @@ replicas grow, from warm-frontier marginal run validation, raw hashing, and
 loading. It models the report's exact two-inventory/one-load pass structure and
 conservatively charges any unexplained probe residual per projected run.
 
-On the reference local NVMe host, the public-registration-commit probe produced
+On the v1 reference local NVMe host, the public-registration-commit probe produced
 36 runs, 468 observations, 1,044 run files, and four unique frontier trees.
 One inventory took 78.427 seconds and a selected-root load took 30.534 seconds.
 One complete frontier validation set took 24.776 seconds; a cached frontier
@@ -353,14 +456,15 @@ registered two-times operational factor. The calibration projection is 3.085
 hours, or 6.171 hours with that factor. The earlier naive calculation that
 scaled fixed frontier work with every replica is invalid and must not be used.
 
-This remains a planning estimate, not a promise that millions of files scale
-perfectly linearly. Reserve a 60-hour reporting window for the maximum
-candidate, keep the raw roots on local SSD/NVMe storage, and rerun both
-benchmarks on the reporting host. If the measured two-times operational budget
-exceeds that window, move the unchanged sealed workflow to faster or
-longer-lived infrastructure; do not reduce replicas, checkpoints, metrics, raw
-verification, or the scientific scope.
+Those timings and the 60-hour window are v1-only. They are not a promise that
+millions of files scale perfectly linearly and must not be extrapolated as a v2
+capacity approval. Keep raw roots on local SSD/NVMe storage and run both v2
+benchmarks on the reporting host. Reserve at least the measured two-times v2
+projection plus interruption-recovery margin. If that budget is unavailable,
+move the unchanged workflow to faster or longer-lived infrastructure; do not
+reduce replicas, checkpoints, metrics, raw verification, or scientific scope.
 
-The exact bounded protocol, estimands, margins, power grid, hard gates, and
+The exact bounded protocols, estimands, margins, power grids, hard gates, and
 scope exclusions are registered in
-[symbolic-confirmatory-v1.md](symbolic-confirmatory-v1.md).
+[symbolic-confirmatory-v1.md](symbolic-confirmatory-v1.md) and
+[symbolic-confirmatory-v2.md](symbolic-confirmatory-v2.md).

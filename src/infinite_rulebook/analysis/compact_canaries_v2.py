@@ -5,9 +5,11 @@ from __future__ import annotations
 import csv
 import io
 import math
+import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from itertools import groupby
+from itertools import chain, groupby
+from pathlib import Path
 from typing import Any
 
 from infinite_rulebook.analysis.canaries import (
@@ -28,18 +30,21 @@ from infinite_rulebook.analysis.evidence_common import (
     checkpoints,
     count,
     exact_selector,
+    expected_group_map,
     finite,
     identifier,
     parse_artifact,
     payload,
     record_payload,
     sha256,
+    validate_expected_group_inventory,
 )
 from infinite_rulebook.analysis.models import (
     AnalysisDataset,
     AnalysisError,
     AnalysisPhase,
     CheckpointObservation,
+    ExpectedGroup,
     GroupSelector,
 )
 from infinite_rulebook.orchestration.hashing import scientific_hash
@@ -134,6 +139,7 @@ class CompactCanaryPlan:
     phase: AnalysisPhase
     canaries: tuple[_BaseCanary, ...]
     aggregate_canaries: tuple[AggregateMetricCanary, ...] = ()
+    expected_groups: tuple[ExpectedGroup, ...] = ()
 
     def __post_init__(self) -> None:
         identifier("plan name", self.name)
@@ -160,6 +166,37 @@ class CompactCanaryPlan:
             "aggregate_canaries",
             tuple(sorted(self.aggregate_canaries, key=lambda item: item.name)),
         )
+        object.__setattr__(
+            self,
+            "expected_groups",
+            tuple(sorted(self.expected_groups)),
+        )
+        groups = expected_group_map(self.expected_groups)
+        for spec in self.canaries:
+            selectors = (
+                (spec.left, spec.right)
+                if isinstance(
+                    spec,
+                    (FrontierIdentityCanary, MetricTrajectoryIdentityCanary),
+                )
+                else (spec.selector,)
+            )
+            for selector in selectors:
+                exact_selector("compact canary selector", selector)
+                group = groups.get(selector)
+                if group is None or not set(spec.checkpoints) <= set(group.checkpoints):
+                    raise ValueError(
+                        "compact canary selector/checkpoints are outside "
+                        "expected_groups"
+                    )
+        for spec in self.aggregate_canaries:
+            if set(spec.selectors) != set(groups) or any(
+                not set(spec.checkpoints) <= set(group.checkpoints)
+                for group in groups.values()
+            ):
+                raise ValueError(
+                    "aggregate canary must cover every exact expected group"
+                )
         names = tuple(item.name for item in (*self.canaries, *self.aggregate_canaries))
         if len(set(names)) != len(names):
             raise ValueError("compact canary names must be unique")
@@ -216,9 +253,20 @@ class CompactCanaryDetail:
             raise TypeError("violated must be a boolean")
         if self.violated != (abs(residual) > tolerance):
             raise ValueError("violated does not match residual and tolerance")
-        if (self.left_semantic_hash is None) != (self.right_semantic_hash is None):
-            raise ValueError("semantic hashes must be supplied together")
-        if self.left_semantic_hash is not None:
+        frontier = self.kind == CanaryKind.FRONTIER_IDENTITY.value
+        if frontier and (
+            self.comparison != "frontier-semantic-hash"
+            or self.left_semantic_hash is None
+            or self.right_semantic_hash is None
+            or residual not in (0.0, 1.0)
+            or tolerance != 0.0
+        ):
+            raise ValueError("frontier details require exact semantic-hash evidence")
+        if not frontier and (
+            self.left_semantic_hash is not None or self.right_semantic_hash is not None
+        ):
+            raise ValueError("semantic hashes are valid only for frontier details")
+        if frontier:
             sha256("left_semantic_hash", self.left_semantic_hash)
             sha256("right_semantic_hash", self.right_semantic_hash)
 
@@ -279,6 +327,8 @@ class CompactGateResult:
         )
         if minimum > maximum or absolute != max(abs(minimum), abs(maximum)):
             raise ValueError("residual extrema are not canonical")
+        if (self.violation_count == 0) != (absolute <= tolerance):
+            raise ValueError("violation count does not match residual extrema")
         object.__setattr__(self, "tolerance", tolerance)
         object.__setattr__(self, "minimum_residual", minimum)
         object.__setattr__(self, "maximum_residual", maximum)
@@ -386,14 +436,21 @@ class CompactCanaryReport:
         sha256("dataset_hash", self.dataset_hash)
         sha256("plan_hash", self.plan_hash)
         if (
-            not self.results
+            not isinstance(self.results, tuple)
+            or not self.results
+            or any(not isinstance(item, CompactGateResult) for item in self.results)
             or self.results != tuple(sorted(self.results, key=lambda item: item.name))
             or len({item.name for item in self.results}) != len(self.results)
         ):
             raise ValueError("results are not a nonempty canonical inventory")
         count("detail_record_count", self.detail_record_count, positive=True)
         if (
-            not self.detail_chunks
+            not isinstance(self.detail_chunks, tuple)
+            or not self.detail_chunks
+            or any(
+                not isinstance(item, DetailChunkReference)
+                for item in self.detail_chunks
+            )
             or tuple(item.index for item in self.detail_chunks)
             != tuple(range(len(self.detail_chunks)))
             or sum(item.record_count for item in self.detail_chunks)
@@ -447,36 +504,97 @@ class CompactCanaryEvidence:
     def __post_init__(self) -> None:
         if (
             not isinstance(self.report, CompactCanaryReport)
-            or not isinstance(
-                self.detail_chunks,
-                tuple,
-            )
+            or not isinstance(self.detail_chunks, tuple)
             or any(
                 not isinstance(item, CompactCanaryDetailChunk)
                 for item in self.detail_chunks
             )
         ):
             raise TypeError("compact evidence requires a report and chunk tuple")
-        references = tuple(item.reference for item in self.detail_chunks)
-        if references != self.report.detail_chunks:
-            raise ValueError("detail chunks do not match the report inventory")
-        previous: tuple[object, ...] | None = None
+        _validate_detail_chunks(self.report, self.detail_chunks)
 
-        def records() -> Iterable[CompactCanaryDetail]:
-            nonlocal previous
-            for chunk in self.detail_chunks:
-                for item in chunk.records:
-                    if previous is not None and item.sort_key <= previous:
-                        raise ValueError("detail chunks are not globally canonical")
-                    previous = item.sort_key
-                    yield item
 
-        summaries = tuple(
-            _summarize_gate(group)
-            for _, group in groupby(records(), key=lambda item: item.gate_name)
-        )
-        if summaries != self.report.results:
-            raise ValueError("gate summary does not match authenticated details")
+@dataclass(frozen=True, slots=True)
+class SpooledCompactCanaryEvidence:
+    """Bounded-memory compact evidence whose chunks live in an artifact directory."""
+
+    report: CompactCanaryReport
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.report, CompactCanaryReport):
+            raise TypeError("spooled compact evidence requires a compact report")
+
+    @property
+    def scientific_hash(self) -> str:
+        return self.report.scientific_hash
+
+    @property
+    def passed(self) -> bool:
+        return self.report.passed
+
+
+def _validate_detail_chunks(
+    report: CompactCanaryReport,
+    chunks: Iterable[CompactCanaryDetailChunk],
+) -> None:
+    expected_references = iter(report.detail_chunks)
+    previous: tuple[object, ...] | None = None
+
+    def records() -> Iterable[CompactCanaryDetail]:
+        nonlocal previous
+        for chunk in chunks:
+            if not isinstance(chunk, CompactCanaryDetailChunk):
+                raise TypeError("compact evidence chunks must be typed detail chunks")
+            try:
+                expected = next(expected_references)
+            except StopIteration:
+                raise ValueError("detail chunks exceed the report inventory") from None
+            if chunk.reference != expected:
+                raise ValueError("detail chunks do not match the report inventory")
+            for item in chunk.records:
+                if previous is not None and item.sort_key <= previous:
+                    raise ValueError("detail chunks are not globally canonical")
+                previous = item.sort_key
+                yield item
+        try:
+            next(expected_references)
+        except StopIteration:
+            return
+        raise ValueError("detail chunks do not complete the report inventory")
+
+    def validated_summary(
+        group: Iterable[CompactCanaryDetail],
+    ) -> CompactGateResult:
+        iterator = iter(group)
+        first = next(iterator)
+        canonical = first.left_semantic_hash
+
+        def validated() -> Iterable[CompactCanaryDetail]:
+            for item in chain((first,), iterator):
+                if (
+                    item.kind == CanaryKind.FRONTIER_IDENTITY.value
+                    and item.residual
+                    != float(
+                        not (
+                            item.left_semantic_hash
+                            == item.right_semantic_hash
+                            == canonical
+                        )
+                    )
+                ):
+                    raise ValueError(
+                        "frontier detail residual contradicts semantic hashes"
+                    )
+                yield item
+
+        return _summarize_gate(validated())
+
+    summaries = tuple(
+        validated_summary(group)
+        for _, group in groupby(records(), key=lambda item: item.gate_name)
+    )
+    if summaries != report.results:
+        raise ValueError("gate summary does not match authenticated details")
 
 
 def _compact_detail(
@@ -625,46 +743,44 @@ def _aggregate_details(
     dataset: AnalysisDataset,
     spec: AggregateMetricCanary,
 ) -> Iterable[CompactCanaryDetail]:
-    histories_by_group: dict[
-        tuple[str, str, str, str],
-        dict[tuple[int, int], dict[int, CheckpointObservation]],
-    ] = {}
-    representatives: dict[
-        tuple[str, str, str, str],
-        CheckpointObservation,
-    ] = {}
-    for item in dataset.observations:
-        group_key = (
+    observations = dataset.observations
+    group_ranges: dict[tuple[str, str, str, str], tuple[int, int]] = {}
+    previous_key: tuple[str, str, str, str] | None = None
+    start = 0
+    for index, item in enumerate(observations):
+        key = (
             item.condition_hash,
             item.agent_hash,
             item.environment_kind,
             item.agent_kind,
         )
-        representatives.setdefault(group_key, item)
-        history = histories_by_group.setdefault(group_key, {}).setdefault(
-            item.pair_key,
-            {},
-        )
-        if item.round_index in history:
-            raise AnalysisError(
-                "aggregate group contains duplicate replica/checkpoint cells"
-            )
-        history[item.round_index] = item
+        if key != previous_key:
+            if previous_key is not None:
+                if previous_key in group_ranges:
+                    raise AnalysisError("aggregate dataset groups are noncontiguous")
+                group_ranges[previous_key] = (start, index)
+            previous_key = key
+            start = index
+    if previous_key is None:
+        raise AnalysisError("aggregate dataset is empty")
+    group_ranges[previous_key] = (start, len(observations))
 
     claimed_groups = []
     for selector in spec.selectors:
-        matched_groups = [
-            key for key, item in representatives.items() if selector.matches(item)
-        ]
-        if len(matched_groups) != 1:
+        group_key = (
+            selector.condition_hash,
+            selector.agent_hash,
+            selector.environment_kind,
+            selector.agent_kind,
+        )
+        if group_key not in group_ranges:
             raise AnalysisError(
                 f"aggregate selector {selector.label!r} must match exactly one group"
             )
-        group_key = matched_groups[0]
         if group_key in claimed_groups:
             raise AnalysisError("aggregate selectors overlap one registered group")
         claimed_groups.append(group_key)
-    if set(claimed_groups) != set(histories_by_group):
+    if set(claimed_groups) != set(group_ranges):
         raise AnalysisError(
             "aggregate selector inventory omits or adds registered dataset groups"
         )
@@ -673,14 +789,27 @@ def _aggregate_details(
         (
             (
                 scientific_hash(group_key, domain="compact-canary-group.v2"),
-                histories_by_group[group_key],
+                group_key,
             )
             for group_key in claimed_groups
         ),
         key=lambda item: item[0],
     )
     comparison = f"{spec.aggregate_metric}=mean({spec.source_metric}[1..checkpoint])"
-    for group_hash, histories in ordered_groups:
+    for group_hash, group_key in ordered_groups:
+        histories: dict[
+            tuple[int, int],
+            dict[int, CheckpointObservation],
+        ] = {}
+        first, last = group_ranges[group_key]
+        for index in range(first, last):
+            item = observations[index]
+            history = histories.setdefault(item.pair_key, {})
+            if item.round_index in history:
+                raise AnalysisError(
+                    "aggregate group contains duplicate replica/checkpoint cells"
+                )
+            history[item.round_index] = item
         algorithms: dict[int, set[int]] = {}
         for environment, algorithm in histories:
             algorithms.setdefault(environment, set()).add(algorithm)
@@ -778,22 +907,28 @@ def _summarize_gate(
     )
 
 
-def evaluate_compact_canaries(
+def _evaluate_compact_canary_report(
     dataset: AnalysisDataset,
     plan: CompactCanaryPlan,
-) -> CompactCanaryEvidence:
-    """Reuse v1 gate evaluators and compact their authenticated detail output."""
-
+    emit_chunk: Callable[[CompactCanaryDetailChunk], None],
+) -> CompactCanaryReport:
     if not isinstance(dataset, AnalysisDataset):
         raise TypeError("dataset must be an AnalysisDataset")
     if not isinstance(plan, CompactCanaryPlan):
         raise TypeError("plan must be a CompactCanaryPlan")
     if dataset.phase is not plan.phase:
         raise AnalysisError("compact canary plan and dataset phases differ")
+    validate_expected_group_inventory(dataset, plan.expected_groups)
     results = []
-    chunks = []
+    references = []
     buffer = []
     previous: tuple[object, ...] | None = None
+
+    def flush() -> None:
+        chunk = CompactCanaryDetailChunk(len(references), tuple(buffer))
+        emit_chunk(chunk)
+        references.append(chunk.reference)
+        buffer.clear()
 
     def emit(item: CompactCanaryDetail) -> None:
         nonlocal previous
@@ -802,8 +937,7 @@ def evaluate_compact_canaries(
         buffer.append(item)
         previous = item.sort_key
         if len(buffer) == COMPACT_CANARY_DETAIL_LIMIT:
-            chunks.append(CompactCanaryDetailChunk(len(chunks), tuple(buffer)))
-            buffer.clear()
+            flush()
 
     specs = sorted(
         (*plan.canaries, *plan.aggregate_canaries),
@@ -844,19 +978,95 @@ def evaluate_compact_canaries(
             raise AnalysisError("compact result differs from registered gate")
         results.append(result)
     if buffer:
-        chunks.append(CompactCanaryDetailChunk(len(chunks), tuple(buffer)))
-    detail_chunks = tuple(chunks)
-    references = tuple(item.reference for item in detail_chunks)
-    report = CompactCanaryReport(
+        flush()
+    reference_inventory = tuple(references)
+    return CompactCanaryReport(
         dataset.phase,
         dataset.scientific_hash,
         plan.scientific_hash,
         tuple(results),
         sum(item.record_count for item in results),
-        references,
-        detail_inventory_hash(references),
+        reference_inventory,
+        detail_inventory_hash(reference_inventory),
     )
-    return CompactCanaryEvidence(report, detail_chunks)
+
+
+def evaluate_compact_canaries(
+    dataset: AnalysisDataset,
+    plan: CompactCanaryPlan,
+) -> CompactCanaryEvidence:
+    """Evaluate compact canaries in memory for bounded datasets and unit tests."""
+
+    chunks = []
+    report = _evaluate_compact_canary_report(dataset, plan, chunks.append)
+    return CompactCanaryEvidence(report, tuple(chunks))
+
+
+def _detail_chunk_filename(index: int) -> str:
+    return f"canary-details-{index:06d}.json"
+
+
+def compact_canary_artifact_names(
+    evidence: CompactCanaryEvidence | SpooledCompactCanaryEvidence,
+) -> tuple[str, ...]:
+    if not isinstance(
+        evidence,
+        (CompactCanaryEvidence, SpooledCompactCanaryEvidence),
+    ):
+        raise TypeError("evidence must be compact canary evidence")
+    return (
+        "canaries.json",
+        *(
+            _detail_chunk_filename(reference.index)
+            for reference in evidence.report.detail_chunks
+        ),
+    )
+
+
+def _write_spooled_text(path: Path, content: str) -> None:
+    with path.open("x", encoding="utf-8") as stream:
+        stream.write(content)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def evaluate_compact_canaries_spooled(
+    dataset: AnalysisDataset,
+    plan: CompactCanaryPlan,
+    directory: Path,
+) -> SpooledCompactCanaryEvidence:
+    """Evaluate and write canonical detail chunks with bounded detail memory."""
+
+    if not isinstance(directory, Path):
+        raise TypeError("compact evidence directory must be a Path")
+    if directory.is_symlink():
+        raise ValueError("compact evidence directory must not be a symlink")
+    directory.mkdir(parents=True, exist_ok=True)
+    if not directory.is_dir():
+        raise ValueError("compact evidence directory must be a directory")
+    if (directory / "canaries.json").exists() or any(
+        directory.glob("canary-details-*.json")
+    ):
+        raise ValueError("compact evidence output already exists")
+    created: list[Path] = []
+
+    def write_chunk(chunk: CompactCanaryDetailChunk) -> None:
+        path = directory / _detail_chunk_filename(chunk.index)
+        created.append(path)
+        _write_spooled_text(path, chunk.to_json())
+
+    try:
+        report = _evaluate_compact_canary_report(dataset, plan, write_chunk)
+        report_path = directory / "canaries.json"
+        created.append(report_path)
+        _write_spooled_text(report_path, report.to_json())
+        evidence = SpooledCompactCanaryEvidence(report)
+        verify_compact_canary_artifact_directory(directory, evidence)
+        return evidence
+    except BaseException:
+        for path in created:
+            path.unlink(missing_ok=True)
+        raise
 
 
 def compact_canary_artifacts(
@@ -870,12 +1080,50 @@ def compact_canary_artifacts(
         ("canaries.json", evidence.report.to_json()),
         *(
             (
-                f"canary-details-{chunk.index:06d}.json",
+                _detail_chunk_filename(chunk.index),
                 chunk.to_json(),
             )
             for chunk in evidence.detail_chunks
         ),
     )
+
+
+def verify_compact_canary_artifact_directory(
+    directory: Path,
+    evidence: CompactCanaryEvidence | SpooledCompactCanaryEvidence,
+) -> None:
+    """Stream-verify one canonical compact evidence bundle against a report."""
+
+    if not isinstance(directory, Path):
+        raise TypeError("compact evidence directory must be a Path")
+    expected_names = compact_canary_artifact_names(evidence)
+    expected_details = set(expected_names[1:])
+    observed_details = {path.name for path in directory.glob("canary-details-*.json")}
+    if observed_details != expected_details:
+        raise ValueError("compact detail files differ from the report inventory")
+    paths = tuple(directory / name for name in expected_names)
+    if any(path.is_symlink() or not path.is_file() for path in paths):
+        raise ValueError("compact evidence artifacts must be regular files")
+    report_content = paths[0].read_text(encoding="utf-8")
+    report = parse_compact_canary_report_json(report_content)
+    if report != evidence.report or report_content != report.to_json():
+        raise ValueError("compact canary report differs from raw evidence")
+
+    def chunks() -> Iterable[CompactCanaryDetailChunk]:
+        for path, reference in zip(
+            paths[1:],
+            report.detail_chunks,
+            strict=True,
+        ):
+            content = path.read_text(encoding="utf-8")
+            chunk = parse_compact_canary_detail_chunk_json(content)
+            if chunk.reference != reference or content != chunk.to_json():
+                raise ValueError(
+                    "compact detail chunk differs from the report inventory"
+                )
+            yield chunk
+
+    _validate_detail_chunks(report, chunks())
 
 
 def compact_canary_results_csv(report: CompactCanaryReport) -> str:
@@ -943,6 +1191,7 @@ _COMPACT_RECORD_TYPES = (
     MetricTrajectoryIdentityCanary,
     ConstantAdditiveMetricCanary,
     ExactZeroMetricCanary,
+    ExpectedGroup,
     GroupSelector,
     CompactCanaryDetail,
     CompactCanaryDetailChunk,
@@ -1011,11 +1260,15 @@ __all__ = [
     "CompactCanaryReport",
     "CompactGateResult",
     "DetailChunkReference",
+    "SpooledCompactCanaryEvidence",
+    "compact_canary_artifact_names",
     "compact_canary_artifacts",
     "compact_canary_results_csv",
     "detail_inventory_hash",
     "evaluate_compact_canaries",
+    "evaluate_compact_canaries_spooled",
     "parse_compact_canary_detail_chunk_json",
     "parse_compact_canary_plan_json",
     "parse_compact_canary_report_json",
+    "verify_compact_canary_artifact_directory",
 ]

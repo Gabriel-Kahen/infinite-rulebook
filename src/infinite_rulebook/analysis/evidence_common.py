@@ -9,7 +9,12 @@ import types
 from enum import Enum
 from typing import Any, TypeVar, get_args, get_origin, get_type_hints
 
-from infinite_rulebook.analysis.models import AnalysisError, GroupSelector
+from infinite_rulebook.analysis.models import (
+    AnalysisDataset,
+    AnalysisError,
+    ExpectedGroup,
+    GroupSelector,
+)
 from infinite_rulebook.orchestration.hashing import is_sha256
 from infinite_rulebook.orchestration.jsonio import parse_json_strict
 
@@ -79,6 +84,103 @@ def exact_selector(name: str, value: GroupSelector) -> None:
         raise TypeError(f"{name} must be a GroupSelector")
     if value.condition_hash is None or value.agent_hash is None:
         raise ValueError(f"{name} must bind exact condition_hash and agent_hash values")
+
+
+def expected_group_map(
+    value: tuple[ExpectedGroup, ...],
+) -> dict[GroupSelector, ExpectedGroup]:
+    if (
+        not isinstance(value, tuple)
+        or not value
+        or any(not isinstance(item, ExpectedGroup) for item in value)
+    ):
+        raise TypeError("expected_groups must be a nonempty tuple of ExpectedGroup")
+    result = {
+        GroupSelector(
+            environment_kind=item.environment_kind,
+            agent_kind=item.agent_kind,
+            condition_hash=item.condition_hash,
+            agent_hash=item.agent_hash,
+        ): item
+        for item in value
+    }
+    if len(result) != len(value):
+        raise ValueError("expected_groups contains duplicate group identities")
+    return result
+
+
+def validate_expected_group_inventory(
+    dataset: AnalysisDataset,
+    expected_groups: tuple[ExpectedGroup, ...],
+) -> None:
+    """Require the exact registered group/replica/checkpoint Cartesian product."""
+
+    if not isinstance(dataset, AnalysisDataset):
+        raise TypeError("dataset must be an AnalysisDataset")
+    expected = {
+        (
+            selector.environment_kind,
+            selector.agent_kind,
+            selector.condition_hash,
+            selector.agent_hash,
+        ): group
+        for selector, group in expected_group_map(expected_groups).items()
+    }
+    checkpoint_positions = {
+        identity: {
+            checkpoint: index for index, checkpoint in enumerate(group.checkpoints)
+        }
+        for identity, group in expected.items()
+    }
+    observed = {
+        identity: bytearray(
+            group.environment_replicas
+            * group.algorithm_replicas
+            * len(group.checkpoints)
+        )
+        for identity, group in expected.items()
+    }
+    counts = dict.fromkeys(expected, 0)
+    for item in dataset.observations:
+        identity = (
+            item.environment_kind,
+            item.agent_kind,
+            item.condition_hash,
+            item.agent_hash,
+        )
+        group = expected.get(identity)
+        if group is None:
+            raise AnalysisError(
+                "evidence dataset groups differ from the registered inventory"
+            )
+        checkpoint = checkpoint_positions[identity].get(item.round_index)
+        if (
+            checkpoint is None
+            or item.environment_replica >= group.environment_replicas
+            or item.algorithm_replica >= group.algorithm_replicas
+        ):
+            raise AnalysisError(
+                "evidence dataset does not match the registered replica/checkpoint grid"
+            )
+        index = (
+            item.environment_replica * group.algorithm_replicas + item.algorithm_replica
+        ) * len(group.checkpoints) + checkpoint
+        if observed[identity][index]:
+            raise AnalysisError(
+                "evidence dataset does not match the registered replica/checkpoint grid"
+            )
+        observed[identity][index] = 1
+        counts[identity] += 1
+    for identity, group in expected.items():
+        required_count = (
+            group.environment_replicas
+            * group.algorithm_replicas
+            * len(group.checkpoints)
+        )
+        if counts[identity] != required_count:
+            raise AnalysisError(
+                "evidence dataset does not match the registered replica/checkpoint grid"
+            )
 
 
 def payload(value: Any) -> Any:
@@ -282,6 +384,7 @@ __all__ = [
     "count",
     "decode_record",
     "exact_selector",
+    "expected_group_map",
     "finite",
     "identifier",
     "keys",
@@ -291,4 +394,5 @@ __all__ = [
     "record_payload",
     "sha256",
     "strict_json",
+    "validate_expected_group_inventory",
 ]
