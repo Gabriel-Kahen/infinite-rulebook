@@ -69,6 +69,9 @@ uv run infinite-rulebook plan \
 
 The symbolic control API and its exact identities are documented in
 [docs/symbolic-controls.md](docs/symbolic-controls.md).
+The non-registered deterministic curriculum API and its current limitations
+are documented in
+[docs/adaptive-curriculum.md](docs/adaptive-curriculum.md).
 See [docs/experiments.md](docs/experiments.md) for artifact, restart, semantic
 hash, validation, and execution contracts. The bounded symbolic
 construct-validation protocol is
