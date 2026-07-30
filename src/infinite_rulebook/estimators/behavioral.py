@@ -309,22 +309,47 @@ class BehavioralFit:
         }
         objective_lower = _finite("objective_lower_bound", self.objective_lower_bound)
         objective_upper = _finite("objective_upper_bound", self.objective_upper_bound)
+        expected_objective_upper = (
+            witness.mutual_information - beta * witness.expected_reward
+        )
+        if objective_upper != expected_objective_upper:
+            raise ValueError(
+                "objective_upper_bound does not match the retained witness"
+            )
         roundoff = 64.0 * math.ulp(max(1.0, abs(objective_lower), abs(objective_upper)))
         if objective_lower > objective_upper + roundoff:
             raise ValueError("objective bounds are inconsistent")
         expected_gap = max(0.0, objective_upper - objective_lower)
-        if not math.isclose(
-            nonnegative["certified_objective_gap"],
-            expected_gap,
-            rel_tol=1e-12,
-            abs_tol=roundoff,
-        ):
+        if nonnegative["certified_objective_gap"] != expected_gap:
             raise ValueError("certified_objective_gap does not match objective bounds")
         if (
             nonnegative["reference_kl_upper_bound"]
             != witness.mutual_information + nonnegative["reference_compression_gap"]
         ):
             raise ValueError("reference KL upper bound is inconsistent")
+        if nonnegative["reference_identity_residual"] != abs(
+            direct_reference_kl - nonnegative["reference_kl_upper_bound"]
+        ):
+            raise ValueError("direct reference KL is inconsistent with its identity")
+        identity_roundoff = 128.0 * math.ulp(
+            max(
+                1.0,
+                direct_reference_kl,
+                nonnegative["reference_kl_upper_bound"],
+            )
+        )
+        if nonnegative["reference_identity_residual"] > identity_roundoff:
+            raise ValueError("direct reference KL identity exceeds roundoff")
+        expected_residual = max(
+            abs(left - right)
+            for left, right in zip(
+                reference,
+                witness.action_marginal,
+                strict=True,
+            )
+        )
+        if nonnegative["fixed_point_residual"] != expected_residual:
+            raise ValueError("fixed_point_residual does not match retained marginals")
         if not isinstance(self.converged, bool):
             raise TypeError("converged must be a bool")
         if not isinstance(self.diagnostics, ValidationReport):
@@ -460,6 +485,7 @@ class BehavioralFrontierPoint:
                     for diagnostic in self.diagnostics.diagnostics
                 )
                 or len(self.diagnostics.diagnostics) > 1
+                or (bool(self.diagnostics.diagnostics) and lower != upper)
             ):
                 raise ValueError("partial-identification diagnostics are inconsistent")
 
@@ -511,6 +537,16 @@ class BehavioralFrontierEstimate:
             raise ValueError("points must have unique increasing targets")
         if fits and tuple(fit.beta for fit in fits) != self.config.betas:
             raise ValueError("fits must cover the configured beta grid in order")
+        for fit in fits:
+            expected_convergence = (
+                fit.certified_objective_gap <= self.config.diagnostic_tolerance
+                and fit.fixed_point_residual
+                <= math.sqrt(self.config.diagnostic_tolerance)
+            )
+            if fit.converged != expected_convergence:
+                raise ValueError(
+                    "fit convergence is inconsistent with config tolerance"
+                )
         has_partial = any(
             point.identification is IdentificationStatus.CERTIFIED_PARTIAL
             for point in points
@@ -525,6 +561,45 @@ class BehavioralFrontierEstimate:
             for point in points
         ):
             raise ValueError("point lower betas must belong to the configured grid")
+        for point in points:
+            if point.identification is not IdentificationStatus.CERTIFIED_PARTIAL:
+                continue
+            expected_lower, expected_beta = max(
+                (
+                    max(
+                        0.0,
+                        fit.beta * point.target_reward + fit.objective_lower_bound,
+                    ),
+                    fit.beta,
+                )
+                for fit in fits
+            )
+            roundoff = 64.0 * math.ulp(
+                max(1.0, abs(expected_lower), abs(point.upper_bound))
+            )
+            if expected_lower > point.upper_bound + roundoff:
+                raise ValueError("point lower certificate exceeds its upper witness")
+            expected_diagnostics = ValidationReport()
+            if expected_lower > point.upper_bound:
+                expected_lower = point.upper_bound
+                expected_diagnostics = ValidationReport(
+                    (
+                        ValidationDiagnostic(
+                            DiagnosticSeverity.INFO,
+                            "bound-roundoff-reconciled",
+                            f"target[{point.target_reward.hex()}]",
+                            "bounds crossed only within floating-point roundoff",
+                        ),
+                    )
+                )
+            if (
+                point.lower_bound,
+                point.lower_bound_beta,
+                point.diagnostics,
+            ) != (expected_lower, expected_beta, expected_diagnostics):
+                raise ValueError(
+                    "point lower certificate is inconsistent with retained fits"
+                )
         shapes = {
             (len(witness.channel), len(witness.channel[0]))
             for witness in (
@@ -697,9 +772,10 @@ def fit_behavioral_channel(
     direct_reference_kl = max(0.0, raw_direct_reference_kl)
     compression_gap = max(0.0, raw_compression_gap)
     reference_kl = witness.mutual_information + compression_gap
-    identity_residual = abs(
+    raw_identity_residual = abs(
         raw_direct_reference_kl - witness.mutual_information - raw_compression_gap
     )
+    identity_residual = abs(direct_reference_kl - reference_kl)
     objective_lower = lagrangian_certificate_lower_bound(
         problem,
         multiplier,
@@ -709,7 +785,7 @@ def fit_behavioral_channel(
     gap = objective_upper - objective_lower
     roundoff = 64.0 * math.ulp(max(1.0, abs(objective_lower), abs(objective_upper)))
     diagnostics = []
-    if identity_residual > settings.diagnostic_tolerance:
+    if raw_identity_residual > settings.diagnostic_tolerance:
         diagnostics.append(
             ValidationDiagnostic(
                 DiagnosticSeverity.ERROR,

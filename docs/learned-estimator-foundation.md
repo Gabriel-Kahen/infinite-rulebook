@@ -34,8 +34,10 @@ arithmetic; no sampled confidence statement is needed or implied. KL ratios
 use the ordinary direct path when representable and a log-difference path when
 division underflows or overflows; weighted subnormal terms are recovered in
 log space when their direct product rounds to zero. A roundoff-scale negative
-raw KL is retained for the identity check and reconciled to zero before it
-becomes a public field; a materially negative value fails closed.
+raw KL is used for the identity check and reconciled to zero before it becomes
+a public field; a materially negative value fails closed. The public identity
+residual is the exact absolute difference between the two reconciled public KL
+fields and may not exceed the declared reconciliation-roundoff allowance.
 
 For a requested reward \(\rho\):
 

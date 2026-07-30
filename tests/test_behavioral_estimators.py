@@ -27,6 +27,11 @@ from infinite_rulebook.frontier import (
     one_coordinate_problem,
     solve_frontier,
 )
+from infinite_rulebook.validation import (
+    DiagnosticSeverity,
+    ValidationDiagnostic,
+    ValidationReport,
+)
 
 FAST_CONFIG = BehavioralEstimatorConfig(optimizer_steps=64)
 
@@ -186,8 +191,25 @@ def test_estimator_evidence_breaks_aliases_and_rejects_forged_state() -> None:
             fit,
             certified_objective_gap=fit.certified_objective_gap + 1.0,
         )
+    with pytest.raises(ValueError, match="certified_objective_gap"):
+        replace(fit, certified_objective_gap=1e-14)
+    with pytest.raises(ValueError, match="direct reference KL"):
+        replace(fit, direct_reference_kl=99.0)
+    with pytest.raises(ValueError, match="direct reference KL"):
+        replace(fit, reference_identity_residual=1e-12)
+    with pytest.raises(ValueError, match="objective_upper_bound"):
+        replace(source.fits[1], objective_upper_bound=0.0)
+    with pytest.raises(ValueError, match="fixed_point_residual"):
+        replace(fit, fixed_point_residual=0.0)
     with pytest.raises(ValueError, match="diagnostics"):
         replace(source.fits[1], converged=True)
+    forged_fit = replace(
+        source.fits[1],
+        converged=True,
+        diagnostics=ValidationReport(),
+    )
+    with pytest.raises(ValueError, match="convergence"):
+        replace(source, fits=(source.fits[0], forged_fit))
     with pytest.raises(ValueError, match="bound methods"):
         replace(source.points[0], upper_bound_method="claimed-witness")
     with pytest.raises(ValueError, match="lower_bound"):
@@ -195,6 +217,25 @@ def test_estimator_evidence_breaks_aliases_and_rejects_forged_state() -> None:
             source.points[0],
             lower_bound=source.points[0].upper_bound + 1.0,
         )
+    forged_point = replace(
+        source.points[0],
+        lower_bound=0.0,
+        lower_bound_beta=0.0,
+    )
+    with pytest.raises(ValueError, match="lower certificate"):
+        replace(source, points=(forged_point,))
+    forged_diagnostics = ValidationReport(
+        (
+            ValidationDiagnostic(
+                DiagnosticSeverity.INFO,
+                "bound-roundoff-reconciled",
+                f"target[{source.points[0].target_reward.hex()}]",
+                "bounds crossed only within floating-point roundoff",
+            ),
+        )
+    )
+    with pytest.raises(ValueError, match="diagnostics"):
+        replace(source.points[0], diagnostics=forged_diagnostics)
 
 
 @pytest.mark.parametrize(
