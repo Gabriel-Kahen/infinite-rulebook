@@ -22,6 +22,22 @@ def _finite_real(name: str, value: Real) -> float:
     return result
 
 
+def _log_action_marginal(
+    prior: tuple[float, ...],
+    channel: Channel,
+    action: int,
+) -> float:
+    terms = tuple(
+        math.log(state_probability) + math.log(channel[state][action])
+        for state, state_probability in enumerate(prior)
+        if state_probability > 0.0 and channel[state][action] > 0.0
+    )
+    if not terms:
+        return -math.inf
+    maximum = max(terms)
+    return maximum + math.log(math.fsum(math.exp(value - maximum) for value in terms))
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelWitness:
     """A feasible behavioral channel and its exact derived quantities."""
@@ -194,16 +210,56 @@ class FiniteDecisionProblem:
             for action in range(self.action_count)
         )
         information_terms = []
+        underflow_log_marginals = {
+            action: _log_action_marginal(self.prior, canonical, action)
+            for action in range(self.action_count)
+            if any(
+                state_probability > 0.0
+                and canonical[state][action] > 0.0
+                and state_probability * canonical[state][action] == 0.0
+                for state, state_probability in enumerate(self.prior)
+            )
+        }
         for state, state_probability in enumerate(self.prior):
             if state_probability == 0.0:
                 continue
             for action, conditional in enumerate(canonical[state]):
-                if conditional > 0.0:
-                    information_terms.append(
-                        state_probability
-                        * conditional
-                        * math.log(conditional / marginal[action])
+                if conditional == 0.0:
+                    continue
+                joint_probability = state_probability * conditional
+                action_probability = marginal[action]
+                if joint_probability > 0.0 and action_probability > 0.0:
+                    ratio = conditional / action_probability
+                    if math.isfinite(ratio) and ratio > 0.0:
+                        information_terms.append(joint_probability * math.log(ratio))
+                        continue
+                if action in underflow_log_marginals:
+                    log_action_probability = underflow_log_marginals[action]
+                else:
+                    if action_probability <= 0.0:
+                        raise ArithmeticError(
+                            "positive conditional has zero action marginal"
+                        )
+                    log_action_probability = math.log(action_probability)
+                if not math.isfinite(log_action_probability):
+                    raise ArithmeticError(
+                        "positive conditional has zero action marginal"
                     )
+                log_ratio = math.log(conditional) - log_action_probability
+                if log_ratio == 0.0:
+                    continue
+                if joint_probability > 0.0:
+                    information_terms.append(joint_probability * log_ratio)
+                    continue
+                # Recover a representable MI term even when p(theta)q(a|theta)
+                # itself falls below the float range.
+                log_joint = math.log(state_probability) + math.log(conditional)
+                information_terms.append(
+                    math.copysign(
+                        math.exp(log_joint + math.log(abs(log_ratio))),
+                        log_ratio,
+                    )
+                )
         information = max(0.0, math.fsum(information_terms))
         return ChannelWitness(canonical, marginal, reward, information)
 
