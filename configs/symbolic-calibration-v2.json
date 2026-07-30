@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "name": "symbolic-construct-calibration-v2",
+  "phase": "calibration",
+  "master_seed": "irb-symbolic-calibration-v2",
+  "algorithm_master_seed": "irb-symbolic-fixed-algorithm-bank-v2",
+  "horizon": 12,
+  "checkpoints": {
+    "rounds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  },
+  "feedback": {
+    "protocol": "P1",
+    "epsilon": 0.1,
+    "query_budget": 1
+  },
+  "reward": {
+    "q": 4,
+    "u": 1.0,
+    "c": 1.0,
+    "units": "nats"
+  },
+  "solver": {
+    "tolerance": 1e-9,
+    "bound_tolerance": 1e-7,
+    "lagrangian_tolerance": 1e-12,
+    "max_iterations": 96,
+    "lagrangian_max_iterations": 100000,
+    "reward_grid_points": 13,
+    "contract_version": "certified-finite-frontier.v1"
+  },
+  "environments": [
+    {
+      "kind": "IND",
+      "projection_size": 3
+    },
+    {
+      "kind": "RED-C",
+      "projection_size": 3,
+      "core_dimensions": 1,
+      "max_redundant_support": 3
+    },
+    {
+      "kind": "MIX",
+      "projection_size": 3,
+      "core_dimensions": 1,
+      "max_redundant_support": 1
+    },
+    {
+      "kind": "ALEA",
+      "projection_size": 3,
+      "distractor_dimensions": 32
+    },
+    {
+      "kind": "TRIVIA",
+      "projection_size": 3,
+      "distractor_dimensions": 6
+    },
+    {
+      "kind": "TRIVIA",
+      "projection_size": 3,
+      "distractor_dimensions": 12
+    },
+    {
+      "kind": "TRIVIA",
+      "projection_size": 3,
+      "distractor_dimensions": 24
+    },
+    {
+      "kind": "PUBLIC-C",
+      "projection_size": 3,
+      "public_reward_cap": 0.5
+    }
+  ],
+  "agents": [
+    {
+      "kind": "fixed",
+      "target_size": 1
+    },
+    {
+      "kind": "scheduled",
+      "target_size": 1,
+      "growth_step": 1,
+      "growth_interval": 4,
+      "maximum_size": 3
+    },
+    {
+      "kind": "reward",
+      "target_size": 3
+    },
+    {
+      "kind": "relevant-information",
+      "target_size": 3
+    },
+    {
+      "kind": "total-information",
+      "target_size": 3
+    },
+    {
+      "kind": "novelty",
+      "target_size": 3
+    }
+  ],
+  "environment_replicas": 192,
+  "algorithm_replicas": 8
+}
