@@ -1386,26 +1386,35 @@ def _validate_completed_run_payload(
         result = payload.get("result")
         if not isinstance(result, dict):
             raise ScientificArtifactError("completed run checkpoint result is invalid")
+        post_query_source_name = "post_query_hidden_expected_reward"
         post_query_mean_name = "post_query_mean_hidden_expected_reward"
         if adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V2:
             if round_index == 0:
-                valid_post_query_mean = post_query_mean_name not in result
+                valid_post_query_metrics = (
+                    post_query_source_name not in result
+                    and post_query_mean_name not in result
+                )
             else:
+                post_query_source = result.get(post_query_source_name)
                 post_query_mean = result.get(post_query_mean_name)
-                valid_post_query_mean = (
-                    not isinstance(post_query_mean, bool)
+                valid_post_query_metrics = (
+                    not isinstance(post_query_source, bool)
+                    and isinstance(post_query_source, (int, float))
+                    and math.isfinite(post_query_source)
+                    and post_query_source == post_query_hidden_rewards[round_index - 1]
+                    and not isinstance(post_query_mean, bool)
                     and isinstance(post_query_mean, (int, float))
                     and math.isfinite(post_query_mean)
                     and post_query_mean
                     == math.fsum(post_query_hidden_rewards[:round_index]) / round_index
                 )
-            if not valid_post_query_mean:
+            if not valid_post_query_metrics:
                 raise ScientificArtifactError(
-                    "v2 checkpoint post-query hidden-reward mean is invalid"
+                    "v2 checkpoint post-query hidden-reward metrics are invalid"
                 )
-        elif post_query_mean_name in result:
+        elif post_query_source_name in result or post_query_mean_name in result:
             raise ScientificArtifactError(
-                "legacy checkpoint contains a v2 post-query hidden-reward mean"
+                "legacy checkpoint contains a v2 post-query hidden-reward metric"
             )
         try:
             typed = validate_checkpoint_record(result["scientific_records"])

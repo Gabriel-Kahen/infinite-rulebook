@@ -168,6 +168,7 @@ def test_v2_event_reward_timing_and_checkpoint_mean() -> None:
     state = adapter.initial_state(cell, seeds)
 
     checkpoint = adapter.checkpoint(state, 0, cell, seeds, hashes)
+    assert "post_query_hidden_expected_reward" not in checkpoint
     assert "post_query_mean_hidden_expected_reward" not in checkpoint
     rewards = []
     for round_index in range(config.horizon):
@@ -185,6 +186,7 @@ def test_v2_event_reward_timing_and_checkpoint_mean() -> None:
         )
         assert (
             event["post_query_hidden_expected_reward"]
+            == checkpoint["post_query_hidden_expected_reward"]
             == checkpoint["hidden_expected_reward"]
         )
         assert checkpoint["post_query_mean_hidden_expected_reward"] == (
@@ -228,8 +230,13 @@ def test_v2_run_resumes_replays_and_loads_authenticated_metric(
     events = EventJournal(store, hashes).events()
     rewards = [event.payload["post_query_hidden_expected_reward"] for event in events]
     observations = load_run_tree(resumed.path)
+    assert "post_query_hidden_expected_reward" not in dict(observations[0].metrics)
     assert "post_query_mean_hidden_expected_reward" not in dict(observations[0].metrics)
     for observation in observations[1:]:
+        assert (
+            dict(observation.metrics)["post_query_hidden_expected_reward"]
+            == rewards[observation.round_index - 1]
+        )
         assert (
             dict(observation.metrics)["post_query_mean_hidden_expected_reward"]
             == math.fsum(rewards[: observation.round_index]) / observation.round_index
@@ -248,6 +255,23 @@ def test_v2_artifacts_reject_rehashed_metric_and_replay_tampering(
     checkpoint = read_artifact(checkpoint_path)
     changed_result = dict(checkpoint.payload["result"])
     changed_result["post_query_mean_hidden_expected_reward"] += 0.25
+    changed = ArtifactEnvelope.create(
+        checkpoint.artifact_type,
+        checkpoint.semantic_hashes,
+        {**checkpoint.payload, "result": changed_result},
+    )
+    _replace_member_and_manifest(result.path, checkpoint_path, changed)
+    with pytest.raises(ScientificArtifactError, match="post-query"):
+        validate_artifact_tree(result.path)
+
+    result = RunExecutor(tmp_path / "source", ExactSymbolicAdapterV2).execute(
+        config,
+        config.cells()[0],
+    )
+    checkpoint_path = result.path / "checkpoints/00000002.json"
+    checkpoint = read_artifact(checkpoint_path)
+    changed_result = dict(checkpoint.payload["result"])
+    changed_result["post_query_hidden_expected_reward"] += 0.25
     changed = ArtifactEnvelope.create(
         checkpoint.artifact_type,
         checkpoint.semantic_hashes,

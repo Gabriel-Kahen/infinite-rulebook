@@ -676,6 +676,9 @@ class ExactSymbolicAdapterV2(ExactSymbolicAdapter):
             semantic_hashes,
         )
         if round_index > 0:
+            result["post_query_hidden_expected_reward"] = (
+                state.post_query_hidden_expected_rewards[-1]
+            )
             result["post_query_mean_hidden_expected_reward"] = (
                 math.fsum(state.post_query_hidden_expected_rewards) / round_index
             )

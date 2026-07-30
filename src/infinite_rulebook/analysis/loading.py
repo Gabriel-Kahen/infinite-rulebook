@@ -171,6 +171,7 @@ def _numeric_metrics(result: dict[str, Any]) -> tuple[tuple[str, float], ...]:
     for name in (
         "expected_reward",
         "hidden_expected_reward",
+        "post_query_hidden_expected_reward",
         "post_query_mean_hidden_expected_reward",
         "public_reward",
     ):
