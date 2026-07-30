@@ -478,6 +478,19 @@ projection plus interruption-recovery margin. If that budget is unavailable,
 move the unchanged workflow to faster or longer-lived infrastructure; do not
 reduce replicas, checkpoints, metrics, raw verification, or scientific scope.
 
+The first post-registration v2 operational preflight is recorded in
+[`symbolic-v2-operational-preflight.md`](symbolic-v2-operational-preflight.md).
+The exact 48-run ingestion contract passed, projecting 46.314 hours at the
+294,912-run maximum and 92.628 hours with the required two-times factor. The
+local 32-GiB-class workstation failed the E768 equal-reserve and no-swap gates,
+so it is not an approved v2 reporting host. The 92.628-hour value is a
+host-specific reference, not a portable budget: the intended host must reserve
+its own newly measured two-times projection plus recovery margin and have local
+storage for both complete raw roots plus reports. These measurements do not
+authorize a registered run. Both capacity benchmarks and the probe must be
+repeated there before calibration, and both capacity benchmarks must be
+repeated again before the selected confirmation, without reducing scope.
+
 The exact bounded protocols, estimands, margins, power grids, hard gates, and
 scope exclusions are registered in
 [symbolic-confirmatory-v1.md](symbolic-confirmatory-v1.md) and
