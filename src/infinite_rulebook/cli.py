@@ -53,42 +53,35 @@ from infinite_rulebook.orchestration.reproducibility import (
 )
 from infinite_rulebook.orchestration.run import RunExecutor
 from infinite_rulebook.orchestration.sweep import SweepRunner
-from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
 from infinite_rulebook.studies.smoke_prerequisite import (
     SmokePrerequisiteEvidence,
 )
 from infinite_rulebook.studies.symbolic_construct import (
-    MAXIMUM_GLOBAL_NULL_FWER,
-    MINIMUM_EQUIVALENCE_POWER,
-    MINIMUM_INDIVIDUAL_POWER,
-    MINIMUM_JOINT_POWER,
-    POWER_ALPHA,
-    POWER_CANDIDATE_ENVIRONMENTS,
-    POWER_CENTER_ENVIRONMENTS,
-    POWER_DESIGN_CONFIDENCE_ALPHA,
-    POWER_PROBABILITY_ENVIRONMENTS,
-    POWER_SEED,
-    POWER_SIMULATION_ERROR_ALPHA,
-    POWER_SIMULATIONS,
-    PRIMARY_MINIMUM_EFFECTS,
-    S5_BOOTSTRAP_DIAGNOSTIC_LOCATION,
-    S5_REWARD_EQUIVALENCE_MARGIN,
     STUDY_CONTRACT,
-    SYMBOLIC_V1_CONFIRMATORY_MASTER_SEED,
-    SYMBOLIC_V1_CONFIRMATORY_NAME,
     build_symbolic_analysis_plan,
     build_symbolic_canary_plan,
-    calibration_evidence_hash,
-    calibration_evidence_hash_from_hashes,
-    expected_analysis_groups,
-    expected_confirmatory_margins,
-    expected_confirmatory_registration,
-    expected_confirmatory_tolerances,
-    power_equivalence_hypotheses,
-    power_hypotheses,
-    verify_symbolic_calibration_design,
-    verify_symbolic_confirmatory_contract,
 )
+from infinite_rulebook.studies.symbolic_registry import (
+    SYMBOLIC_STUDY_V1,
+    SymbolicStudySpec,
+    execution_adapter_factory,
+    registered_symbolic_study,
+)
+
+# Backward-compatible module constants for callers that inspected the v1 CLI.
+POWER_SIMULATIONS = SYMBOLIC_STUDY_V1.power.simulations
+POWER_CANDIDATE_ENVIRONMENTS = (
+    SYMBOLIC_STUDY_V1.power.candidate_environment_counts
+)
+POWER_SEED = SYMBOLIC_STUDY_V1.power.seed
+POWER_ALPHA = SYMBOLIC_STUDY_V1.power.alpha
+POWER_SIMULATION_ERROR_ALPHA = SYMBOLIC_STUDY_V1.power.simulation_error_alpha
+MINIMUM_INDIVIDUAL_POWER = SYMBOLIC_STUDY_V1.power.minimum_individual_power
+MINIMUM_EQUIVALENCE_POWER = SYMBOLIC_STUDY_V1.power.minimum_equivalence_power
+MINIMUM_JOINT_POWER = SYMBOLIC_STUDY_V1.power.minimum_joint_power
+MAXIMUM_GLOBAL_NULL_FWER = SYMBOLIC_STUDY_V1.power.maximum_global_null_fwer
+PRIMARY_MINIMUM_EFFECTS = SYMBOLIC_STUDY_V1.power.minimum_effects
+S5_REWARD_EQUIVALENCE_MARGIN = SYMBOLIC_STUDY_V1.power.equivalence_margin
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -341,6 +334,8 @@ def _load_registered_canary_plan(path: Path, expected: object) -> None:
 def _deviation_log(
     experiment: ExperimentConfig,
     deviations: Sequence[str],
+    *,
+    study_contract: str = STUDY_CONTRACT,
 ) -> dict[str, object]:
     if any(
         not isinstance(item, str) or not item or item != item.strip()
@@ -353,7 +348,7 @@ def _deviation_log(
     payload: dict[str, object] = {
         "artifact_type": "symbolic-study-deviation-log",
         "schema_version": 1,
-        "study_contract": STUDY_CONTRACT,
+        "study_contract": study_contract,
         "phase": experiment.phase,
         "config_hash": experiment.config_hash,
         "deviations": list(entries),
@@ -640,16 +635,47 @@ def _verify_report_json_outputs(
 def _smoke_prerequisite_for_execution(
     experiment: ExperimentConfig,
     path: Path | None,
+    *,
+    study: SymbolicStudySpec | None = None,
 ) -> SmokePrerequisiteEvidence | None:
     if experiment.phase == "calibration":
         if path is None:
             raise ValueError(
                 "registered calibration execution requires Stage-0 smoke evidence"
             )
-        return _load_smoke_prerequisite(path)
+        selected = study or registered_symbolic_study(experiment.name)
+        evidence = _load_smoke_prerequisite(path)
+        if selected.smoke_prerequisite_hash is not None and (
+            evidence.config.config_hash != selected.smoke_config_hash
+            or evidence.scientific_hash != selected.smoke_prerequisite_hash
+        ):
+            raise ValueError(
+                f"symbolic v{selected.version} calibration requires its exact "
+                "registered Stage-0 evidence"
+            )
+        return evidence
     if path is not None:
         raise ValueError("smoke evidence is accepted only for calibration execution")
     return None
+
+
+def _verify_registered_execution(
+    experiment: ExperimentConfig,
+) -> SymbolicStudySpec | None:
+    if experiment.phase not in {"calibration", "confirmatory"}:
+        return None
+    study = registered_symbolic_study(experiment.name)
+    if experiment.phase == "calibration":
+        study.verify_calibration(experiment)
+    else:
+        current = collect_provenance()
+        study.verify_confirmatory(
+            experiment,
+            analysis_code_hash=current.analysis_code_hash,
+            dependency_lock_hash=current.dependency_lock_hash,
+            environment_digest=current.environment_digest,
+        )
+    return study
 
 
 def _validate_inventory_receipts(
@@ -700,6 +726,8 @@ def _reconstruct_registered_power(
     analysis: dict[str, object],
     calibration_environment_count: int,
     algorithm_replicas: int,
+    *,
+    study: SymbolicStudySpec = SYMBOLIC_STUDY_V1,
 ) -> tuple[
     tuple[PowerHypothesis, ...],
     tuple[EquivalencePowerHypothesis, ...],
@@ -707,8 +735,9 @@ def _reconstruct_registered_power(
     """Rebuild frozen power inputs from the authenticated analysis artifact."""
 
     raw_contrasts = analysis.get("contrasts")
+    minimum_effects = study.power.minimum_effects
     if not isinstance(raw_contrasts, list) or len(raw_contrasts) != len(
-        PRIMARY_MINIMUM_EFFECTS
+        minimum_effects
     ):
         raise ValueError("calibration analysis primary contrasts are invalid")
     by_name = {
@@ -716,10 +745,10 @@ def _reconstruct_registered_power(
         for item in raw_contrasts
         if isinstance(item, dict) and isinstance(item.get("name"), str)
     }
-    if set(by_name) != set(PRIMARY_MINIMUM_EFFECTS):
+    if set(by_name) != set(minimum_effects):
         raise ValueError("calibration analysis changed the registered primary family")
     directional = []
-    for name in sorted(PRIMARY_MINIMUM_EFFECTS):
+    for name in sorted(minimum_effects):
         item = by_name[name]
         differences = item.get("differences")
         if (
@@ -736,7 +765,7 @@ def _reconstruct_registered_power(
             PowerHypothesis.from_cluster_differences(
                 name,
                 tuple(differences),
-                minimum_effect=PRIMARY_MINIMUM_EFFECTS[name],
+                minimum_effect=minimum_effects[name],
                 alternative=Alternative.GREATER,
                 algorithm_replicas_per_environment=algorithm_replicas,
             )
@@ -750,8 +779,8 @@ def _reconstruct_registered_power(
         raise ValueError("calibration analysis equivalence result is invalid")
     differences = item.get("differences")
     if (
-        item.get("name") != "ind-red-terminal-hidden-reward-equivalence"
-        or item.get("margin") != S5_REWARD_EQUIVALENCE_MARGIN
+        item.get("name") != study.power.equivalence_name
+        or item.get("margin") != study.power.equivalence_margin
         or item.get("pair_count") != calibration_environment_count
         or item.get("cell_pair_count")
         != calibration_environment_count * algorithm_replicas
@@ -763,8 +792,8 @@ def _reconstruct_registered_power(
         EquivalencePowerHypothesis.from_cluster_differences(
             item["name"],
             tuple(differences),
-            margin=S5_REWARD_EQUIVALENCE_MARGIN,
-            diagnostic_location=S5_BOOTSTRAP_DIAGNOSTIC_LOCATION,
+            margin=study.power.equivalence_margin,
+            diagnostic_location=study.power.equivalence_diagnostic_location,
             algorithm_replicas_per_environment=algorithm_replicas,
         ),
     )
@@ -784,7 +813,8 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
     calibration = load_experiment_config(arguments.calibration_config)
     if calibration.phase != "calibration":
         raise ValueError("only a calibration config can be frozen")
-    verify_symbolic_calibration_design(calibration)
+    study = registered_symbolic_study(calibration.name)
+    study.verify_calibration(calibration)
     summary = _load_calibration_summary(arguments.calibration_summary)
     if summary.get("phase") != "calibration":
         raise ValueError("summary is not calibration evidence")
@@ -792,7 +822,7 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         raise ValueError("summary does not match the calibration config")
     if summary.get("run_count") != len(calibration.cells()):
         raise ValueError("summary does not cover the complete calibration inventory")
-    expected_calibration_plan = build_symbolic_analysis_plan(
+    expected_calibration_plan = study.build_analysis_plan(
         calibration,
         phase=AnalysisPhase.CALIBRATION,
     )
@@ -812,20 +842,9 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         raise ValueError("failed scientific canaries block confirmation")
     if summary.get("freeze_eligible") is not True:
         raise ValueError("calibration summary is not eligible for confirmation")
-    expected_power_design = {
-        "power_simulations": POWER_SIMULATIONS,
-        "power_seed": POWER_SEED,
-        "power_candidate_environment_counts": list(POWER_CANDIDATE_ENVIRONMENTS),
-        "power_center_environment_count": POWER_CENTER_ENVIRONMENTS,
-        "power_probability_environment_count": POWER_PROBABILITY_ENVIRONMENTS,
-        "power_design_confidence_alpha": POWER_DESIGN_CONFIDENCE_ALPHA,
-        "power_alpha": POWER_ALPHA,
-        "power_simulation_error_alpha": POWER_SIMULATION_ERROR_ALPHA,
-        "minimum_individual_power": MINIMUM_INDIVIDUAL_POWER,
-        "minimum_equivalence_power": MINIMUM_EQUIVALENCE_POWER,
-        "minimum_joint_power": MINIMUM_JOINT_POWER,
-        "maximum_global_null_fwer": MAXIMUM_GLOBAL_NULL_FWER,
-    }
+    expected_power_design = study.power.summary_fields(
+        include_rng_stream=study.records_power_rng_stream
+    )
     for name, expected in expected_power_design.items():
         if summary.get(name) != expected:
             raise ValueError(f"calibration summary changed registered {name}")
@@ -841,7 +860,7 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
     )
     if (
         release.phase != "calibration"
-        or release.study_contract != STUDY_CONTRACT
+        or release.study_contract != study.study_contract
         or release.config_hash != calibration.config_hash
         or release.freeze_hash is not None
         or release.calibration_evidence_hash != summary.get("calibration_evidence_hash")
@@ -918,7 +937,7 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         or isinstance(deviations.get("schema_version"), bool)
         or not isinstance(deviations.get("schema_version"), int)
         or deviations.get("schema_version") != 1
-        or deviations.get("study_contract") != STUDY_CONTRACT
+        or deviations.get("study_contract") != study.study_contract
         or deviations.get("phase") != "calibration"
         or deviations.get("config_hash") != calibration.config_hash
         or not isinstance(deviation_entries, list)
@@ -933,7 +952,8 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         raise ValueError("calibration deviation log is invalid or inconsistent")
     if deviation_entries:
         raise ValueError(
-            "symbolic v1 confirmation cannot be frozen after any deviation"
+            f"symbolic v{study.version} confirmation cannot be frozen after any "
+            "deviation"
         )
     serial_inventory = RawArtifactInventory.from_dict(
         _read_json_object(
@@ -1046,6 +1066,7 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         analysis,
         calibration.environment_replicas,
         calibration.algorithm_replicas,
+        study=study,
     )
     if hypotheses != _jsonable(reconstructed) or equivalence_hypotheses != _jsonable(
         reconstructed_equivalences
@@ -1053,18 +1074,19 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         raise ValueError("power calibration hypotheses do not derive from analysis")
     recomputed_power = calibrate_environment_count(
         reconstructed,
-        candidate_environment_counts=POWER_CANDIDATE_ENVIRONMENTS,
+        candidate_environment_counts=study.power.candidate_environment_counts,
         equivalence_hypotheses=reconstructed_equivalences,
-        simulations=POWER_SIMULATIONS,
-        seed=POWER_SEED,
-        alpha=POWER_ALPHA,
-        minimum_power=MINIMUM_INDIVIDUAL_POWER,
-        minimum_equivalence_power=MINIMUM_EQUIVALENCE_POWER,
-        minimum_joint_power=MINIMUM_JOINT_POWER,
-        maximum_fwer=MAXIMUM_GLOBAL_NULL_FWER,
-        simulation_error_alpha=POWER_SIMULATION_ERROR_ALPHA,
-        design_confidence_alpha=POWER_DESIGN_CONFIDENCE_ALPHA,
-        center_environment_count=POWER_CENTER_ENVIRONMENTS,
+        simulations=study.power.simulations,
+        seed=study.power.seed,
+        rng_stream=study.power.rng_stream,
+        alpha=study.power.alpha,
+        minimum_power=study.power.minimum_individual_power,
+        minimum_equivalence_power=study.power.minimum_equivalence_power,
+        minimum_joint_power=study.power.minimum_joint_power,
+        maximum_fwer=study.power.maximum_global_null_fwer,
+        simulation_error_alpha=study.power.simulation_error_alpha,
+        design_confidence_alpha=study.power.design_confidence_alpha,
+        center_environment_count=study.power.center_environment_count,
     )
     if power_result != _jsonable(recomputed_power):
         raise ValueError(
@@ -1114,7 +1136,7 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
             "scientific source, dependency lock, or execution environment changed "
             "after calibration"
         )
-    recomputed_evidence = calibration_evidence_hash_from_hashes(
+    recomputed_evidence = study.calibration_evidence_hash_from_hashes(
         config_hash=calibration.config_hash,
         analysis_report_hash=analysis["scientific_hash"],
         canary_report_hash=canaries["scientific_hash"],
@@ -1145,38 +1167,42 @@ def _freeze_study(arguments: argparse.Namespace) -> int:
         calibration,
         environment_replicas=selected,
     )
-    registration_hash = expected_confirmatory_registration(design)
+    registration_hash = study.expected_confirmatory_registration(design)
     if calibration.algorithm_master_seed is None:
         raise ValueError(
             "calibration config must declare a fixed algorithm_master_seed"
         )
     banks = SeedBankIdentities.bind(
         calibration_master_seed=calibration.master_seed,
-        confirmatory_master_seed=SYMBOLIC_V1_CONFIRMATORY_MASTER_SEED,
+        confirmatory_master_seed=study.confirmatory_master_seed,
         algorithm_master_seed=calibration.algorithm_master_seed,
+        calibration_namespace=study.seed_namespaces[0],
+        confirmatory_namespace=study.seed_namespaces[1],
+        algorithm_namespace=study.seed_namespaces[2],
+        evaluation_namespace=study.seed_namespaces[3],
     )
     sealed = freeze_experiment_config(
         design,
-        name=SYMBOLIC_V1_CONFIRMATORY_NAME,
-        confirmatory_master_seed=SYMBOLIC_V1_CONFIRMATORY_MASTER_SEED,
+        name=study.confirmatory_name,
+        confirmatory_master_seed=study.confirmatory_master_seed,
         calibration_evidence_hash=evidence_hash,
-        analysis_contract=STUDY_CONTRACT,
+        analysis_contract=study.study_contract,
         analysis_version=registration_hash,
         analysis_code_hash=current_source_hash,
         dependency_lock_hash=current_provenance.dependency_lock_hash,
         environment_digest=current_provenance.environment_digest,
         seed_banks=banks,
-        tolerances=expected_confirmatory_tolerances(design),
-        margins=expected_confirmatory_margins(),
+        tolerances=study.expected_confirmatory_tolerances(design),
+        margins=study.expected_confirmatory_margins(),
     )
-    verify_symbolic_confirmatory_contract(
+    study.verify_confirmatory(
         sealed,
         analysis_code_hash=current_source_hash,
         dependency_lock_hash=current_provenance.dependency_lock_hash,
         environment_digest=current_provenance.environment_digest,
     )
     assert sealed.confirmatory_freeze is not None
-    plan = build_symbolic_analysis_plan(
+    plan = study.build_analysis_plan(
         sealed,
         phase=AnalysisPhase.CONFIRMATORY,
         freeze_hash=sealed.confirmatory_freeze.seal_hash,
@@ -1245,10 +1271,12 @@ def _write_study_report(arguments: argparse.Namespace) -> int:
         protected_directories=(arguments.artifact_root,),
     )
     experiment = load_experiment_config(arguments.config)
+    study = registered_symbolic_study(experiment.name)
     smoke_evidence = (
         _smoke_prerequisite_for_execution(
             experiment,
             arguments.smoke_evidence,
+            study=study,
         )
         if experiment.phase == "calibration"
         else None
@@ -1297,6 +1325,7 @@ def _write_study_report(arguments: argparse.Namespace) -> int:
     staged_arguments = argparse.Namespace(**vars(arguments))
     staged_arguments.output_dir = staging
     staged_arguments._preloaded_experiment = experiment
+    staged_arguments._study = study
     staged_arguments._preloaded_smoke_evidence = smoke_evidence
     staged_arguments._preloaded_reproducibility = reproducibility
     try:
@@ -1318,6 +1347,7 @@ def _write_study_report(arguments: argparse.Namespace) -> int:
 
 def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
     experiment = arguments._preloaded_experiment
+    study = arguments._study
     smoke_evidence = arguments._preloaded_smoke_evidence
     reproducibility = arguments._preloaded_reproducibility
     protected_files = (
@@ -1342,14 +1372,14 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
     )
     if experiment.phase == "confirmatory":
         current_provenance = collect_provenance()
-        verify_symbolic_confirmatory_contract(
+        study.verify_confirmatory(
             experiment,
             analysis_code_hash=current_provenance.analysis_code_hash,
             dependency_lock_hash=current_provenance.dependency_lock_hash,
             environment_digest=current_provenance.environment_digest,
         )
     plan = load_analysis_plan(arguments.plan)
-    if plan.expected_groups != expected_analysis_groups(experiment):
+    if plan.expected_groups != study.expected_groups(experiment):
         raise ValueError("analysis plan inventory does not match the experiment config")
     if (
         experiment.confirmatory_freeze is not None
@@ -1396,7 +1426,7 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
         if experiment.confirmatory_freeze is None
         else experiment.confirmatory_freeze.seal_hash
     )
-    expected_plan = build_symbolic_analysis_plan(
+    expected_plan = study.build_analysis_plan(
         experiment,
         phase=phase,
         freeze_hash=expected_freeze,
@@ -1441,7 +1471,11 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
             "reproducibility evidence does not match the analyzed artifact trees"
         )
     canaries = evaluate_canaries(dataset, expected_canary_plan)
-    deviations = _deviation_log(experiment, arguments.deviation)
+    deviations = _deviation_log(
+        experiment,
+        arguments.deviation,
+        study_contract=study.study_contract,
+    )
     report = build_report(
         dataset,
         plan,
@@ -1590,22 +1624,23 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
     power_evidence: dict[str, object] | None = None
     if phase is AnalysisPhase.CALIBRATION and canaries.passed:
         assert smoke_evidence is not None
-        hypotheses = power_hypotheses(report)
-        equivalence_hypotheses = power_equivalence_hypotheses(report)
+        hypotheses = study.power.hypotheses(report)
+        equivalence_hypotheses = study.power.equivalence_hypotheses(report)
         power = calibrate_environment_count(
             hypotheses,
-            candidate_environment_counts=POWER_CANDIDATE_ENVIRONMENTS,
+            candidate_environment_counts=study.power.candidate_environment_counts,
             equivalence_hypotheses=equivalence_hypotheses,
             simulations=arguments.power_simulations,
-            seed=POWER_SEED,
-            alpha=POWER_ALPHA,
-            minimum_power=MINIMUM_INDIVIDUAL_POWER,
-            minimum_equivalence_power=MINIMUM_EQUIVALENCE_POWER,
-            minimum_joint_power=MINIMUM_JOINT_POWER,
-            maximum_fwer=MAXIMUM_GLOBAL_NULL_FWER,
-            simulation_error_alpha=POWER_SIMULATION_ERROR_ALPHA,
-            design_confidence_alpha=POWER_DESIGN_CONFIDENCE_ALPHA,
-            center_environment_count=POWER_CENTER_ENVIRONMENTS,
+            seed=study.power.seed,
+            rng_stream=study.power.rng_stream,
+            alpha=study.power.alpha,
+            minimum_power=study.power.minimum_individual_power,
+            minimum_equivalence_power=study.power.minimum_equivalence_power,
+            minimum_joint_power=study.power.minimum_joint_power,
+            maximum_fwer=study.power.maximum_global_null_fwer,
+            simulation_error_alpha=study.power.simulation_error_alpha,
+            design_confidence_alpha=study.power.design_confidence_alpha,
+            center_environment_count=study.power.center_environment_count,
         )
         power_payload = {
             "artifact_type": "symbolic-power-calibration",
@@ -1631,7 +1666,7 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
                 calibration_hash=plain_power["scientific_hash"],
             ),
         )
-        evidence = calibration_evidence_hash(
+        evidence = study.calibration_evidence_hash(
             config=experiment,
             report=report,
             canary_report_hash=canaries.scientific_hash,
@@ -1676,30 +1711,18 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
         summary["power_hash"] = blocked_power["scientific_hash"]
     if phase is AnalysisPhase.CALIBRATION:
         summary.update(
-            {
-                "power_simulations": arguments.power_simulations,
-                "power_seed": POWER_SEED,
-                "power_candidate_environment_counts": list(
-                    POWER_CANDIDATE_ENVIRONMENTS
-                ),
-                "power_center_environment_count": POWER_CENTER_ENVIRONMENTS,
-                "power_probability_environment_count": (POWER_PROBABILITY_ENVIRONMENTS),
-                "power_design_confidence_alpha": (POWER_DESIGN_CONFIDENCE_ALPHA),
-                "power_alpha": POWER_ALPHA,
-                "power_simulation_error_alpha": POWER_SIMULATION_ERROR_ALPHA,
-                "minimum_individual_power": MINIMUM_INDIVIDUAL_POWER,
-                "minimum_equivalence_power": MINIMUM_EQUIVALENCE_POWER,
-                "minimum_joint_power": MINIMUM_JOINT_POWER,
-                "maximum_global_null_fwer": MAXIMUM_GLOBAL_NULL_FWER,
-                "freeze_eligible": (
-                    canaries.passed
-                    and summary["reproducibility_passed"] is True
-                    and summary.get("smoke_prerequisite_passed") is True
-                    and summary.get("selected_environment_replicas") is not None
-                    and arguments.power_simulations == POWER_SIMULATIONS
-                    and summary["deviation_count"] == 0
-                ),
-            }
+            study.power.summary_fields(
+                include_rng_stream=study.records_power_rng_stream
+            )
+        )
+        summary["power_simulations"] = arguments.power_simulations
+        summary["freeze_eligible"] = (
+            canaries.passed
+            and summary["reproducibility_passed"] is True
+            and summary.get("smoke_prerequisite_passed") is True
+            and summary.get("selected_environment_replicas") is not None
+            and arguments.power_simulations == study.power.simulations
+            and summary["deviation_count"] == 0
         )
     summary["scientific_hash"] = scientific_hash(
         summary,
@@ -1733,7 +1756,7 @@ def _build_study_report(arguments: argparse.Namespace) -> dict[str, object]:
         output,
         member_names,
         phase=phase.value,
-        study_contract=STUDY_CONTRACT,
+        study_contract=study.study_contract,
         config_hash=experiment.config_hash,
         freeze_hash=expected_freeze,
         calibration_evidence_hash=evidence_hash,
@@ -1966,9 +1989,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         experiment = load_experiment_config(arguments.config)
+        study = (
+            registered_symbolic_study(experiment.name)
+            if experiment.phase == "calibration"
+            else None
+        )
         smoke_evidence = _smoke_prerequisite_for_execution(
             experiment,
             arguments.smoke_evidence,
+            study=study,
         )
         extra_protected_files = (
             () if arguments.smoke_evidence is None else (arguments.smoke_evidence,)
@@ -1990,16 +2019,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             protected_files=(arguments.config, *extra_protected_files),
             protected_directories=extra_protected_directories,
         )
-        if experiment.phase == "calibration":
-            verify_symbolic_calibration_design(experiment)
-        elif experiment.phase == "confirmatory":
-            current_provenance = collect_provenance()
-            verify_symbolic_confirmatory_contract(
-                experiment,
-                analysis_code_hash=current_provenance.analysis_code_hash,
-                dependency_lock_hash=current_provenance.dependency_lock_hash,
-                environment_digest=current_provenance.environment_digest,
-            )
+        study = _verify_registered_execution(experiment)
         if os.path.lexists(arguments.output):
             if not arguments.resume:
                 raise ValueError(
@@ -2020,6 +2040,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             serial_root=arguments.serial_root,
             parallel_root=arguments.parallel_root,
             parallel_workers=arguments.workers,
+            adapter_factory=(
+                execution_adapter_factory(experiment.name)
+                if study is None
+                else study.adapter_factory
+            ),
             resume=arguments.resume,
             smoke_prerequisite_hash=(
                 None if smoke_evidence is None else smoke_evidence.scientific_hash
@@ -2058,20 +2083,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     experiment = load_experiment_config(arguments.config)
     if arguments.command == "pilot" and experiment.phase != "pilot":
         raise ValueError("the pilot command accepts only phase='pilot' configs")
+    study = (
+        registered_symbolic_study(experiment.name)
+        if experiment.phase == "calibration"
+        else None
+    )
     smoke_evidence = _smoke_prerequisite_for_execution(
         experiment,
         arguments.smoke_evidence,
+        study=study,
     )
-    if experiment.phase == "calibration":
-        verify_symbolic_calibration_design(experiment)
-    elif experiment.phase == "confirmatory":
-        current_provenance = collect_provenance()
-        verify_symbolic_confirmatory_contract(
-            experiment,
-            analysis_code_hash=current_provenance.analysis_code_hash,
-            dependency_lock_hash=current_provenance.dependency_lock_hash,
-            environment_digest=current_provenance.environment_digest,
-        )
+    study = _verify_registered_execution(experiment)
     _preflight_output_paths(
         output_directories=(arguments.artifact_root,),
         protected_files=(
@@ -2087,7 +2109,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ),
     )
-    executor = RunExecutor(arguments.artifact_root, ExactSymbolicAdapter)
+    executor = RunExecutor(
+        arguments.artifact_root,
+        (
+            execution_adapter_factory(experiment.name)
+            if study is None
+            else study.adapter_factory
+        ),
+    )
     results = SweepRunner(executor).run(
         experiment,
         max_workers=arguments.workers,

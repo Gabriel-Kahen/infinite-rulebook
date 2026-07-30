@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -449,6 +449,24 @@ def _prepare_report(
         classmethod(create_inventory),
     )
     monkeypatch.setattr(RawArtifactInventory, "verify", verify_inventory)
+    registered = cli.registered_symbolic_study
+    test_study = replace(
+        cli.SYMBOLIC_STUDY_V1,
+        power=replace(
+            cli.SYMBOLIC_STUDY_V1.power,
+            simulations=_TEST_POWER_SIMULATIONS,
+            candidate_environment_counts=(32,),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "registered_symbolic_study",
+        lambda name: (
+            test_study
+            if registered(name) is cli.SYMBOLIC_STUDY_V1
+            else registered(name)
+        ),
+    )
     monkeypatch.setattr(cli, "POWER_SIMULATIONS", _TEST_POWER_SIMULATIONS)
     monkeypatch.setattr(cli, "POWER_CANDIDATE_ENVIRONMENTS", (32,))
 

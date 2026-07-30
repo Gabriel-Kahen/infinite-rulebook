@@ -39,6 +39,7 @@ from infinite_rulebook.studies.symbolic_construct import (
     build_symbolic_analysis_plan,
     build_symbolic_canary_plan,
 )
+from infinite_rulebook.studies.symbolic_registry import SYMBOLIC_STUDY_V2
 
 
 def test_json_output_is_verified_before_publication(tmp_path: Path) -> None:
@@ -94,6 +95,75 @@ def test_run_command_accepts_phase_aware_arguments(tmp_path: Path) -> None:
     assert arguments.command == "run"
     assert arguments.workers == 3
     assert arguments.artifact_root == tmp_path
+
+
+def test_v2_run_selects_registered_adapter_and_exact_stage_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+    smoke = SimpleNamespace(
+        scientific_hash=SYMBOLIC_STUDY_V2.smoke_prerequisite_hash,
+        config=SimpleNamespace(config_hash=SYMBOLIC_STUDY_V2.smoke_config_hash),
+        reproducibility=SimpleNamespace(
+            serial_root=tmp_path / "smoke-serial",
+            parallel_root=tmp_path / "smoke-parallel",
+        ),
+    )
+
+    class CapturingSweep:
+        def __init__(self, executor: RunExecutor) -> None:
+            observed["adapter_factory"] = executor.adapter_factory
+
+        def run(
+            self,
+            experiment: ExperimentConfig,
+            *,
+            max_workers: int,
+        ) -> tuple[object, ...]:
+            observed["experiment"] = experiment.name
+            observed["workers"] = max_workers
+            return ()
+
+    monkeypatch.setattr(
+        "infinite_rulebook.cli._load_smoke_prerequisite",
+        lambda _: smoke,
+    )
+    monkeypatch.setattr("infinite_rulebook.cli.SweepRunner", CapturingSweep)
+
+    assert (
+        main(
+            [
+                "run",
+                "configs/symbolic-calibration-v2.json",
+                "--artifact-root",
+                str(tmp_path / "raw"),
+                "--workers",
+                "3",
+                "--smoke-evidence",
+                str(tmp_path / "stage-zero.json"),
+            ]
+        )
+        == 0
+    )
+    assert observed == {
+        "adapter_factory": SYMBOLIC_STUDY_V2.adapter_factory,
+        "experiment": SYMBOLIC_STUDY_V2.calibration_name,
+        "workers": 3,
+    }
+
+    smoke.scientific_hash = "0" * 64
+    with pytest.raises(ValueError, match="exact registered Stage-0"):
+        main(
+            [
+                "run",
+                "configs/symbolic-calibration-v2.json",
+                "--artifact-root",
+                str(tmp_path / "other-raw"),
+                "--smoke-evidence",
+                str(tmp_path / "stage-zero.json"),
+            ]
+        )
 
 
 def test_legacy_pilot_alias_rejects_calibration_config() -> None:
