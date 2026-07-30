@@ -70,9 +70,7 @@ from infinite_rulebook.studies.symbolic_registry import (
 
 # Backward-compatible module constants for callers that inspected the v1 CLI.
 POWER_SIMULATIONS = SYMBOLIC_STUDY_V1.power.simulations
-POWER_CANDIDATE_ENVIRONMENTS = (
-    SYMBOLIC_STUDY_V1.power.candidate_environment_counts
-)
+POWER_CANDIDATE_ENVIRONMENTS = SYMBOLIC_STUDY_V1.power.candidate_environment_counts
 POWER_SEED = SYMBOLIC_STUDY_V1.power.seed
 POWER_ALPHA = SYMBOLIC_STUDY_V1.power.alpha
 POWER_SIMULATION_ERROR_ALPHA = SYMBOLIC_STUDY_V1.power.simulation_error_alpha

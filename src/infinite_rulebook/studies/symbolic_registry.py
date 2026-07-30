@@ -68,9 +68,7 @@ class SymbolicPowerDesign:
                 self.candidate_environment_counts
             ),
             "power_center_environment_count": self.center_environment_count,
-            "power_probability_environment_count": (
-                self.probability_environment_count
-            ),
+            "power_probability_environment_count": (self.probability_environment_count),
             "power_design_confidence_alpha": self.design_confidence_alpha,
             "power_alpha": self.alpha,
             "power_simulation_error_alpha": self.simulation_error_alpha,
