@@ -19,11 +19,33 @@ from infinite_rulebook.orchestration.hashing import scientific_hash
 from infinite_rulebook.orchestration.jsonio import load_json_strict
 
 CONFIG_SCHEMA_VERSION = 1
-SYMBOLIC_ADAPTER_CONTRACT_VERSION = "exact-symbolic-adapter.v1"
+SYMBOLIC_ADAPTER_CONTRACT_V1 = "exact-symbolic-adapter.v1"
+SYMBOLIC_ADAPTER_CONTRACT_V2 = "exact-symbolic-adapter.v2"
+SYMBOLIC_ADAPTER_CONTRACT_VERSION = SYMBOLIC_ADAPTER_CONTRACT_V1
+SYMBOLIC_V2_CALIBRATION_EXPERIMENT_NAME = "symbolic-construct-calibration-v2"
+SYMBOLIC_V2_CONFIRMATORY_EXPERIMENT_NAME = "symbolic-construct-confirmatory-v2"
 REPRODUCIBILITY_OPERATIONAL_DIRECTORY = ".infinite-rulebook-reproducibility"
 RESERVED_EXPERIMENT_NAMES = frozenset(
     {"_frontiers", REPRODUCIBILITY_OPERATIONAL_DIRECTORY}
 )
+
+
+def registered_symbolic_v2_phase(name: str) -> str | None:
+    """Return the phase bound to an exact registered v2 experiment name."""
+
+    if name == SYMBOLIC_V2_CALIBRATION_EXPERIMENT_NAME:
+        return "calibration"
+    if name == SYMBOLIC_V2_CONFIRMATORY_EXPERIMENT_NAME:
+        return "confirmatory"
+    return None
+
+
+def symbolic_adapter_contract(name: str) -> str:
+    """Resolve the adapter contract without changing the legacy name space."""
+
+    if registered_symbolic_v2_phase(name) is not None:
+        return SYMBOLIC_ADAPTER_CONTRACT_V2
+    return SYMBOLIC_ADAPTER_CONTRACT_V1
 
 
 class EnvironmentKind(StrEnum):
@@ -271,6 +293,9 @@ class ExperimentConfig:
             raise ValueError("experiment name collides with a reserved artifact path")
         if self.phase not in {"pilot", "calibration", "confirmatory"}:
             raise ValueError("phase must be 'pilot', 'calibration', or 'confirmatory'")
+        registered_v2_phase = registered_symbolic_v2_phase(self.name)
+        if registered_v2_phase is not None and self.phase != registered_v2_phase:
+            raise ValueError(f"{self.name} requires phase={registered_v2_phase!r}")
         if self.phase == "confirmatory":
             if self.confirmatory_freeze is None:
                 raise ConfirmatoryFreezeError(
@@ -347,15 +372,18 @@ class ExperimentConfig:
     def resolved_run_settings(self) -> dict[str, Any]:
         """Return settings shared by cells, excluding unrelated sweep members."""
 
+        adapter_contract = symbolic_adapter_contract(self.name)
         settings = {
             "schema_version": self.schema_version,
-            "adapter_contract": SYMBOLIC_ADAPTER_CONTRACT_VERSION,
+            "adapter_contract": adapter_contract,
             "phase": self.phase,
             "horizon": self.horizon,
             "checkpoints": asdict(self.checkpoints),
             "master_seed": self.master_seed,
             "algorithm_master_seed": self.effective_algorithm_master_seed,
         }
+        if adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V2:
+            settings["experiment_name"] = self.name
         if self.confirmatory_freeze is not None:
             settings["confirmatory_frozen"] = True
             settings["confirmatory_freeze_hash"] = self.confirmatory_freeze.seal_hash

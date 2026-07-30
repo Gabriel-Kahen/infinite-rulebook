@@ -23,9 +23,11 @@ from infinite_rulebook.orchestration.artifacts import (
 )
 from infinite_rulebook.orchestration.config import (
     REPRODUCIBILITY_OPERATIONAL_DIRECTORY,
-    SYMBOLIC_ADAPTER_CONTRACT_VERSION,
+    SYMBOLIC_ADAPTER_CONTRACT_V1,
+    SYMBOLIC_ADAPTER_CONTRACT_V2,
     ExperimentConfig,
     RunCell,
+    symbolic_adapter_contract,
 )
 from infinite_rulebook.orchestration.freeze import ConfirmatoryFreezeError
 from infinite_rulebook.orchestration.hashing import scientific_hash
@@ -38,6 +40,39 @@ from infinite_rulebook.orchestration.seeds import RunSeeds, SeedBank
 from infinite_rulebook.orchestration.semantics import semantic_hashes
 
 RUNNER_VERSION = "symbolic-runner.v1"
+
+
+def _verify_registered_confirmatory_contract(
+    experiment: ExperimentConfig,
+    *,
+    adapter_contract: str,
+    analysis_code_hash: str,
+    dependency_lock_hash: str,
+    environment_digest: str,
+) -> None:
+    if adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V1:
+        from infinite_rulebook.studies.symbolic_construct import (
+            verify_symbolic_confirmatory_contract,
+        )
+    elif adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V2:
+        try:
+            from infinite_rulebook.studies.symbolic_construct_v2 import (
+                verify_symbolic_confirmatory_contract,
+            )
+        except ModuleNotFoundError as error:
+            if error.name != "infinite_rulebook.studies.symbolic_construct_v2":
+                raise
+            raise ConfirmatoryFreezeError(
+                "the registered v2 confirmatory study contract is unavailable"
+            ) from error
+    else:  # pragma: no cover - guarded by adapter contract resolution
+        raise ConfirmatoryFreezeError("unregistered confirmatory adapter contract")
+    verify_symbolic_confirmatory_contract(
+        experiment,
+        analysis_code_hash=analysis_code_hash,
+        dependency_lock_hash=dependency_lock_hash,
+        environment_digest=environment_digest,
+    )
 
 
 class ExperimentAdapter(Protocol):
@@ -197,22 +232,24 @@ class RunExecutor:
         if not experiment.contains_cell(cell):
             raise ValueError("run cell is not in the experiment inventory")
         adapter = self.adapter_factory()
-        if adapter.contract_version != SYMBOLIC_ADAPTER_CONTRACT_VERSION:
+        configured_contract = symbolic_adapter_contract(experiment.name)
+        if adapter.contract_version != configured_contract:
             raise ValueError("adapter does not implement the configured contract")
         if experiment.phase == "calibration":
-            from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
+            from infinite_rulebook.orchestration.symbolic import (
+                exact_symbolic_adapter_class,
+            )
 
-            if type(adapter) is not ExactSymbolicAdapter:
+            if type(adapter) is not exact_symbolic_adapter_class(configured_contract):
                 raise ConfirmatoryFreezeError(
                     "calibration execution requires the registered exact adapter"
                 )
         if experiment.confirmatory_freeze is not None:
-            from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
-            from infinite_rulebook.studies.symbolic_construct import (
-                verify_symbolic_confirmatory_contract,
+            from infinite_rulebook.orchestration.symbolic import (
+                exact_symbolic_adapter_class,
             )
 
-            if type(adapter) is not ExactSymbolicAdapter:
+            if type(adapter) is not exact_symbolic_adapter_class(configured_contract):
                 raise ConfirmatoryFreezeError(
                     "confirmatory execution requires the registered exact adapter"
                 )
@@ -224,8 +261,9 @@ class RunExecutor:
                 raise ConfirmatoryFreezeError(
                     "confirmatory provenance is not the current scientific source"
                 )
-            verify_symbolic_confirmatory_contract(
+            _verify_registered_confirmatory_contract(
                 experiment,
+                adapter_contract=configured_contract,
                 analysis_code_hash=current.analysis_code_hash,
                 dependency_lock_hash=current.dependency_lock_hash,
                 environment_digest=current.environment_digest,

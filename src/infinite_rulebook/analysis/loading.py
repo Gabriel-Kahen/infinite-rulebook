@@ -168,7 +168,12 @@ def _numeric_metrics(result: dict[str, Any]) -> tuple[tuple[str, float], ...]:
             raise AnalysisError(f"checkpoint metric {name!r} must be finite")
         metrics[sys.intern(name)] = number
 
-    for name in ("expected_reward", "hidden_expected_reward", "public_reward"):
+    for name in (
+        "expected_reward",
+        "hidden_expected_reward",
+        "post_query_mean_hidden_expected_reward",
+        "public_reward",
+    ):
         if name in result:
             add(name, result[name])
     for section in ("information", "novelty", "support", "compute"):
