@@ -32,13 +32,22 @@ without interpreting metrics or scientific outcomes. E768 additionally
 requires an explicit memory-pressure acknowledgement. Capacity commands
 require the same fresh static record and recheck the approved commit, clean
 tree, lockfile, executable checkout Python, absolute hashed `uv` and Git
-executables, tool checkout/interpreter/lock/installed dependency bytes,
-machine, boot, physical memory, and qualified storage before launch, plus the
-checkout snapshot after the detached process. Git identity commands use
+executables, tool checkout/interpreter/lock/complete startup-environment bytes,
+the checkout `.venv` configuration and complete `site-packages` byte/metadata
+tree, machine, boot, physical memory, and qualified storage before launch.
+The execution interpreter must remain the checkout's exact
+`.venv/bin/python`, with the recorded executable bytes, version, and prefix.
+Capacity gates repeat the checkout and execution-environment checks after the
+detached process. System site-packages, user site-packages, arbitrary external
+`.pth` paths, unapproved executable `.pth` lines, bytecode writes, and ignored
+source-tree bytecode caches are disabled or rejected. Accepted editable source
+paths and the checkout `scripts` import tree receive byte-and-metadata seals.
+Git identity commands use
 explicit Git-directory and work-tree arguments in a fixed environment that
 does not inherit `GIT_*`, `PYTHON*`, `UV_*`, loader, or caller `PATH` settings.
-Any process-monitoring exception terminates and reaps the entire process
-group.
+Cleanup signals the stored detached process group even if its leader has
+already exited, escalates to `SIGKILL`, and fails if live members of that
+detached process group remain.
 
 Linux `MemTotal` can be below installed capacity because of firmware and kernel
 reservations. The 64-GiB check is deliberately fail-closed on visible physical
@@ -61,7 +70,9 @@ Keep operational records outside both Git worktrees and their Git metadata
 directories, and outside the qualified storage/probe tree. Record writes
 reject protected roots and symlinked path components, install complete files
 without following the final path, refuse replacement, and set created records
-to mode `0400`:
+to mode `0400`. Before reporting success, the writer reopens the lexical
+parent without following symlinks and verifies the parent inode plus the final
+record inode and bytes:
 
 ```bash
 export IRB_EXECUTION_SHA="c9b6297b63b572d9e6d106de4add1dae436c00d3"
@@ -173,7 +184,8 @@ uv run python scripts/qualify_symbolic_v2_host.py run-capacity \
 
 Each record binds the exact static record, tool identity, machine and boot,
 execution repository and Git directory, absolute hashed Git and `uv`
-executables, checkout Python, lockfile, and pre/post checkout snapshots. It
+executables, checkout Python, lockfile, pre/post checkout snapshots, and
+pre/post execution-environment hashes. It
 checks the exact registered shape and deterministic synthetic dataset hash.
 Passing requires:
 
@@ -185,7 +197,8 @@ Passing requires:
 - at least the measured peak RSS remaining again as physical `MemAvailable`.
 
 A timeout, output-limit breach, process failure, shape mismatch, swap
-dependence, reserve failure, or post-run checkout change is a failed gate.
+dependence, reserve failure, post-run checkout change, or execution-environment
+change is a failed gate.
 The default hard timeout is two hours; `--timeout-hours` may set another finite,
 positive limit. Monitoring intervals cannot exceed one second and never sleep
 past the hard deadline.
@@ -221,8 +234,11 @@ Do not open run payloads, plot conditions, compare agents, or use probe metrics
 for protocol decisions. `run-probe` records the no-symlink device/inode
 identity, hashes every regular artifact file through the open directory
 descriptor, stores the normalized path, byte size, and SHA-256 of every file
-in a detailed manifest, and requires the execution and benchmark manifests to
-match. The probe device must equal the statically qualified storage device
+in a detailed manifest, and also seals directory and file device, inode, mode,
+link-count, size, mtime, and ctime state. It requires both the content
+manifest and metadata seal to remain stable and to match across execution,
+benchmark preflight, benchmark binding, and assessment. The probe device must
+equal the statically qualified storage device
 before either child is launched and again during assessment. It
 binds the benchmark to the execution-record hash, expected config/command,
 approved checkout, tool source, machine, and boot. A plain or manually bound
@@ -264,8 +280,9 @@ probe-benchmark records to be ordered, no more than 24 hours old, and bound to
 the same approved execution SHA, static-record hash, tool source, host, boot,
 and artifact directory. Assessment rechecks current physical memory, mount,
 device, storage-directory inode, free bytes, free inodes, and the live detailed
-artifact manifest through one no-follow directory descriptor, then confirms
-that the path still names that inode. It recomputes fixed, marginal, residual,
+artifact manifest and metadata seal through repeated no-follow,
+descriptor-anchored scans, then confirms that the path still names that inode.
+It recomputes fixed, marginal, residual,
 projected, and two-times budget values from the recorded primitive timings
 using the same registered projection formula; claimed projected or budget
 fields are never trusted directly. Its timestamp is deterministically the

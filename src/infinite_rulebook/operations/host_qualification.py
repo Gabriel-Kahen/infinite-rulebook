@@ -147,6 +147,12 @@ _CAPACITY_SPECS = {
         "dataset_hash": V2_E768_DATASET_HASH,
     },
 }
+_ALLOWED_PTH_EXECUTABLE_LINE_HASHES = frozenset(
+    {
+        "2cbb286eeaf39b2cd7d68cb09c1bc3cfb0cc8d27da949004d0c22698f127f270",
+        "69ac3d8f27e679c81b94ab30b3b56e9cd138219b1ba94a1fa3606d5a76a1433d",
+    }
+)
 
 
 def _utc_now() -> str:
@@ -343,7 +349,10 @@ def _open_directory_nofollow(path: Path) -> int:
         raise
 
 
-def _read_record_at(directory_fd: int, name: str) -> str | None:
+def _read_record_identity_at(
+    directory_fd: int,
+    name: str,
+) -> tuple[str, tuple[int, int, int, int]] | None:
     try:
         descriptor = os.open(
             name,
@@ -353,27 +362,100 @@ def _read_record_at(directory_fd: int, name: str) -> str | None:
     except FileNotFoundError:
         return None
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
             raise ValueError("qualification record target must be a regular file")
         with os.fdopen(descriptor, encoding="utf-8", closefd=False) as stream:
-            return stream.read()
+            content = stream.read()
+        after = os.fstat(descriptor)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise ValueError("qualification record changed while being read")
+        return content, (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_nlink,
+        )
     finally:
         os.close(descriptor)
 
 
-def _make_record_read_only_at(directory_fd: int, name: str) -> None:
+def _make_record_read_only_at(
+    directory_fd: int,
+    name: str,
+    *,
+    expected_identity: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
     descriptor = os.open(
         name,
         os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
         dir_fd=directory_fd,
     )
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != expected_identity[:2]
+            or before.st_nlink != 1
+        ):
             raise ValueError("qualification record target must be a regular file")
         os.fchmod(descriptor, 0o400)
         os.fsync(descriptor)
+        after = os.fstat(descriptor)
+        if (
+            (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+            or not stat.S_ISREG(after.st_mode)
+            or stat.S_IMODE(after.st_mode) != 0o400
+            or after.st_nlink != 1
+        ):
+            raise ValueError("qualification record changed while being hardened")
+        return (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_nlink,
+        )
     finally:
         os.close(descriptor)
+
+
+def _verify_record_publication(
+    target: Path,
+    *,
+    directory_fd: int,
+    content: str,
+    expected_identity: tuple[int, int, int, int],
+) -> None:
+    verification_fd = _open_existing_directory_nofollow(target.parent)
+    try:
+        if not _same_open_directory(directory_fd, verification_fd):
+            raise ValueError("qualification record parent changed during publication")
+        published = _read_record_identity_at(verification_fd, target.name)
+        if published is None:
+            raise ValueError("qualification record is absent after publication")
+        observed_content, observed_identity = published
+        if (
+            observed_identity != expected_identity
+            or observed_content != content
+            or not stat.S_ISREG(observed_identity[2])
+            or stat.S_IMODE(observed_identity[2]) != 0o400
+            or observed_identity[3] != 1
+        ):
+            raise ValueError("qualification record changed during publication")
+    finally:
+        os.close(verification_fd)
 
 
 def write_record(
@@ -398,48 +480,82 @@ def write_record(
     target = validate_output_path(path, forbidden_roots=forbidden_roots)
     directory_fd = _open_directory_nofollow(target.parent)
     temporary_name = f".{target.name}.{secrets.token_hex(16)}.tmp"
+    temporary_exists = False
     try:
-        existing = _read_record_at(directory_fd, target.name)
+        existing = _read_record_identity_at(directory_fd, target.name)
         if existing is not None:
-            if existing != content:
+            existing_content, published_identity = existing
+            if existing_content != content:
                 raise ValueError(
                     f"refusing to overwrite qualification record: {target}"
                 )
-            _make_record_read_only_at(directory_fd, target.name)
-            return
-        descriptor = os.open(
-            temporary_name,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=directory_fd,
-        )
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(descriptor)
-            os.fchmod(descriptor, 0o400)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        try:
-            os.link(
-                temporary_name,
+            published_identity = _make_record_read_only_at(
+                directory_fd,
                 target.name,
-                src_dir_fd=directory_fd,
-                dst_dir_fd=directory_fd,
-                follow_symlinks=False,
+                expected_identity=published_identity,
             )
-        except FileExistsError:
-            if _read_record_at(directory_fd, target.name) != content:
-                raise ValueError(
-                    f"refusing to overwrite qualification record: {target}"
-                ) from None
-            _make_record_read_only_at(directory_fd, target.name)
-        os.fsync(directory_fd)
-    finally:
+        else:
+            descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory_fd,
+            )
+            temporary_exists = True
+            try:
+                with os.fdopen(
+                    descriptor,
+                    "w",
+                    encoding="utf-8",
+                    closefd=False,
+                ) as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(descriptor)
+                os.fchmod(descriptor, 0o400)
+                os.fsync(descriptor)
+                temporary_metadata = os.fstat(descriptor)
+                published_identity = (
+                    temporary_metadata.st_dev,
+                    temporary_metadata.st_ino,
+                    temporary_metadata.st_mode,
+                    temporary_metadata.st_nlink,
+                )
+            finally:
+                os.close(descriptor)
+            try:
+                os.link(
+                    temporary_name,
+                    target.name,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                raced = _read_record_identity_at(directory_fd, target.name)
+                if raced is None or raced[0] != content:
+                    raise ValueError(
+                        f"refusing to overwrite qualification record: {target}"
+                    ) from None
+                published_identity = _make_record_read_only_at(
+                    directory_fd,
+                    target.name,
+                    expected_identity=raced[1],
+                )
         with suppress(FileNotFoundError):
             os.unlink(temporary_name, dir_fd=directory_fd)
+        temporary_exists = False
+        os.fsync(directory_fd)
+        _verify_record_publication(
+            target,
+            directory_fd=directory_fd,
+            content=content,
+            expected_identity=published_identity,
+        )
+    finally:
+        if temporary_exists:
+            with suppress(FileNotFoundError):
+                os.unlink(temporary_name, dir_fd=directory_fd)
         os.close(directory_fd)
 
 
@@ -586,6 +702,17 @@ def _dependency_environment_hash() -> str:
     )
 
 
+def _tool_execution_environment_hash() -> str:
+    identity = _execution_environment_identity(
+        Path(sys.prefix),
+        python_version=platform.python_version(),
+        reject_import_bytecode=False,
+    )
+    if identity["includes_system_site_packages"]:
+        raise ValueError("tool environment must disable system site-packages")
+    return _execution_environment_hash(identity)
+
+
 def _tool_identity(*, git_path: str) -> dict[str, Any]:
     repository = Path(__file__).resolve().parents[3]
     git_directory = _git_directory(repository)
@@ -639,6 +766,7 @@ def _tool_identity(*, git_path: str) -> dict[str, Any]:
         "python_version": platform.python_version(),
         "dependency_lock_sha256": _sha256_file(repository / "uv.lock"),
         "dependency_environment_hash": _dependency_environment_hash(),
+        "startup_environment_hash": _tool_execution_environment_hash(),
     }
 
 
@@ -1108,6 +1236,7 @@ def _host_identity_hash(
                 "execution_python": runtime["execution_python"],
                 "execution_python_path": runtime["execution_python_path"],
                 "execution_python_sha256": runtime["execution_python_sha256"],
+                "execution_environment_hash": runtime["execution_environment_hash"],
                 "git": runtime["git"],
                 "git_path": runtime["git_path"],
                 "git_sha256": runtime["git_sha256"],
@@ -1171,6 +1300,8 @@ def _static_requirements(
             passed=(
                 _python_version_supported(runtime["execution_python"])
                 and runtime["execution_python_sha256"] is not None
+                and runtime["execution_python_path"]
+                == str(Path(execution["repository"]) / ".venv" / "bin" / "python")
                 and runtime["execution_prefix"]
                 == str(Path(execution["repository"]) / ".venv")
             ),
@@ -1222,6 +1353,53 @@ def _static_requirements(
             required=True,
         ),
         _requirement(
+            "execution-environment-bound",
+            passed=(
+                isinstance(runtime["execution_environment"], dict)
+                and is_sha256(runtime["execution_environment_hash"])
+                and _execution_environment_hash(runtime["execution_environment"])
+                == runtime["execution_environment_hash"]
+                and not runtime["execution_environment"][
+                    "includes_system_site_packages"
+                ]
+                and runtime["execution_environment"]["site_packages"]["file_count"] > 0
+                and all(
+                    (
+                        _path_within(
+                            Path(path),
+                            Path(execution["repository"]) / "src",
+                        )
+                        or _path_within(
+                            Path(path),
+                            Path(
+                                runtime["execution_environment"]["site_packages"][
+                                    "path"
+                                ]
+                            ),
+                        )
+                    )
+                    for path in runtime["execution_environment"]["pth_path_entries"]
+                )
+            ),
+            observed={
+                "hash": runtime["execution_environment_hash"],
+                "includes_system_site_packages": (
+                    runtime["execution_environment"]["includes_system_site_packages"]
+                    if isinstance(runtime["execution_environment"], dict)
+                    else None
+                ),
+                "pth_path_entries": (
+                    runtime["execution_environment"]["pth_path_entries"]
+                    if isinstance(runtime["execution_environment"], dict)
+                    else []
+                ),
+            },
+            required=(
+                "metadata-and-byte-bound checkout .venv with system site-packages "
+                "disabled and path entries confined to the checkout"
+            ),
+        ),
+        _requirement(
             "qualification-tool-clean",
             passed=tool["worktree_clean"],
             observed=tool["worktree_clean"],
@@ -1238,11 +1416,13 @@ def _static_requirements(
             passed=(
                 is_sha256(tool["dependency_lock_sha256"])
                 and is_sha256(tool["dependency_environment_hash"])
+                and is_sha256(tool["startup_environment_hash"])
                 and is_sha256(tool["python_sha256"])
             ),
             observed={
                 "lock": tool["dependency_lock_sha256"],
                 "environment": tool["dependency_environment_hash"],
+                "startup_environment": tool["startup_environment_hash"],
                 "python": tool["python_sha256"],
             },
             required="hash-bound tool interpreter, lock, and installed environment",
@@ -1451,6 +1631,20 @@ def inspect_host(
             )
         except (OSError, subprocess.CalledProcessError):
             environment_synced = False
+    execution_environment: dict[str, Any] | None = None
+    execution_environment_hash: str | None = None
+    if execution_python_version is not None and execution_prefix is not None:
+        try:
+            execution_environment = _execution_environment_identity(
+                Path(execution_prefix),
+                python_version=execution_python_version,
+            )
+            execution_environment_hash = _execution_environment_hash(
+                execution_environment
+            )
+        except (OSError, ValueError):
+            execution_environment = None
+            execution_environment_hash = None
     if uv_path is None:
         raise ValueError("uv executable is required for host inspection")
     plan = _exact_plan_payload(
@@ -1476,6 +1670,8 @@ def inspect_host(
         "execution_python_sha256": snapshot["execution_python_sha256"],
         "execution_prefix": execution_prefix,
         "environment_synced": environment_synced,
+        "execution_environment": execution_environment,
+        "execution_environment_hash": execution_environment_hash,
         "kernel": platform.platform(),
         "logical_cpu_count": os.cpu_count(),
         "platform": sys.platform,
@@ -1597,6 +1793,7 @@ def _capacity_decision(
     process_major_faults: int,
     swapout_delta_pages: int,
     checkout_unchanged: bool = True,
+    execution_environment_unchanged: bool = True,
 ) -> dict[str, Any]:
     spec = _CAPACITY_SPECS[stage]
     expected_integers = {
@@ -1673,6 +1870,7 @@ def _capacity_decision(
     no_swap_dependence = process_major_faults == 0 and swapout_delta_pages == 0
     return {
         "checkout_unchanged_passed": checkout_unchanged,
+        "execution_environment_unchanged_passed": (execution_environment_unchanged),
         "exact_shape_passed": shape_passed,
         "benchmark_metrics_consistent_passed": benchmark_metrics_consistent,
         "memory_measurements_consistent_passed": memory_measurements_consistent,
@@ -1680,6 +1878,7 @@ def _capacity_decision(
         "no_swap_dependence_observed": no_swap_dependence,
         "passed": (
             checkout_unchanged
+            and execution_environment_unchanged
             and shape_passed
             and benchmark_metrics_consistent
             and memory_measurements_consistent
@@ -1694,21 +1893,67 @@ def _sanitized_environment() -> dict[str, str]:
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
     }
 
 
-def _terminate_and_reap(process: subprocess.Popen[str]) -> None:
-    if process.poll() is None:
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGTERM)
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=10)
-    else:
+def _process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_process_group_exit(
+    process_group: int,
+    *,
+    timeout_seconds: float,
+) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while _process_group_exists(process_group):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+def _terminate_and_reap(
+    process: subprocess.Popen[str],
+    *,
+    process_group: int,
+) -> None:
+    if (
+        isinstance(process_group, bool)
+        or process_group <= 0
+        or process_group != process.pid
+    ):
+        raise ValueError("detached process group must equal its positive leader PID")
+    with suppress(ProcessLookupError):
+        os.killpg(process_group, signal.SIGTERM)
+    try:
         process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(process_group, signal.SIGKILL)
+        process.wait(timeout=10)
+        if not _wait_for_process_group_exit(
+            process_group,
+            timeout_seconds=1.0,
+        ):
+            raise RuntimeError("detached process group survived SIGKILL") from None
+        return
+    if not _wait_for_process_group_exit(process_group, timeout_seconds=1.0):
+        with suppress(ProcessLookupError):
+            os.killpg(process_group, signal.SIGKILL)
+        if not _wait_for_process_group_exit(
+            process_group,
+            timeout_seconds=1.0,
+        ):
+            raise RuntimeError("detached process group survived cleanup")
 
 
 def _run_bounded_detached_json(
@@ -1743,6 +1988,7 @@ def _run_bounded_detached_json(
             start_new_session=True,
             pass_fds=tuple(pass_fds),
         )
+        process_group = process.pid
         try:
             while process.poll() is None:
                 if (
@@ -1757,7 +2003,7 @@ def _run_bounded_detached_json(
                     break
                 time.sleep(min(0.25, timeout - elapsed))
         finally:
-            _terminate_and_reap(process)
+            _terminate_and_reap(process, process_group=process_group)
         stdout.seek(0, os.SEEK_END)
         stdout_size = stdout.tell()
         stdout.seek(0)
@@ -1808,6 +2054,7 @@ def _capacity_execution_identity(host: Mapping[str, Any]) -> dict[str, Any]:
         "uv_sha256": host["runtime"]["uv_sha256"],
         "execution_python_path": host["runtime"]["execution_python_path"],
         "execution_python_sha256": host["runtime"]["execution_python_sha256"],
+        "execution_environment_hash": host["runtime"]["execution_environment_hash"],
     }
 
 
@@ -1827,17 +2074,54 @@ def _current_git_matches_host(host: Mapping[str, Any]) -> bool:
 
 def _current_execution_python_matches_host(host: Mapping[str, Any]) -> bool:
     path = Path(host["runtime"]["execution_python_path"])
-    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+    expected_path = Path(host["execution"]["repository"]) / ".venv" / "bin" / "python"
+    if (
+        path != expected_path
+        or not path.is_absolute()
+        or not path.is_file()
+        or not os.access(path, os.X_OK)
+    ):
         return False
     try:
         resolved = path.resolve(strict=True)
-    except OSError:
+        observed_version = _run_text(
+            (
+                str(path),
+                "-c",
+                "import platform; print(platform.python_version())",
+            ),
+            cwd=Path(host["execution"]["repository"]),
+        )
+        observed_prefix = _run_text(
+            (
+                str(path),
+                "-c",
+                "import sys; print(sys.prefix)",
+            ),
+            cwd=Path(host["execution"]["repository"]),
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
         return False
     return (
         resolved.is_file()
         and os.access(resolved, os.X_OK)
         and _sha256_file(resolved) == host["runtime"]["execution_python_sha256"]
+        and observed_version == host["runtime"]["execution_python"]
+        and observed_prefix == host["runtime"]["execution_prefix"]
     )
+
+
+def _current_execution_environment_hash(
+    host: Mapping[str, Any],
+) -> str | None:
+    try:
+        observed = _execution_environment_identity(
+            Path(host["runtime"]["execution_prefix"]),
+            python_version=host["runtime"]["execution_python"],
+        )
+    except (OSError, TypeError, ValueError):
+        return None
+    return _execution_environment_hash(observed)
 
 
 def _record_is_fresh(record: Mapping[str, Any]) -> bool:
@@ -1907,6 +2191,11 @@ def run_capacity_benchmark(
         raise ValueError("git executable changed after static inspection")
     if not _current_execution_python_matches_host(host):
         raise ValueError("execution Python changed after static inspection")
+    prelaunch_environment_hash = _current_execution_environment_hash(host)
+    if prelaunch_environment_hash != host["runtime"][
+        "execution_environment_hash"
+    ] or not _current_execution_environment_matches_host(host):
+        raise ValueError("execution environment changed after static inspection")
     if (
         _tool_identity_hash(_tool_identity(git_path=host["runtime"]["git_path"]))
         != host["tool_identity_hash"]
@@ -1959,6 +2248,7 @@ def run_capacity_benchmark(
             text=True,
             start_new_session=True,
         )
+        process_group = process.pid
         try:
             while process.poll() is None:
                 current = _read_key_values(meminfo)
@@ -1978,7 +2268,7 @@ def run_capacity_benchmark(
                     break
                 time.sleep(min(interval, timeout - elapsed))
         finally:
-            _terminate_and_reap(process)
+            _terminate_and_reap(process, process_group=process_group)
         stdout_file.seek(0, os.SEEK_END)
         stdout_size = stdout_file.tell()
         output_limit_exceeded = output_limit_exceeded or stdout_size > MIB
@@ -1999,6 +2289,13 @@ def run_capacity_benchmark(
     )
     checkout_unchanged = after_snapshot == before_snapshot and _snapshot_matches_host(
         after_snapshot, host
+    )
+    postrun_environment_hash = _current_execution_environment_hash(host)
+    execution_environment_unchanged = (
+        postrun_environment_hash
+        == prelaunch_environment_hash
+        == host["runtime"]["execution_environment_hash"]
+        and _current_execution_environment_matches_host(host)
     )
     after_memory = _read_key_values(meminfo)
     after_vmstat = _read_key_values(vmstat_path)
@@ -2039,6 +2336,7 @@ def run_capacity_benchmark(
         process_major_faults=process_major_faults,
         swapout_delta_pages=swapout_delta,
         checkout_unchanged=checkout_unchanged,
+        execution_environment_unchanged=execution_environment_unchanged,
     )
     page_size = os.sysconf("SC_PAGE_SIZE")
     execution_identity = _capacity_execution_identity(host)
@@ -2062,6 +2360,8 @@ def run_capacity_benchmark(
         "benchmark_result": result,
         "prelaunch_checkout": before_snapshot,
         "postrun_checkout": after_snapshot,
+        "prelaunch_execution_environment_hash": prelaunch_environment_hash,
+        "postrun_execution_environment_hash": postrun_environment_hash,
         "host_memory": {
             "before_available_memory_bytes": before_memory.get("MemAvailable", 0),
             "after_available_memory_bytes": after_memory.get("MemAvailable", 0),
@@ -2356,6 +2656,22 @@ def _sha256_descriptor(descriptor: int) -> str:
     return digest.hexdigest()
 
 
+def _stat_stability_token(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
 def _build_artifact_manifest(
     root: Path,
     *,
@@ -2367,6 +2683,7 @@ def _build_artifact_manifest(
     for directory, directory_names, file_names, current_directory_fd in os.fwalk(
         root,
         topdown=True,
+        onerror=_raise_walk_error,
         follow_symlinks=False,
         dir_fd=base_directory_fd,
     ):
@@ -2402,24 +2719,11 @@ def _build_artifact_manifest(
             )
             try:
                 opened = os.fstat(descriptor)
-                if (
-                    opened.st_dev,
-                    opened.st_ino,
-                    opened.st_size,
-                    opened.st_mtime_ns,
-                ) != (
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                ):
+                if _stat_stability_token(opened) != _stat_stability_token(metadata):
                     raise ValueError("probe artifact changed while building manifest")
                 file_hash = _sha256_descriptor(descriptor)
                 after = os.fstat(descriptor)
-                if (after.st_size, after.st_mtime_ns) != (
-                    opened.st_size,
-                    opened.st_mtime_ns,
-                ):
+                if _stat_stability_token(after) != _stat_stability_token(opened):
                     raise ValueError("probe artifact changed while being hashed")
             finally:
                 os.close(descriptor)
@@ -2446,11 +2750,92 @@ def _build_artifact_manifest(
 
 
 def _artifact_manifest(artifact_root: Path) -> dict[str, Any]:
-    return _build_artifact_manifest(_assert_no_symlink_components(artifact_root))
+    return _stable_manifest_at_path(_assert_no_symlink_components(artifact_root))
 
 
 def _artifact_manifest_from_descriptor(directory_fd: int) -> dict[str, Any]:
     return _build_artifact_manifest(Path("."), base_directory_fd=directory_fd)
+
+
+def _directory_stability_state_from_descriptor(
+    directory_fd: int,
+) -> tuple[tuple[object, ...], ...]:
+    state: list[tuple[object, ...]] = []
+    root = Path(".")
+    for directory, directory_names, file_names, current_fd in os.fwalk(
+        root,
+        topdown=True,
+        onerror=_raise_walk_error,
+        follow_symlinks=False,
+        dir_fd=directory_fd,
+    ):
+        directory_names.sort()
+        file_names.sort()
+        metadata = os.fstat(current_fd)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("manifest traversal left the open directory tree")
+        state.append(
+            (
+                "directory",
+                Path(directory).relative_to(root).as_posix(),
+                *_stat_stability_token(metadata),
+                tuple(directory_names),
+                tuple(file_names),
+            )
+        )
+        relative_directory = Path(directory).relative_to(root)
+        for name in file_names:
+            metadata = os.stat(
+                name,
+                dir_fd=current_fd,
+                follow_symlinks=False,
+            )
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("manifest stability tree contains a non-regular file")
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=current_fd,
+            )
+            try:
+                opened = os.fstat(descriptor)
+                if _stat_stability_token(opened) != _stat_stability_token(metadata):
+                    raise ValueError(
+                        "manifest entry changed during stability verification"
+                    )
+            finally:
+                os.close(descriptor)
+            state.append(
+                (
+                    "file",
+                    (relative_directory / name).as_posix(),
+                    *_stat_stability_token(metadata),
+                )
+            )
+    return tuple(state)
+
+
+def _stable_manifest_and_seal_from_descriptor(
+    directory_fd: int,
+) -> tuple[dict[str, Any], str]:
+    state_before = _directory_stability_state_from_descriptor(directory_fd)
+    manifest = _artifact_manifest_from_descriptor(directory_fd)
+    repeated = _artifact_manifest_from_descriptor(directory_fd)
+    state_after = _directory_stability_state_from_descriptor(directory_fd)
+    if manifest != repeated or state_before != state_after:
+        raise ValueError("directory tree changed during manifest verification")
+    seal = scientific_hash(
+        {
+            "manifest_hash": manifest["manifest_hash"],
+            "stability_state": state_after,
+        },
+        domain="operations.stable-directory-tree.v1",
+    )
+    return manifest, seal
+
+
+def _stable_manifest_from_descriptor(directory_fd: int) -> dict[str, Any]:
+    return _stable_manifest_and_seal_from_descriptor(directory_fd)[0]
 
 
 def _open_existing_directory_nofollow(path: Path) -> int:
@@ -2474,11 +2859,168 @@ def _open_existing_directory_nofollow(path: Path) -> int:
         raise
 
 
+def _stable_manifest_and_seal_at_path(
+    path: Path,
+) -> tuple[dict[str, Any], str]:
+    target = _absolute_path(path)
+    descriptor = _open_existing_directory_nofollow(target)
+    verification_descriptor: int | None = None
+    try:
+        manifest, seal = _stable_manifest_and_seal_from_descriptor(descriptor)
+        verification_descriptor = _open_existing_directory_nofollow(target)
+        if not _same_open_directory(descriptor, verification_descriptor):
+            raise ValueError("directory root changed during manifest verification")
+        repeated, repeated_seal = _stable_manifest_and_seal_from_descriptor(
+            verification_descriptor
+        )
+        if repeated != manifest or repeated_seal != seal:
+            raise ValueError("directory tree changed during manifest verification")
+        return manifest, seal
+    finally:
+        if verification_descriptor is not None:
+            os.close(verification_descriptor)
+        os.close(descriptor)
+
+
+def _stable_manifest_at_path(path: Path) -> dict[str, Any]:
+    return _stable_manifest_and_seal_at_path(path)[0]
+
+
+def _stable_directory_tree_snapshot(
+    path: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    target = _absolute_path(path)
+    descriptor = _open_existing_directory_nofollow(target)
+    verification_descriptor: int | None = None
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"stable tree root must be a directory: {target}")
+        manifest, stability_hash = _stable_manifest_and_seal_from_descriptor(descriptor)
+        verification_descriptor = _open_existing_directory_nofollow(target)
+        if not _same_open_directory(descriptor, verification_descriptor):
+            raise ValueError("directory root changed during stable tree verification")
+        repeated, repeated_stability_hash = _stable_manifest_and_seal_from_descriptor(
+            verification_descriptor
+        )
+        if repeated != manifest or repeated_stability_hash != stability_hash:
+            raise ValueError("directory tree changed during stable tree verification")
+        final_metadata = os.fstat(verification_descriptor)
+        if _stat_stability_token(final_metadata) != _stat_stability_token(metadata):
+            raise ValueError("directory root changed during stable tree verification")
+        directory_count = 1 + sum(
+            entry["kind"] == "directory" for entry in manifest["entries"]
+        )
+        identity = {
+            "path": str(target),
+            "device": final_metadata.st_dev,
+            "inode": final_metadata.st_ino,
+            "mode": final_metadata.st_mode,
+            "link_count": final_metadata.st_nlink,
+            "file_count": manifest["file_count"],
+            "directory_count": directory_count,
+            "total_bytes": manifest["total_bytes"],
+            "manifest_hash": manifest["manifest_hash"],
+            "stability_hash": stability_hash,
+        }
+        return identity, manifest
+    finally:
+        if verification_descriptor is not None:
+            os.close(verification_descriptor)
+        os.close(descriptor)
+
+
+def _stable_directory_tree_identity(path: Path) -> dict[str, Any]:
+    return _stable_directory_tree_snapshot(path)[0]
+
+
+def _stable_import_target_identity(
+    path: Path,
+    *,
+    reject_bytecode: bool,
+) -> dict[str, Any]:
+    identity, manifest = _stable_directory_tree_snapshot(path)
+    if reject_bytecode and any(
+        "__pycache__" in Path(entry["path"]).parts
+        or Path(entry["path"]).suffix == ".pyc"
+        for entry in manifest["entries"]
+    ):
+        raise ValueError(
+            "execution import path contains unbound Python bytecode caches"
+        )
+    return identity
+
+
+def _read_descriptor_bytes(descriptor: int) -> bytes:
+    chunks: list[bytes] = []
+    while chunk := os.read(descriptor, MIB):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _stable_file_bytes_and_identity(path: Path) -> tuple[bytes, dict[str, Any]]:
+    target = _absolute_path(path)
+    directory_fd = _open_existing_directory_nofollow(target.parent)
+    verification_fd: int | None = None
+    descriptor: int | None = None
+    repeated_descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            target.name,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"stable file must be regular: {target}")
+        content = _read_descriptor_bytes(descriptor)
+        after = os.fstat(descriptor)
+        if _stat_stability_token(before) != _stat_stability_token(after):
+            raise ValueError(f"file changed while being read: {target}")
+        verification_fd = _open_existing_directory_nofollow(target.parent)
+        if not _same_open_directory(directory_fd, verification_fd):
+            raise ValueError("file parent changed during stable verification")
+        repeated_descriptor = os.open(
+            target.name,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=verification_fd,
+        )
+        repeated_metadata = os.fstat(repeated_descriptor)
+        repeated_content = _read_descriptor_bytes(repeated_descriptor)
+        repeated_after = os.fstat(repeated_descriptor)
+        if (
+            _stat_stability_token(before) != _stat_stability_token(repeated_metadata)
+            or _stat_stability_token(repeated_metadata)
+            != _stat_stability_token(repeated_after)
+            or content != repeated_content
+        ):
+            raise ValueError(f"file changed during stable verification: {target}")
+        return content, {
+            "path": str(target),
+            "device": before.st_dev,
+            "inode": before.st_ino,
+            "mode": before.st_mode,
+            "link_count": before.st_nlink,
+            "size_bytes": before.st_size,
+            "mtime_ns": before.st_mtime_ns,
+            "ctime_ns": before.st_ctime_ns,
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+    finally:
+        if repeated_descriptor is not None:
+            os.close(repeated_descriptor)
+        if verification_fd is not None:
+            os.close(verification_fd)
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(directory_fd)
+
+
 def _current_artifact_evidence(
     artifact_root: Path,
     *,
     storage_root: Path,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], str]:
     artifact = _absolute_path(artifact_root)
     storage = _absolute_path(storage_root)
     if (
@@ -2498,11 +3040,19 @@ def _current_artifact_evidence(
             "device": metadata.st_dev,
             "inode": metadata.st_ino,
         }
-        manifest = _artifact_manifest_from_descriptor(descriptor)
+        manifest, stability_hash = _stable_manifest_and_seal_from_descriptor(descriptor)
         verification_descriptor = _open_existing_directory_nofollow(artifact)
         if not _same_open_directory(descriptor, verification_descriptor):
             raise ValueError("probe artifact root changed during verification")
-        return identity, manifest
+        verification_manifest, verification_stability_hash = (
+            _stable_manifest_and_seal_from_descriptor(verification_descriptor)
+        )
+        if (
+            verification_manifest != manifest
+            or verification_stability_hash != stability_hash
+        ):
+            raise ValueError("probe artifact tree changed during verification")
+        return identity, manifest, stability_hash
     finally:
         if verification_descriptor is not None:
             os.close(verification_descriptor)
@@ -2559,6 +3109,165 @@ def _same_open_directory(left: int, right: int) -> bool:
         and stat.S_ISDIR(right_stat.st_mode)
         and (left_stat.st_dev, left_stat.st_ino)
         == (right_stat.st_dev, right_stat.st_ino)
+    )
+
+
+def _execution_environment_identity(
+    prefix: Path,
+    *,
+    python_version: str,
+    reject_import_bytecode: bool = True,
+) -> dict[str, Any]:
+    canonical_prefix = _assert_no_symlink_components(prefix)
+    version_parts = python_version.split(".")
+    if (
+        len(version_parts) < 2
+        or not version_parts[0].isdigit()
+        or not version_parts[1].isdigit()
+    ):
+        raise ValueError("execution Python version must include major and minor")
+    python_directory = f"python{version_parts[0]}.{version_parts[1]}"
+    config_content, config_identity = _stable_file_bytes_and_identity(
+        canonical_prefix / "pyvenv.cfg"
+    )
+    try:
+        config_text = config_content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("pyvenv.cfg must be UTF-8") from error
+    config_fields: dict[str, str] = {}
+    for line in config_text.splitlines():
+        if not line.strip():
+            continue
+        key, separator, value = line.partition("=")
+        normalized_key = key.strip().lower()
+        if not separator or not normalized_key or normalized_key in config_fields:
+            raise ValueError("pyvenv.cfg fields must be unique key/value pairs")
+        config_fields[normalized_key] = value.strip()
+    include_system = config_fields.get("include-system-site-packages", "").lower()
+    if include_system not in {"true", "false"}:
+        raise ValueError("pyvenv.cfg must declare include-system-site-packages")
+    site_packages_path = canonical_prefix / "lib" / python_directory / "site-packages"
+    tree_before = _stable_directory_tree_identity(site_packages_path)
+    pth_path_entries: set[str] = set()
+    pth_executable_line_hashes: set[str] = set()
+    for candidate in sorted(site_packages_path.iterdir(), key=lambda item: item.name):
+        if candidate.suffix != ".pth":
+            continue
+        pth_content, _ = _stable_file_bytes_and_identity(candidate)
+        try:
+            pth_text = pth_content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError(f"site path file must be UTF-8: {candidate}") from error
+        for line in pth_text.splitlines():
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            if entry.startswith(("import ", "import\t")):
+                line_hash = hashlib.sha256(entry.encode("utf-8")).hexdigest()
+                if line_hash not in _ALLOWED_PTH_EXECUTABLE_LINE_HASHES:
+                    raise ValueError(
+                        "execution environment contains an unapproved "
+                        "executable .pth line"
+                    )
+                pth_executable_line_hashes.add(line_hash)
+                continue
+            pth_path_entries.add(str(_absolute_path(site_packages_path / entry)))
+    tree_after = _stable_directory_tree_identity(site_packages_path)
+    if tree_after != tree_before:
+        raise ValueError(
+            "execution site-packages changed during environment inspection"
+        )
+    pth_target_identities = [
+        _stable_import_target_identity(
+            Path(path),
+            reject_bytecode=reject_import_bytecode,
+        )
+        for path in sorted(pth_path_entries)
+        if not _path_within(Path(path), site_packages_path)
+    ]
+    target_by_path = {target["path"]: target for target in pth_target_identities}
+    checkout_import_trees = []
+    for path in (
+        canonical_prefix.parent / "src",
+        canonical_prefix.parent / "scripts",
+    ):
+        target = target_by_path.get(str(path))
+        checkout_import_trees.append(
+            target
+            if target is not None
+            else _stable_import_target_identity(
+                path,
+                reject_bytecode=reject_import_bytecode,
+            )
+        )
+    final_tree = _stable_directory_tree_identity(site_packages_path)
+    if final_tree != tree_before:
+        raise ValueError(
+            "execution site-packages changed during environment inspection"
+        )
+    repeated_config_content, repeated_config_identity = _stable_file_bytes_and_identity(
+        canonical_prefix / "pyvenv.cfg"
+    )
+    if (
+        repeated_config_content != config_content
+        or repeated_config_identity != config_identity
+    ):
+        raise ValueError("pyvenv.cfg changed during execution environment inspection")
+    repeated_targets = [
+        _stable_import_target_identity(
+            Path(target["path"]),
+            reject_bytecode=reject_import_bytecode,
+        )
+        for target in pth_target_identities
+    ]
+    if repeated_targets != pth_target_identities:
+        raise ValueError("execution import path changed during environment inspection")
+    repeated_checkout_trees = [
+        _stable_import_target_identity(
+            Path(target["path"]),
+            reject_bytecode=reject_import_bytecode,
+        )
+        for target in checkout_import_trees
+    ]
+    if repeated_checkout_trees != checkout_import_trees:
+        raise ValueError("checkout import tree changed during environment inspection")
+    return {
+        "prefix": str(canonical_prefix),
+        "python_version": python_version,
+        "pyvenv_config": config_identity,
+        "includes_system_site_packages": include_system == "true",
+        "site_packages": final_tree,
+        "pth_path_entries": sorted(pth_path_entries),
+        "pth_target_identities": pth_target_identities,
+        "checkout_import_trees": checkout_import_trees,
+        "pth_executable_line_hashes": sorted(pth_executable_line_hashes),
+    }
+
+
+def _execution_environment_hash(identity: Mapping[str, Any]) -> str:
+    return scientific_hash(
+        identity,
+        domain="operations.host-execution-environment.v1",
+    )
+
+
+def _current_execution_environment_matches_host(
+    host: Mapping[str, Any],
+) -> bool:
+    expected_identity = host["runtime"].get("execution_environment")
+    expected_hash = host["runtime"].get("execution_environment_hash")
+    if not isinstance(expected_identity, dict) or not is_sha256(expected_hash):
+        return False
+    try:
+        observed = _execution_environment_identity(
+            Path(host["runtime"]["execution_prefix"]),
+            python_version=host["runtime"]["execution_python"],
+        )
+    except (OSError, ValueError):
+        return False
+    return (
+        observed == expected_identity
+        and _execution_environment_hash(observed) == expected_hash
     )
 
 
@@ -2639,6 +3348,8 @@ def _assert_current_context(
         raise ValueError("git executable no longer matches static qualification")
     if not _current_execution_python_matches_host(host):
         raise ValueError("execution Python no longer matches static qualification")
+    if not _current_execution_environment_matches_host(host):
+        raise ValueError("execution environment no longer matches static qualification")
     if (
         _tool_identity_hash(_tool_identity(git_path=host["runtime"]["git_path"]))
         != host["tool_identity_hash"]
@@ -2710,7 +3421,9 @@ def _bind_probe_result(
             "secure probe binding requires both an open directory and executed command"
         )
     if artifact_directory_fd is None:
-        artifact_manifest = _artifact_manifest(artifact_root)
+        artifact_manifest, artifact_stability_hash = _stable_manifest_and_seal_at_path(
+            artifact_root
+        )
     else:
         if isinstance(artifact_directory_fd, bool) or artifact_directory_fd < 0:
             raise ValueError("artifact directory descriptor must be nonnegative")
@@ -2723,7 +3436,9 @@ def _bind_probe_result(
             artifact_identity["inode"],
         ):
             raise ValueError("open artifact directory differs from expected root")
-        artifact_manifest = _artifact_manifest_from_descriptor(artifact_directory_fd)
+        artifact_manifest, artifact_stability_hash = (
+            _stable_manifest_and_seal_from_descriptor(artifact_directory_fd)
+        )
     common = {
         "schema_version": 1,
         "recorded_at": _utc_now(),
@@ -2736,6 +3451,7 @@ def _bind_probe_result(
         "expected_artifact_root": host["probe_storage"]["artifact_root"],
         "artifact_storage_identity": artifact_identity,
         "artifact_manifest": artifact_manifest,
+        "artifact_stability_hash": artifact_stability_hash,
         "secure_artifact_access": secure_artifact_access,
         "executed_command": executed_command,
         "scientific_boundary": {
@@ -2791,6 +3507,8 @@ def _bind_probe_result(
             raise ValueError("probe artifact storage identity changed before benchmark")
         if execution["artifact_manifest"] != artifact_manifest:
             raise ValueError("probe artifact content changed before benchmark binding")
+        if execution["artifact_stability_hash"] != artifact_stability_hash:
+            raise ValueError("probe artifact metadata changed before benchmark binding")
         if execution["result"]["artifact_root"] != checked["artifact_root"]:
             raise ValueError("probe benchmark artifact root differs from execution")
         payload = {
@@ -3000,11 +3718,13 @@ def run_probe_step(
                 identity["inode"],
             ) or identity != execution["artifact_storage_identity"]:
                 raise ValueError("probe artifact identity changed before benchmark")
-            if (
-                _artifact_manifest_from_descriptor(root_fd)
-                != execution["artifact_manifest"]
-            ):
+            current_manifest, current_stability_hash = (
+                _stable_manifest_and_seal_from_descriptor(root_fd)
+            )
+            if current_manifest != execution["artifact_manifest"]:
                 raise ValueError("probe artifact content changed before benchmark")
+            if current_stability_hash != execution["artifact_stability_hash"]:
+                raise ValueError("probe artifact metadata changed before benchmark")
             command = _secured_probe_arguments(
                 "benchmark",
                 uv_path=host["runtime"]["uv_path"],
@@ -3204,11 +3924,13 @@ def assess_qualification(
         )
     )
     try:
-        current_artifact_identity, current_artifact_manifest = (
-            _current_artifact_evidence(
-                Path(expected_probe_root),
-                storage_root=Path(host["storage"]["storage_root"]),
-            )
+        (
+            current_artifact_identity,
+            current_artifact_manifest,
+            current_artifact_stability_hash,
+        ) = _current_artifact_evidence(
+            Path(expected_probe_root),
+            storage_root=Path(host["storage"]["storage_root"]),
         )
         probe_artifacts_current = all(
             (
@@ -3218,6 +3940,10 @@ def assess_qualification(
                 == probe_benchmark["artifact_storage_identity"],
                 current_artifact_manifest == probe_execution["artifact_manifest"],
                 current_artifact_manifest == probe_benchmark["artifact_manifest"],
+                current_artifact_stability_hash
+                == probe_execution["artifact_stability_hash"],
+                current_artifact_stability_hash
+                == probe_benchmark["artifact_stability_hash"],
             )
         )
     except (OSError, ValueError):
@@ -3232,6 +3958,8 @@ def assess_qualification(
             == probe_benchmark["artifact_storage_identity"],
             probe_execution["artifact_manifest"]
             == probe_benchmark["artifact_manifest"],
+            probe_execution["artifact_stability_hash"]
+            == probe_benchmark["artifact_stability_hash"],
             probe_execution["secure_artifact_access"] is True,
             probe_benchmark["secure_artifact_access"] is True,
             probe_static_binding_passed,
@@ -3437,6 +4165,7 @@ def _validate_tool_identity(value: object) -> dict[str, Any]:
                 "python_version",
                 "dependency_lock_sha256",
                 "dependency_environment_hash",
+                "startup_environment_hash",
             }
         ),
     )
@@ -3451,14 +4180,219 @@ def _validate_tool_identity(value: object) -> dict[str, Any]:
         "python_sha256",
         "dependency_lock_sha256",
         "dependency_environment_hash",
+        "startup_environment_hash",
     ):
         _expect_sha256(tool[name], label=f"tool.{name}")
     for name in ("git_directory", "git_path", "python_path", "python_prefix"):
         path = Path(_expect_string(tool[name], label=f"tool.{name}"))
         if not path.is_absolute():
             raise ValueError(f"tool.{name} must be absolute")
-    _expect_string(tool["python_version"], label="tool.python_version")
+    tool_python = _expect_string(
+        tool["python_version"],
+        label="tool.python_version",
+    )
+    if not _python_version_supported(tool_python):
+        raise ValueError("tool.python_version is unsupported")
     return tool
+
+
+def _validate_stable_tree_identity(
+    value: object,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    identity = _expect_keys(
+        value,
+        label=label,
+        keys=frozenset(
+            {
+                "path",
+                "device",
+                "inode",
+                "mode",
+                "link_count",
+                "file_count",
+                "directory_count",
+                "total_bytes",
+                "manifest_hash",
+                "stability_hash",
+            }
+        ),
+    )
+    path = Path(_expect_string(identity["path"], label=f"{label}.path"))
+    if not path.is_absolute():
+        raise ValueError(f"{label}.path must be absolute")
+    for name in (
+        "device",
+        "inode",
+        "mode",
+        "link_count",
+        "file_count",
+        "directory_count",
+        "total_bytes",
+    ):
+        _expect_int(identity[name], label=f"{label}.{name}", minimum=0)
+    if (
+        not stat.S_ISDIR(identity["mode"])
+        or identity["inode"] < 1
+        or identity["link_count"] < 1
+        or identity["directory_count"] < 1
+    ):
+        raise ValueError(f"{label} metadata is invalid")
+    for name in ("manifest_hash", "stability_hash"):
+        _expect_sha256(identity[name], label=f"{label}.{name}")
+    return identity
+
+
+def _validate_execution_environment_identity(
+    value: object,
+) -> dict[str, Any]:
+    identity = _expect_keys(
+        value,
+        label="execution environment",
+        keys=frozenset(
+            {
+                "prefix",
+                "python_version",
+                "pyvenv_config",
+                "includes_system_site_packages",
+                "site_packages",
+                "pth_path_entries",
+                "pth_target_identities",
+                "checkout_import_trees",
+                "pth_executable_line_hashes",
+            }
+        ),
+    )
+    prefix = Path(
+        _expect_string(identity["prefix"], label="execution environment.prefix")
+    )
+    if not prefix.is_absolute():
+        raise ValueError("execution environment.prefix must be absolute")
+    python_version = _expect_string(
+        identity["python_version"],
+        label="execution environment.python_version",
+    )
+    if not _python_version_supported(python_version):
+        raise ValueError("execution environment Python version is unsupported")
+    config = _expect_keys(
+        identity["pyvenv_config"],
+        label="execution environment.pyvenv_config",
+        keys=frozenset(
+            {
+                "path",
+                "device",
+                "inode",
+                "mode",
+                "link_count",
+                "size_bytes",
+                "mtime_ns",
+                "ctime_ns",
+                "sha256",
+            }
+        ),
+    )
+    config_path = Path(
+        _expect_string(
+            config["path"],
+            label="execution environment.pyvenv_config.path",
+        )
+    )
+    if config_path != prefix / "pyvenv.cfg":
+        raise ValueError("execution environment pyvenv.cfg path is inconsistent")
+    for name in (
+        "device",
+        "inode",
+        "mode",
+        "link_count",
+        "size_bytes",
+        "mtime_ns",
+        "ctime_ns",
+    ):
+        _expect_int(
+            config[name],
+            label=f"execution environment.pyvenv_config.{name}",
+            minimum=0,
+        )
+    if (
+        not stat.S_ISREG(config["mode"])
+        or config["inode"] < 1
+        or config["link_count"] < 1
+    ):
+        raise ValueError("execution environment pyvenv.cfg metadata is invalid")
+    _expect_sha256(
+        config["sha256"],
+        label="execution environment.pyvenv_config.sha256",
+    )
+    _expect_bool(
+        identity["includes_system_site_packages"],
+        label="execution environment.includes_system_site_packages",
+    )
+    site_packages = _validate_stable_tree_identity(
+        identity["site_packages"],
+        label="execution environment.site_packages",
+    )
+    site_path = Path(site_packages["path"])
+    major, minor, *_ = python_version.split(".")
+    expected_site_path = prefix / "lib" / f"python{major}.{minor}" / "site-packages"
+    if site_path != expected_site_path:
+        raise ValueError("execution environment site-packages path is inconsistent")
+    path_entries = identity["pth_path_entries"]
+    if not isinstance(path_entries, list):
+        raise ValueError("execution environment.pth_path_entries must be a list")
+    checked_entries = [
+        _expect_string(
+            entry,
+            label=f"execution environment.pth_path_entries[{index}]",
+        )
+        for index, entry in enumerate(path_entries)
+    ]
+    if checked_entries != sorted(set(checked_entries)) or any(
+        not Path(entry).is_absolute() or str(_absolute_path(Path(entry))) != entry
+        for entry in checked_entries
+    ):
+        raise ValueError(
+            "execution environment path entries must be unique normalized absolutes"
+        )
+    target_identities = identity["pth_target_identities"]
+    if not isinstance(target_identities, list):
+        raise ValueError("execution environment.pth_target_identities must be a list")
+    checked_targets = [
+        _validate_stable_tree_identity(
+            target,
+            label=f"execution environment.pth_target_identities[{index}]",
+        )
+        for index, target in enumerate(target_identities)
+    ]
+    expected_target_paths = [
+        entry for entry in checked_entries if not _path_within(Path(entry), site_path)
+    ]
+    if [target["path"] for target in checked_targets] != expected_target_paths:
+        raise ValueError("execution environment .pth targets do not match path entries")
+    checkout_import_trees = identity["checkout_import_trees"]
+    if not isinstance(checkout_import_trees, list):
+        raise ValueError("execution environment.checkout_import_trees must be a list")
+    checked_checkout_trees = [
+        _validate_stable_tree_identity(
+            target,
+            label=f"execution environment.checkout_import_trees[{index}]",
+        )
+        for index, target in enumerate(checkout_import_trees)
+    ]
+    if [target["path"] for target in checked_checkout_trees] != [
+        str(prefix.parent / "src"),
+        str(prefix.parent / "scripts"),
+    ]:
+        raise ValueError("execution environment checkout import trees are incomplete")
+    executable_hashes = identity["pth_executable_line_hashes"]
+    if (
+        not isinstance(executable_hashes, list)
+        or executable_hashes != sorted(set(executable_hashes))
+        or any(not is_sha256(value) for value in executable_hashes)
+        or not set(executable_hashes) <= _ALLOWED_PTH_EXECUTABLE_LINE_HASHES
+    ):
+        raise ValueError("execution environment executable .pth lines are not approved")
+    return identity
 
 
 def _validate_static_record(record: Mapping[str, Any]) -> None:
@@ -3555,6 +4489,8 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
                 "execution_python_sha256",
                 "execution_prefix",
                 "environment_synced",
+                "execution_environment",
+                "execution_environment_hash",
                 "kernel",
                 "logical_cpu_count",
                 "platform",
@@ -3579,12 +4515,39 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
     )
     if not python_path.is_absolute():
         raise ValueError("runtime.execution_python_path must be absolute")
+    expected_python_path = repository / ".venv" / "bin" / "python"
+    if python_path != expected_python_path:
+        raise ValueError(
+            "runtime.execution_python_path must name the checkout .venv Python"
+        )
     if runtime["execution_python_sha256"] is not None:
         _expect_sha256(
             runtime["execution_python_sha256"],
             label="runtime.execution_python_sha256",
         )
     _expect_bool(runtime["environment_synced"], label="runtime.environment_synced")
+    if runtime["execution_environment"] is None:
+        if runtime["execution_environment_hash"] is not None:
+            raise ValueError("runtime execution environment hash requires an identity")
+    else:
+        environment = _validate_execution_environment_identity(
+            runtime["execution_environment"]
+        )
+        environment_hash = _expect_sha256(
+            runtime["execution_environment_hash"],
+            label="runtime.execution_environment_hash",
+        )
+        if environment_hash != _execution_environment_hash(environment):
+            raise ValueError(
+                "runtime execution environment hash does not match identity"
+            )
+        if (
+            environment["prefix"] != runtime["execution_prefix"]
+            or environment["python_version"] != runtime["execution_python"]
+        ):
+            raise ValueError(
+                "runtime execution environment differs from Python runtime"
+            )
     _expect_string(runtime["kernel"], label="runtime.kernel")
     if runtime["logical_cpu_count"] is not None:
         _expect_int(
@@ -3594,6 +4557,8 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
         )
     _expect_string(runtime["platform"], label="runtime.platform")
     _expect_string(runtime["tool_python"], label="runtime.tool_python")
+    if runtime["tool_python"] != tool["python_version"]:
+        raise ValueError("runtime tool Python version differs from tool identity")
     _expect_string(runtime["git"], label="runtime.git")
     _expect_string(runtime["git_path"], label="runtime.git_path")
     _expect_sha256(runtime["git_sha256"], label="runtime.git_sha256")
@@ -3873,6 +4838,8 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
                 "benchmark_result",
                 "prelaunch_checkout",
                 "postrun_checkout",
+                "prelaunch_execution_environment_hash",
+                "postrun_execution_environment_hash",
                 "host_memory",
                 "host_swap",
                 "process_major_faults",
@@ -3905,6 +4872,7 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
                 "uv_sha256",
                 "execution_python_path",
                 "execution_python_sha256",
+                "execution_environment_hash",
             }
         ),
     )
@@ -3924,6 +4892,7 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
         "uv_lock_sha256",
         "uv_sha256",
         "execution_python_sha256",
+        "execution_environment_hash",
     ):
         _expect_sha256(execution[name], label=f"execution.{name}")
     host_identity = _validate_host_identity(
@@ -3976,10 +4945,21 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
         record["postrun_checkout"],
         label="postrun_checkout",
     )
+    prelaunch_environment_hash = _expect_sha256(
+        record["prelaunch_execution_environment_hash"],
+        label="prelaunch_execution_environment_hash",
+    )
+    postrun_environment_hash = record["postrun_execution_environment_hash"]
+    if postrun_environment_hash is not None:
+        _expect_sha256(
+            postrun_environment_hash,
+            label="postrun_execution_environment_hash",
+        )
     if (
         before["commit"] != execution["commit"]
         or before["uv_lock_sha256"] != execution["uv_lock_sha256"]
         or before["execution_python_sha256"] != execution["execution_python_sha256"]
+        or prelaunch_environment_hash != execution["execution_environment_hash"]
         or not before["clean"]
     ):
         raise ValueError("capacity prelaunch snapshot differs from execution binding")
@@ -4035,6 +5015,11 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
         process_major_faults=faults,
         swapout_delta_pages=swap["pswpout_delta_pages"],
         checkout_unchanged=before == after and before["clean"] and after["clean"],
+        execution_environment_unchanged=(
+            prelaunch_environment_hash
+            == postrun_environment_hash
+            == execution["execution_environment_hash"]
+        ),
     )
     if record["decision"] != expected_decision:
         raise ValueError("capacity decision does not match recomputed evidence")
@@ -4170,6 +5155,10 @@ def _validate_probe_record_common(
         record["artifact_storage_identity"]
     )
     artifact_manifest = _validate_artifact_manifest(record["artifact_manifest"])
+    _expect_sha256(
+        record["artifact_stability_hash"],
+        label="artifact_stability_hash",
+    )
     secure_artifact_access = _expect_bool(
         record["secure_artifact_access"],
         label="secure_artifact_access",
@@ -4210,6 +5199,7 @@ def _validate_probe_execution_record(record: Mapping[str, Any]) -> None:
                 "expected_artifact_root",
                 "artifact_storage_identity",
                 "artifact_manifest",
+                "artifact_stability_hash",
                 "secure_artifact_access",
                 "source_result_hash",
                 "result",
@@ -4264,6 +5254,7 @@ def _validate_probe_benchmark_record(record: Mapping[str, Any]) -> None:
                 "expected_artifact_root",
                 "artifact_storage_identity",
                 "artifact_manifest",
+                "artifact_stability_hash",
                 "secure_artifact_access",
                 "probe_execution_record_hash",
                 "source_result_hash",

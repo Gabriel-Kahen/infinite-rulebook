@@ -9,6 +9,7 @@ import signal
 import stat
 import subprocess
 import sys
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +38,91 @@ from infinite_rulebook.operations.host_qualification import (
 from infinite_rulebook.orchestration.artifacts import artifact_root_lock
 
 COMMIT = qualification.APPROVED_V2_EXECUTION_COMMITS[0]
+
+
+def _fake_execution_environment(repository: Path) -> dict[str, object]:
+    prefix = repository / ".venv"
+    return {
+        "prefix": str(prefix),
+        "python_version": "3.11.15",
+        "pyvenv_config": {
+            "path": str(prefix / "pyvenv.cfg"),
+            "device": 1,
+            "inode": 2,
+            "mode": stat.S_IFREG | 0o644,
+            "link_count": 1,
+            "size_bytes": 64,
+            "mtime_ns": 1,
+            "ctime_ns": 1,
+            "sha256": "7" * 64,
+        },
+        "includes_system_site_packages": False,
+        "site_packages": {
+            "path": str(prefix / "lib" / "python3.11" / "site-packages"),
+            "device": 1,
+            "inode": 3,
+            "mode": stat.S_IFDIR | 0o755,
+            "link_count": 2,
+            "file_count": 100,
+            "directory_count": 10,
+            "total_bytes": 1000,
+            "manifest_hash": "8" * 64,
+            "stability_hash": "9" * 64,
+        },
+        "pth_path_entries": [str(repository / "src")],
+        "pth_target_identities": [
+            {
+                "path": str(repository / "src"),
+                "device": 1,
+                "inode": 4,
+                "mode": stat.S_IFDIR | 0o755,
+                "link_count": 2,
+                "file_count": 50,
+                "directory_count": 5,
+                "total_bytes": 500,
+                "manifest_hash": "a" * 64,
+                "stability_hash": "b" * 64,
+            }
+        ],
+        "checkout_import_trees": [
+            {
+                "path": str(repository / name),
+                "device": 1,
+                "inode": inode,
+                "mode": stat.S_IFDIR | 0o755,
+                "link_count": 2,
+                "file_count": 50,
+                "directory_count": 5,
+                "total_bytes": 500,
+                "manifest_hash": digest * 64,
+                "stability_hash": stability * 64,
+            }
+            for name, inode, digest, stability in (
+                ("src", 4, "a", "b"),
+                ("scripts", 5, "c", "d"),
+            )
+        ],
+        "pth_executable_line_hashes": [],
+    }
+
+
+def _synthetic_execution_environment(tmp_path: Path) -> tuple[Path, Path]:
+    repository = tmp_path / "repository"
+    prefix = repository / ".venv"
+    site_packages = prefix / "lib" / "python3.11" / "site-packages"
+    site_packages.mkdir(parents=True)
+    (repository / "src").mkdir()
+    (repository / "scripts").mkdir()
+    (prefix / "pyvenv.cfg").write_text(
+        "include-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    (site_packages / "package.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (site_packages / "editable.pth").write_text(
+        f"{repository / 'src'}\n",
+        encoding="utf-8",
+    )
+    return repository, prefix
 
 
 def _fake_host_files(
@@ -116,6 +202,11 @@ def _mock_static_environment(
         qualification,
         "_dependency_environment_hash",
         lambda: "9" * 64,
+    )
+    monkeypatch.setattr(
+        qualification,
+        "_execution_environment_identity",
+        lambda _prefix, **_kwargs: _fake_execution_environment(repository),
     )
     monkeypatch.setattr(
         qualification.os,
@@ -263,6 +354,12 @@ def _capacity_record(
             "benchmark_result": result,
             "prelaunch_checkout": snapshot,
             "postrun_checkout": dict(snapshot),
+            "prelaunch_execution_environment_hash": execution[
+                "execution_environment_hash"
+            ],
+            "postrun_execution_environment_hash": execution[
+                "execution_environment_hash"
+            ],
             "host_memory": {
                 "before_available_memory_bytes": 80 * GIB,
                 "after_available_memory_bytes": 79 * GIB,
@@ -578,10 +675,16 @@ def test_capacity_runner_captures_synthetic_evidence_with_mocked_process(
     monkeypatch.setenv("PYTHONPATH", "/untrusted")
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/untrusted")
     monkeypatch.setenv("LD_PRELOAD", "/untrusted.so")
+    signals: list[int] = []
     monkeypatch.setattr(
         qualification.os,
         "killpg",
-        lambda *_: pytest.fail("completed process group must not be signaled"),
+        lambda _group, sent_signal: signals.append(sent_signal),
+    )
+    monkeypatch.setattr(
+        qualification,
+        "_process_group_exists",
+        lambda _group: False,
     )
     monkeypatch.setattr(
         qualification.subprocess,
@@ -600,11 +703,89 @@ def test_capacity_runner_captures_synthetic_evidence_with_mocked_process(
     assert record["process_major_faults"] == 0
     assert record["host_swap"]["pswpout_delta_pages"] == 0
     assert record["benchmark_result"]["dataset_hash"] == V2_E192_DATASET_HASH
+    assert signals == [signal.SIGTERM]
     assert captured["arguments"][0] == host["runtime"]["uv_path"]
     assert host["runtime"]["execution_python_path"] in captured["arguments"]
-    assert not any(
-        name.startswith(("PYTHON", "UV_")) or name in {"LD_PRELOAD", "LD_LIBRARY_PATH"}
-        for name in captured["environment"]
+    assert captured["environment"] == qualification._sanitized_environment()
+
+
+def test_capacity_runner_records_postrun_environment_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    original = copy.deepcopy(host["runtime"]["execution_environment"])
+    changed = copy.deepcopy(original)
+    changed["site_packages"]["stability_hash"] = "a" * 64
+    child_started = False
+
+    def environment_identity(*_args, **_kwargs):
+        return changed if child_started else original
+
+    monkeypatch.setattr(
+        qualification,
+        "_execution_environment_identity",
+        environment_identity,
+    )
+    monkeypatch.setattr(
+        qualification,
+        "_current_host_resources_match",
+        lambda *_args, **_kwargs: True,
+    )
+    readings = iter(
+        (
+            {"MemAvailable": 80 * GIB},
+            {"pswpin": 10, "pswpout": 20},
+            {"MemAvailable": 79 * GIB},
+            {"pswpin": 10, "pswpout": 20},
+        )
+    )
+    monkeypatch.setattr(qualification, "_read_key_values", lambda _path: next(readings))
+    usage = iter((SimpleNamespace(ru_majflt=5), SimpleNamespace(ru_majflt=5)))
+    monkeypatch.setattr(qualification.resource, "getrusage", lambda _: next(usage))
+
+    class Process:
+        returncode = 0
+        pid = 123
+
+        @staticmethod
+        def poll() -> int:
+            return 0
+
+        @staticmethod
+        def wait(timeout=None) -> int:
+            del timeout
+            return 0
+
+    def popen(_arguments, **kwargs):
+        nonlocal child_started
+        child_started = True
+        return _write_fake_process_output(
+            Process(),
+            kwargs["stdout"],
+            kwargs["stderr"],
+        )
+
+    monkeypatch.setattr(qualification.subprocess, "Popen", popen)
+    monkeypatch.setattr(qualification.os, "killpg", lambda *_args: None)
+    monkeypatch.setattr(
+        qualification,
+        "_process_group_exists",
+        lambda _group: False,
+    )
+    record = run_capacity_benchmark(
+        stage="e192",
+        static_record=host,
+        proc_root=tmp_path / "proc",
+        machine_id_path=tmp_path / "machine-id",
+    )
+
+    assert verify_record(record) == record
+    assert not record["decision"]["execution_environment_unchanged_passed"]
+    assert not record["decision"]["passed"]
+    assert (
+        record["prelaunch_execution_environment_hash"]
+        != record["postrun_execution_environment_hash"]
     )
 
 
@@ -758,6 +939,91 @@ def test_records_are_write_once_and_owner_read_only(
     changed = qualification._signed(changed)
     with pytest.raises(ValueError, match="overwrite"):
         write_record(path, changed)
+
+
+def test_record_write_fails_if_parent_namespace_changes_during_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "publication" / "record.json"
+    payload = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    moved_parent = tmp_path / "moved-publication"
+    replacement_parent = tmp_path / "replacement-publication"
+    replacement_parent.mkdir()
+    original_link = qualification.os.link
+    swapped = False
+
+    def swap_parent_then_link(*args, **kwargs):
+        nonlocal swapped
+        if not swapped:
+            path.parent.rename(moved_parent)
+            path.parent.symlink_to(replacement_parent, target_is_directory=True)
+            swapped = True
+        return original_link(*args, **kwargs)
+
+    monkeypatch.setattr(qualification.os, "link", swap_parent_then_link)
+    with pytest.raises((OSError, ValueError)):
+        write_record(path, payload)
+
+    assert swapped
+    assert not path.exists()
+    assert (moved_parent / path.name).is_file()
+
+
+@pytest.mark.parametrize("mutation", ("writable", "hardlink"))
+def test_record_write_verifies_final_mode_and_link_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    path = tmp_path / "publication" / "record.json"
+    payload = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    original_unlink = qualification.os.unlink
+    original_link = qualification.os.link
+    mutated = False
+
+    def mutate_after_temporary_unlink(name, *, dir_fd=None):
+        nonlocal mutated
+        original_unlink(name, dir_fd=dir_fd)
+        if not mutated:
+            anchored_target = Path(f"/proc/self/fd/{dir_fd}") / path.name
+            if mutation == "writable":
+                anchored_target.chmod(0o600)
+            else:
+                original_link(
+                    path.name,
+                    "record-alias.json",
+                    src_dir_fd=dir_fd,
+                    dst_dir_fd=dir_fd,
+                    follow_symlinks=False,
+                )
+            mutated = True
+
+    monkeypatch.setattr(
+        qualification.os,
+        "unlink",
+        mutate_after_temporary_unlink,
+    )
+    with pytest.raises(ValueError, match="changed during publication"):
+        write_record(path, payload)
+
+
+def test_record_write_does_not_chmod_preexisting_hardlink_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "record.json"
+    alias = tmp_path / "record-alias.json"
+    payload = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    write_record(path, payload)
+    path.chmod(0o600)
+    os.link(path, alias)
+
+    with pytest.raises(ValueError, match="regular file"):
+        write_record(path, payload)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(alias.stat().st_mode) == 0o600
 
 
 def test_verify_record_rejects_bool_schema_and_skeletal_records(
@@ -1034,6 +1300,11 @@ def test_capacity_runner_terminates_and_reaps_on_sampling_base_exception(
             Process.returncode = -sent_signal
 
     monkeypatch.setattr(qualification.os, "killpg", killpg)
+    monkeypatch.setattr(
+        qualification,
+        "_process_group_exists",
+        lambda _group: Process.alive,
+    )
     monkeypatch.setattr(qualification.subprocess, "Popen", lambda *_a, **_k: Process())
 
     with pytest.raises(KeyboardInterrupt):
@@ -1046,6 +1317,40 @@ def test_capacity_runner_terminates_and_reaps_on_sampling_base_exception(
 
     assert signals == [signal.SIGTERM, signal.SIGKILL]
     assert Process.wait_count == 2
+
+
+def test_cleanup_terminates_descendants_after_group_leader_exits() -> None:
+    script = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen("
+        "[sys.executable, '-c', 'import time; time.sleep(30)'], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL)\n"
+        "print(child.pid, flush=True)\n"
+    )
+    leader = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    assert leader.stdout is not None
+    child_pid = int(leader.stdout.readline())
+    leader.wait(timeout=10)
+    child_stat = Path(f"/proc/{child_pid}/stat")
+    assert child_stat.exists()
+
+    try:
+        qualification._terminate_and_reap(
+            leader,
+            process_group=leader.pid,
+        )
+        if child_stat.exists():
+            state = child_stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
+            assert state == "Z"
+    finally:
+        with suppress(ProcessLookupError):
+            os.killpg(leader.pid, signal.SIGKILL)
 
 
 @pytest.mark.parametrize(
@@ -1268,6 +1573,12 @@ def test_probe_runner_anchors_execution_and_benchmark_to_open_directories(
         return Process()
 
     monkeypatch.setattr(qualification.subprocess, "Popen", popen)
+    monkeypatch.setattr(qualification.os, "killpg", lambda *_args: None)
+    monkeypatch.setattr(
+        qualification,
+        "_process_group_exists",
+        lambda _group: False,
+    )
     execution = run_probe_step(
         kind="execution",
         static_record=host,
@@ -1289,6 +1600,67 @@ def test_probe_runner_anchors_execution_and_benchmark_to_open_directories(
     assert "scripts.run_ingestion_probe" in execution["planned_command"]
     assert "runpy.run_module" in execution["executed_command"]
     assert len(anchored_paths) == 2
+
+
+def test_probe_runner_rejects_postrun_environment_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    original = copy.deepcopy(host["runtime"]["execution_environment"])
+    changed = copy.deepcopy(original)
+    changed["site_packages"]["stability_hash"] = "a" * 64
+    child_started = False
+
+    def environment_identity(*_args, **_kwargs):
+        return changed if child_started else original
+
+    monkeypatch.setattr(
+        qualification,
+        "_execution_environment_identity",
+        environment_identity,
+    )
+
+    class Process:
+        pid = 123
+        returncode = 0
+
+        @staticmethod
+        def poll():
+            return 0
+
+        @staticmethod
+        def wait(timeout=None):
+            del timeout
+            return 0
+
+    def popen(_arguments, **kwargs):
+        nonlocal child_started
+        descriptor = kwargs["pass_fds"][0]
+        (Path(f"/proc/self/fd/{descriptor}") / "artifact.json").write_text(
+            "{}",
+            encoding="utf-8",
+        )
+        result = {**_probe_execution_result(host), "artifact_root": "."}
+        kwargs["stdout"].write(json.dumps(result))
+        kwargs["stdout"].flush()
+        child_started = True
+        return Process()
+
+    monkeypatch.setattr(qualification.subprocess, "Popen", popen)
+    monkeypatch.setattr(qualification.os, "killpg", lambda *_args: None)
+    monkeypatch.setattr(
+        qualification,
+        "_process_group_exists",
+        lambda _group: False,
+    )
+    with pytest.raises(ValueError, match="execution environment no longer matches"):
+        run_probe_step(
+            kind="execution",
+            static_record=host,
+            proc_root=tmp_path / "proc",
+            machine_id_path=tmp_path / "machine-id",
+        )
 
 
 def test_probe_descriptor_cwd_is_compatible_with_artifact_nofollow_walker(
@@ -1649,6 +2021,8 @@ def test_git_identity_commands_ignore_inherited_repository_redirects(
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
     }
 
     repository = tmp_path / "qualified"
@@ -1789,22 +2163,211 @@ def test_installed_dependency_hash_binds_file_bytes(
     assert before != after
 
 
-def test_current_execution_python_requires_executable_bound_bytes(
+@pytest.mark.parametrize("relative_path", ("package.py", "editable.pth"))
+def test_execution_environment_binds_all_site_package_bytes_and_metadata(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    _, prefix = _synthetic_execution_environment(tmp_path)
+    before = qualification._execution_environment_identity(
+        prefix,
+        python_version="3.11.15",
+    )
+    target = prefix / "lib" / "python3.11" / "site-packages" / relative_path
+    metadata = target.stat()
+    original = target.read_bytes()
+    replacement = bytes(byte ^ 1 for byte in original)
+    target.write_bytes(replacement)
+    target.write_bytes(original)
+    os.utime(target, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    after = qualification._execution_environment_identity(
+        prefix,
+        python_version="3.11.15",
+    )
+
+    assert (
+        before["site_packages"]["manifest_hash"]
+        == after["site_packages"]["manifest_hash"]
+    )
+    assert (
+        before["site_packages"]["stability_hash"]
+        != after["site_packages"]["stability_hash"]
+    )
+    assert qualification._execution_environment_hash(
+        before
+    ) != qualification._execution_environment_hash(after)
+
+
+def test_execution_environment_brackets_pyvenv_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, prefix = _synthetic_execution_environment(tmp_path)
+    config = prefix / "pyvenv.cfg"
+    original_tree_identity = qualification._stable_directory_tree_identity
+    scanned = False
+
+    def mutate_config_after_first_tree_scan(path):
+        nonlocal scanned
+        identity = original_tree_identity(path)
+        if not scanned:
+            config.write_text(
+                "include-system-site-packages = true \n",
+                encoding="utf-8",
+            )
+            scanned = True
+        return identity
+
+    monkeypatch.setattr(
+        qualification,
+        "_stable_directory_tree_identity",
+        mutate_config_after_first_tree_scan,
+    )
+    with pytest.raises(ValueError, match=r"pyvenv\.cfg changed"):
+        qualification._execution_environment_identity(
+            prefix,
+            python_version="3.11.15",
+        )
+
+
+def test_execution_environment_rejects_executable_pth_path_escape(
     tmp_path: Path,
 ) -> None:
-    python = tmp_path / "python"
+    _, prefix = _synthetic_execution_environment(tmp_path)
+    site_packages = prefix / "lib" / "python3.11" / "site-packages"
+    (site_packages / "escape.pth").write_text(
+        "import sys; sys.path.insert(0, '/tmp/unbound')\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"unapproved executable \.pth line"):
+        qualification._execution_environment_identity(
+            prefix,
+            python_version="3.11.15",
+        )
+
+
+def test_tool_startup_environment_binds_unowned_site_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, prefix = _synthetic_execution_environment(tmp_path)
+    monkeypatch.setattr(qualification.sys, "prefix", str(prefix))
+    monkeypatch.setattr(
+        qualification.platform,
+        "python_version",
+        lambda: "3.11.15",
+    )
+    before = qualification._tool_execution_environment_hash()
+    site_packages = prefix / "lib" / "python3.11" / "site-packages"
+    (site_packages / "sitecustomize.py").write_text(
+        "VALUE = 'unowned startup file'\n",
+        encoding="utf-8",
+    )
+    after = qualification._tool_execution_environment_hash()
+
+    assert before != after
+
+
+@pytest.mark.parametrize("import_root", ("src", "scripts"))
+def test_execution_environment_rejects_ignored_import_bytecode(
+    tmp_path: Path,
+    import_root: str,
+) -> None:
+    repository, prefix = _synthetic_execution_environment(tmp_path)
+    cache = repository / import_root / "__pycache__"
+    cache.mkdir()
+    (cache / "module.cpython-311.pyc").write_bytes(b"unbound")
+
+    with pytest.raises(ValueError, match="unbound Python bytecode"):
+        qualification._execution_environment_identity(
+            prefix,
+            python_version="3.11.15",
+        )
+
+
+def test_execution_environment_change_blocks_launch_before_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    changed = copy.deepcopy(host["runtime"]["execution_environment"])
+    changed["site_packages"]["stability_hash"] = "a" * 64
+    monkeypatch.setattr(
+        qualification,
+        "_execution_environment_identity",
+        lambda *_args, **_kwargs: changed,
+    )
+    monkeypatch.setattr(
+        qualification.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("workload must not launch"),
+    )
+
+    with pytest.raises(ValueError, match="execution environment changed"):
+        run_capacity_benchmark(stage="e192", static_record=host)
+    with pytest.raises(ValueError, match="execution environment no longer matches"):
+        run_probe_step(kind="execution", static_record=host)
+
+
+def test_current_execution_python_requires_executable_bound_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    python = repository / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
     python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     python.chmod(0o600)
     host = {
+        "execution": {"repository": str(repository)},
         "runtime": {
             "execution_python_path": str(python),
             "execution_python_sha256": qualification._sha256_file(python),
-        }
+            "execution_python": "3.11.15",
+            "execution_prefix": str(repository / ".venv"),
+        },
     }
+    monkeypatch.setattr(
+        qualification,
+        "_run_text",
+        lambda arguments, **_kwargs: (
+            "3.11.15"
+            if "platform.python_version()" in arguments[-1]
+            else str(repository / ".venv")
+        ),
+    )
     assert not qualification._current_execution_python_matches_host(host)
 
     python.chmod(0o700)
     assert qualification._current_execution_python_matches_host(host)
+
+
+def test_static_record_rejects_execution_python_outside_checkout_venv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    forged = copy.deepcopy(host)
+    forged["runtime"]["execution_python_path"] = "/bin/true"
+    forged["runtime"]["execution_python_sha256"] = qualification._sha256_file(
+        Path("/bin/true")
+    )
+
+    with pytest.raises(ValueError, match=r"checkout \.venv Python"):
+        verify_record(_resign(forged))
+
+
+def test_static_record_binds_runtime_and_tool_python_versions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    forged = copy.deepcopy(host)
+    forged["runtime"]["tool_python"] = "3.12.0"
+
+    with pytest.raises(ValueError, match="differs from tool identity"):
+        verify_record(_resign(forged))
 
 
 def test_current_resource_revalidation_checks_storage_mount_and_memory(
@@ -2009,11 +2572,15 @@ def test_live_probe_verification_keeps_one_descriptor_anchor(
     (root / "original.json").write_text("{}", encoding="utf-8")
     displaced = storage / "displaced"
     original_manifest = qualification._artifact_manifest_from_descriptor
+    replaced = False
 
     def replace_root_after_open(descriptor):
-        root.rename(displaced)
-        root.mkdir()
-        (root / "replacement.json").write_text("{}", encoding="utf-8")
+        nonlocal replaced
+        if not replaced:
+            root.rename(displaced)
+            root.mkdir()
+            (root / "replacement.json").write_text("{}", encoding="utf-8")
+            replaced = True
         return original_manifest(descriptor)
 
     monkeypatch.setattr(
@@ -2021,11 +2588,130 @@ def test_live_probe_verification_keeps_one_descriptor_anchor(
         "_artifact_manifest_from_descriptor",
         replace_root_after_open,
     )
-    with pytest.raises(ValueError, match="changed during verification"):
+    with pytest.raises(ValueError, match=r"changed during .*verification"):
         qualification._current_artifact_evidence(
             root,
             storage_root=storage,
         )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("late-root-file", "late-nested-file", "overwrite"),
+)
+def test_live_probe_verification_rejects_post_scan_tree_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    storage = tmp_path / "storage"
+    root = storage / "probe"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    original_file = root / "original.json"
+    original_file.write_text("AAAA", encoding="utf-8")
+    original_manifest = qualification._artifact_manifest_from_descriptor
+    mutated = False
+
+    def mutate_after_first_scan(descriptor):
+        nonlocal mutated
+        manifest = original_manifest(descriptor)
+        if not mutated:
+            anchored = Path(f"/proc/self/fd/{descriptor}")
+            if mutation == "late-root-file":
+                (anchored / "late.json").write_text("{}", encoding="utf-8")
+            elif mutation == "late-nested-file":
+                (anchored / "nested" / "late.json").write_text(
+                    "{}",
+                    encoding="utf-8",
+                )
+            else:
+                (anchored / "original.json").write_text(
+                    "BBBB",
+                    encoding="utf-8",
+                )
+            mutated = True
+        return manifest
+
+    monkeypatch.setattr(
+        qualification,
+        "_artifact_manifest_from_descriptor",
+        mutate_after_first_scan,
+    )
+    with pytest.raises(ValueError, match="changed during manifest verification"):
+        qualification._current_artifact_evidence(
+            root,
+            storage_root=storage,
+        )
+
+
+def test_manifest_seal_rejects_mutate_restore_after_content_scans(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "probe"
+    root.mkdir()
+    artifact = root / "artifact.json"
+    artifact.write_text("AAAA", encoding="utf-8")
+    original_metadata = artifact.stat()
+    original_manifest = qualification._artifact_manifest_from_descriptor
+    scans = 0
+
+    def mutate_restore_after_second_scan(descriptor):
+        nonlocal scans
+        manifest = original_manifest(descriptor)
+        scans += 1
+        if scans == 2:
+            anchored = Path(f"/proc/self/fd/{descriptor}") / artifact.name
+            anchored.write_text("BBBB", encoding="utf-8")
+            anchored.write_text("AAAA", encoding="utf-8")
+            os.utime(
+                anchored,
+                ns=(
+                    original_metadata.st_atime_ns,
+                    original_metadata.st_mtime_ns,
+                ),
+            )
+        return manifest
+
+    monkeypatch.setattr(
+        qualification,
+        "_artifact_manifest_from_descriptor",
+        mutate_restore_after_second_scan,
+    )
+    descriptor = os.open(
+        root,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    try:
+        with pytest.raises(ValueError, match="changed during manifest verification"):
+            qualification._stable_manifest_from_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def test_manifest_walk_errors_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "probe"
+    root.mkdir()
+
+    def failing_fwalk(*_args, onerror=None, **_kwargs):
+        assert onerror is not None
+        onerror(OSError("synthetic descendant traversal failure"))
+        yield
+
+    monkeypatch.setattr(qualification.os, "fwalk", failing_fwalk)
+    descriptor = os.open(
+        root,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    try:
+        with pytest.raises(OSError, match="descendant traversal failure"):
+            qualification._stable_manifest_from_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def test_cli_protects_separate_tool_repository_outputs(tmp_path: Path) -> None:
