@@ -134,6 +134,11 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("config", type=Path)
     plan.add_argument("output", type=Path)
     plan.add_argument("canary_output", type=Path)
+    plan.add_argument(
+        "--supplemental-output",
+        type=Path,
+        help="registered supplemental plan output (required for symbolic v2)",
+    )
     report = subparsers.add_parser(
         "report",
         help="validate and report a complete symbolic study artifact root",
@@ -143,6 +148,11 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("canary_plan", type=Path)
     report.add_argument("artifact_root", type=Path)
     report.add_argument("output_dir", type=Path)
+    report.add_argument(
+        "--supplemental-plan",
+        type=Path,
+        help="registered supplemental plan (required for symbolic v2)",
+    )
     report.add_argument(
         "--power-simulations",
         type=int,
@@ -207,6 +217,11 @@ def _parser() -> argparse.ArgumentParser:
     freeze.add_argument("output_config", type=Path)
     freeze.add_argument("output_plan", type=Path)
     freeze.add_argument("output_canary_plan", type=Path)
+    freeze.add_argument(
+        "--output-supplemental-plan",
+        type=Path,
+        help="sealed supplemental plan output (required for symbolic v2)",
+    )
     return parser
 
 
