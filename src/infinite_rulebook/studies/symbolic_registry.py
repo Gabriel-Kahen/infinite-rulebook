@@ -7,12 +7,30 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from infinite_rulebook.analysis.canaries import evaluate_canaries
+from infinite_rulebook.analysis.compact_canaries_v2 import (
+    CompactCanaryEvidence,
+    compact_canary_artifacts,
+    compact_canary_results_csv,
+    evaluate_compact_canaries,
+    parse_compact_canary_detail_chunk_json,
+    parse_compact_canary_plan_json,
+    parse_compact_canary_report_json,
+)
 from infinite_rulebook.analysis.models import AnalysisPhase
+from infinite_rulebook.analysis.supplemental_v2 import (
+    evaluate_supplemental_evidence,
+    parse_supplemental_evidence_plan_json,
+    parse_supplemental_evidence_report_json,
+    supplemental_evidence_artifacts,
+)
+from infinite_rulebook.analysis.visualization import canary_results_csv
 from infinite_rulebook.orchestration.config import (
     ExperimentConfig,
     symbolic_adapter_contract,
 )
 from infinite_rulebook.orchestration.freeze import ConfirmatoryFreezeRecord
+from infinite_rulebook.orchestration.jsonio import parse_json_strict
 from infinite_rulebook.orchestration.symbolic import (
     ExactSymbolicAdapter,
     ExactSymbolicAdapterV2,
@@ -27,6 +45,60 @@ ConfirmatoryVerifier = Callable[..., ConfirmatoryFreezeRecord]
 EvidenceHashBuilder = Callable[..., str]
 ExpectedGroupsBuilder = Callable[[ExperimentConfig], tuple[Any, ...]]
 PowerHypothesesBuilder = Callable[[Any], tuple[Any, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolicSupplementalDesign:
+    """Registered evidence outside one study's primary multiplicity family."""
+
+    build_plan: Callable[..., Any]
+    verify_plan_json: Callable[[str, Any], None]
+    evaluate: Callable[[Any, Any], Any]
+    artifacts: Callable[[Any, Any], tuple[tuple[str, str], ...]]
+    verify_artifacts: Callable[[Mapping[str, str], Any, Any], None]
+
+    @staticmethod
+    def binding_fields(plan: Any, report: Any) -> dict[str, object]:
+        return {
+            "supplemental_plan_hash": plan.scientific_hash,
+            "supplemental_report_hash": report.scientific_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolicEvidenceDesign:
+    """Versioned deterministic canary and supplemental evidence behavior."""
+
+    build_canary_plan: Callable[..., Any]
+    verify_canary_plan_json: Callable[[str, Any], None]
+    evaluate_canaries: Callable[[Any, Any], Any]
+    canary_report: Callable[[Any], Any]
+    canary_artifacts: Callable[[Any], tuple[tuple[str, str], ...]]
+    verify_canary_artifacts: Callable[[Mapping[str, str], Any], None]
+    canary_results_csv: Callable[[Any], str]
+    canary_binding_fields: Callable[[Any], dict[str, object]]
+    supplemental: SymbolicSupplementalDesign | None = None
+
+    def calibration_hash_fields(
+        self,
+        canary_evidence: Any,
+        supplemental_plan: Any | None,
+        supplemental_report: Any | None,
+    ) -> dict[str, object]:
+        fields = self.canary_binding_fields(canary_evidence)
+        if self.supplemental is None:
+            if supplemental_plan is not None or supplemental_report is not None:
+                raise ValueError("study does not register supplemental evidence")
+            return fields
+        if supplemental_plan is None or supplemental_report is None:
+            raise ValueError("study requires registered supplemental evidence")
+        return {
+            **fields,
+            **self.supplemental.binding_fields(
+                supplemental_plan,
+                supplemental_report,
+            ),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +173,7 @@ class SymbolicStudySpec:
     expected_confirmatory_margins: Callable[[], dict[str, float]]
     calibration_evidence_hash: EvidenceHashBuilder
     calibration_evidence_hash_from_hashes: EvidenceHashBuilder
+    evidence: SymbolicEvidenceDesign
     power: SymbolicPowerDesign
     smoke_config_hash: str
     smoke_prerequisite_hash: str | None
@@ -158,6 +231,113 @@ def _power_design(module: Any, *, rng_stream: str) -> SymbolicPowerDesign:
     )
 
 
+def _strict_object(content: str, *, label: str) -> dict[str, Any]:
+    value = parse_json_strict(content, label=label)
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
+def _verify_v1_canary_plan(content: str, expected: Any) -> None:
+    if _strict_object(content, label="v1 canary plan") != expected.to_dict():
+        raise ValueError("canary plan differs from the registered v1 plan")
+
+
+def _v1_canary_artifacts(evidence: Any) -> tuple[tuple[str, str], ...]:
+    return (("canaries.json", evidence.to_json()),)
+
+
+def _verify_v1_canary_artifacts(
+    contents: Mapping[str, str],
+    evidence: Any,
+) -> None:
+    expected = dict(_v1_canary_artifacts(evidence))
+    if dict(contents) != expected:
+        raise ValueError("v1 canary artifact bundle differs from raw evidence")
+    if (
+        _strict_object(contents["canaries.json"], label="v1 canary report")
+        != evidence.to_dict()
+    ):
+        raise ValueError("v1 canary report is noncanonical")
+
+
+def _verify_v2_canary_plan(content: str, expected: Any) -> None:
+    if parse_compact_canary_plan_json(content) != expected:
+        raise ValueError("canary plan differs from the registered v2 plan")
+
+
+def _verify_v2_canary_artifacts(
+    contents: Mapping[str, str],
+    evidence: Any,
+) -> None:
+    expected = dict(compact_canary_artifacts(evidence))
+    if dict(contents) != expected:
+        raise ValueError("v2 canary artifact bundle differs from raw evidence")
+    report = parse_compact_canary_report_json(contents["canaries.json"])
+    chunks = tuple(
+        parse_compact_canary_detail_chunk_json(contents[name])
+        for name in sorted(contents)
+        if name.startswith("canary-details-")
+    )
+    if CompactCanaryEvidence(report, chunks) != evidence:
+        raise ValueError("v2 canary artifact bundle is internally inconsistent")
+
+
+def _verify_v2_supplemental_plan(content: str, expected: Any) -> None:
+    if parse_supplemental_evidence_plan_json(content) != expected:
+        raise ValueError("supplemental plan differs from the registered v2 plan")
+
+
+def _verify_v2_supplemental_artifacts(
+    contents: Mapping[str, str],
+    plan: Any,
+    report: Any,
+) -> None:
+    expected = dict(supplemental_evidence_artifacts(plan, report))
+    if dict(contents) != expected:
+        raise ValueError("v2 supplemental artifacts differ from raw evidence")
+    if (
+        parse_supplemental_evidence_plan_json(contents["supplemental-plan.json"])
+        != plan
+        or parse_supplemental_evidence_report_json(contents["supplemental.json"])
+        != report
+    ):
+        raise ValueError("v2 supplemental artifacts are internally inconsistent")
+
+
+V1_EVIDENCE = SymbolicEvidenceDesign(
+    build_canary_plan=v1.build_symbolic_canary_plan,
+    verify_canary_plan_json=_verify_v1_canary_plan,
+    evaluate_canaries=evaluate_canaries,
+    canary_report=lambda evidence: evidence,
+    canary_artifacts=_v1_canary_artifacts,
+    verify_canary_artifacts=_verify_v1_canary_artifacts,
+    canary_results_csv=canary_results_csv,
+    canary_binding_fields=lambda evidence: {},
+)
+
+V2_EVIDENCE = SymbolicEvidenceDesign(
+    build_canary_plan=v2.build_symbolic_canary_plan,
+    verify_canary_plan_json=_verify_v2_canary_plan,
+    evaluate_canaries=evaluate_compact_canaries,
+    canary_report=lambda evidence: evidence.report,
+    canary_artifacts=compact_canary_artifacts,
+    verify_canary_artifacts=_verify_v2_canary_artifacts,
+    canary_results_csv=lambda evidence: compact_canary_results_csv(evidence.report),
+    canary_binding_fields=lambda evidence: {
+        "canary_detail_root_hash": evidence.report.detail_root_hash,
+        "canary_detail_record_count": evidence.report.detail_record_count,
+    },
+    supplemental=SymbolicSupplementalDesign(
+        build_plan=v2.build_symbolic_supplemental_plan,
+        verify_plan_json=_verify_v2_supplemental_plan,
+        evaluate=evaluate_supplemental_evidence,
+        artifacts=supplemental_evidence_artifacts,
+        verify_artifacts=_verify_v2_supplemental_artifacts,
+    ),
+)
+
+
 SYMBOLIC_STUDY_V1 = SymbolicStudySpec(
     version=1,
     study_contract=v1.STUDY_CONTRACT,
@@ -174,6 +354,7 @@ SYMBOLIC_STUDY_V1 = SymbolicStudySpec(
     expected_confirmatory_margins=v1.expected_confirmatory_margins,
     calibration_evidence_hash=v1.calibration_evidence_hash,
     calibration_evidence_hash_from_hashes=v1.calibration_evidence_hash_from_hashes,
+    evidence=V1_EVIDENCE,
     power=_power_design(v1, rng_stream="analysis.cluster-power.v1"),
     smoke_config_hash=v1.SYMBOLIC_V1_SMOKE_CONFIG_HASH,
     smoke_prerequisite_hash=None,
@@ -201,6 +382,7 @@ SYMBOLIC_STUDY_V2 = SymbolicStudySpec(
     expected_confirmatory_margins=v2.expected_confirmatory_margins,
     calibration_evidence_hash=v2.calibration_evidence_hash,
     calibration_evidence_hash_from_hashes=v2.calibration_evidence_hash_from_hashes,
+    evidence=V2_EVIDENCE,
     power=_power_design(v2, rng_stream=v2.POWER_RNG_STREAM),
     smoke_config_hash=v2.SYMBOLIC_V2_SMOKE_CONFIG_HASH,
     smoke_prerequisite_hash=v2.SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
@@ -241,8 +423,10 @@ def execution_adapter_factory(
 __all__ = [
     "SYMBOLIC_STUDY_V1",
     "SYMBOLIC_STUDY_V2",
+    "SymbolicEvidenceDesign",
     "SymbolicPowerDesign",
     "SymbolicStudySpec",
+    "SymbolicSupplementalDesign",
     "execution_adapter_factory",
     "registered_symbolic_study",
 ]

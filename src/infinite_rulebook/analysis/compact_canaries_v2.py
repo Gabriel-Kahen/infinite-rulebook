@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import math
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -876,6 +878,64 @@ def compact_canary_artifacts(
     )
 
 
+def compact_canary_results_csv(report: CompactCanaryReport) -> str:
+    """Return one bounded summary row per authenticated v2 canary gate."""
+
+    if not isinstance(report, CompactCanaryReport):
+        raise TypeError("report must be a CompactCanaryReport")
+    fields = (
+        "phase",
+        "canary_report_hash",
+        "dataset_hash",
+        "canary_plan_hash",
+        "detail_root_hash",
+        "all_canaries_passed",
+        "name",
+        "kind",
+        "gate_passed",
+        "environment_clusters",
+        "cell_count",
+        "checkpoint_count",
+        "record_count",
+        "violation_count",
+        "tolerance",
+        "minimum_residual",
+        "maximum_residual",
+        "maximum_absolute_error",
+    )
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=fields,
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for result in report.results:
+        writer.writerow(
+            {
+                "phase": report.phase.value,
+                "canary_report_hash": report.scientific_hash,
+                "dataset_hash": report.dataset_hash,
+                "canary_plan_hash": report.plan_hash,
+                "detail_root_hash": report.detail_root_hash,
+                "all_canaries_passed": str(report.passed).lower(),
+                "name": result.name,
+                "kind": result.kind,
+                "gate_passed": str(result.passed).lower(),
+                "environment_clusters": result.environment_cluster_count,
+                "cell_count": result.cell_count,
+                "checkpoint_count": result.checkpoint_count,
+                "record_count": result.record_count,
+                "violation_count": result.violation_count,
+                "tolerance": repr(result.tolerance),
+                "minimum_residual": repr(result.minimum_residual),
+                "maximum_residual": repr(result.maximum_residual),
+                "maximum_absolute_error": repr(result.maximum_absolute_error),
+            }
+        )
+    return stream.getvalue()
+
+
 _COMPACT_RECORD_TYPES = (
     AggregateMetricCanary,
     CompactCanaryPlan,
@@ -952,6 +1012,7 @@ __all__ = [
     "CompactGateResult",
     "DetailChunkReference",
     "compact_canary_artifacts",
+    "compact_canary_results_csv",
     "detail_inventory_hash",
     "evaluate_compact_canaries",
     "parse_compact_canary_detail_chunk_json",

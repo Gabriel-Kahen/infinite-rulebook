@@ -31,6 +31,8 @@ from infinite_rulebook.studies.symbolic_construct_v2 import (
     SYMBOLIC_V2_SMOKE_CONFIG_HASH,
     SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
     build_symbolic_analysis_plan,
+    build_symbolic_canary_plan,
+    build_symbolic_supplemental_plan,
     calibration_evidence_hash_from_hashes,
     registration_component_hash,
     registration_component_payload,
@@ -88,10 +90,10 @@ def test_v2_plan_has_six_exact_primaries_and_no_scope_reduction() -> None:
         PRIMARY_MINIMUM_EFFECTS
     )
     assert plan.scientific_hash == (
-        "7ca9738ff424dce05cb92383e7a560b5c860d56635680289590143a0fbef29fc"
+        "905689632de395d29de90914409cb9326871f0ad168258a86c4b4b9ed743d353"
     )
     assert plan.registration_hash == (
-        "e19c78286dae4482006ea02af658f0bdcf7d26b7f4026ceddde65cb8e8cc1439"
+        "94572551c16e12a376b3681c44c307d8b74c4e2733cc5f1848435698924f423f"
     )
     by_name = {contrast.name: contrast for contrast in plan.contrasts}
     assert by_name[S2_EARLY].metric == ("post_query_mean_hidden_expected_reward")
@@ -141,6 +143,28 @@ def test_v2_component_binds_compound_non_rescue_and_compact_evidence() -> None:
         "all-exact-registered-condition-agent-groups"
     )
     assert compact["detail_chunk_records"] == 4096
+    assert compact["plan_hashes"] == {
+        "calibration": (
+            "c3085463cc4d381799ff2c651ca4b6b315a2d88c003dff631893899928d8004b"
+        ),
+        "confirmatory": (
+            "a7225427cd8bb7a6131a36937a0da4f8c15f8144c3bf27b30c323e9d484cb752"
+        ),
+    }
+    assert component["supplemental_evidence"] == {
+        "plan_hashes": {
+            "calibration": (
+                "08781c94ce05ffae565025b3cd17da2ff3747c6a9c8ec830c77d3cd3375445ca"
+            ),
+            "confirmatory": (
+                "daabfadbbae5739019e15441214c83d4bdd02daba6852abfa7fa2b01cfdf9cd4"
+            ),
+        },
+        "legacy_replication": LEGACY_D6_REPLICATION,
+        "descriptive_comparison": SECONDARY_D12,
+        "family_membership": "outside-primary-holm",
+        "may_rescue_compound_s2": False,
+    }
     assert component["power"]["rng_stream"] == POWER_RNG_STREAM
     assert component["stage_0_prerequisite"] == {
         "role": "operational-not-inferential",
@@ -148,6 +172,32 @@ def test_v2_component_binds_compound_non_rescue_and_compact_evidence() -> None:
         "config_hash": SYMBOLIC_V2_SMOKE_CONFIG_HASH,
         "evidence_hash": SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
         "does_not_replace_v2_adapter_validation": True,
+    }
+
+
+def test_v2_evidence_plans_are_exact_and_registration_bound() -> None:
+    config = load_experiment_config(_CONFIG)
+    canaries = build_symbolic_canary_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    supplemental = build_symbolic_supplemental_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+
+    assert len(canaries.canaries) == 26
+    assert len(canaries.aggregate_canaries) == 1
+    aggregate = canaries.aggregate_canaries[0]
+    assert len(aggregate.selectors) == 48
+    assert aggregate.checkpoints == tuple(range(1, 13))
+    assert aggregate.source_metric == "post_query_hidden_expected_reward"
+    assert aggregate.aggregate_metric == "post_query_mean_hidden_expected_reward"
+    assert {item.name for item in supplemental.legacy_replications} == {
+        LEGACY_D6_REPLICATION
+    }
+    assert {item.name for item in supplemental.descriptive_comparisons} == {
+        SECONDARY_D12
     }
 
 
