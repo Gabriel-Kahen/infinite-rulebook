@@ -374,6 +374,7 @@ class FactorizedQueryAgent:
         self._validate_candidate_metadata(context.candidates)
         if self._pending_action is not None:
             context.validate_action(self._pending_action)
+            self._validate_policy_action(self._pending_action)
             return self._pending_action
 
         ranked: list[tuple[float, int, TargetKey, QueryTarget]] = []
@@ -404,8 +405,16 @@ class FactorizedQueryAgent:
             tuple(item[3] for item in ranked[: context.query_budget]),
         )
         context.validate_action(action)
+        self._validate_policy_action(action)
         self._pending_action = action
         return action
+
+    def _validate_policy_action(self, action: QueryAction) -> None:
+        validator = getattr(self.policy, "validate_action", None)
+        if validator is not None:
+            if not callable(validator):
+                raise TypeError("policy action validator must be callable")
+            validator(action)
 
     def observe(self, batch: ObservationBatch) -> None:
         """Apply exactly one bounded P1 batch to persistent target posteriors."""
@@ -416,6 +425,7 @@ class FactorizedQueryAgent:
             raise ValueError("observation round does not match agent state")
         if self._pending_action is None or batch.action != self._pending_action:
             raise ValueError("observations must match the selected acquisition action")
+        self._validate_policy_action(batch.action)
         if len(batch.action.targets) > self.query_budget:
             raise ValueError("observation batch exceeds the agent budget")
         if any(observation > self.q for observation in batch.observations):
