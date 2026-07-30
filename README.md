@@ -16,7 +16,8 @@ I(\Theta;A).
 
 ## Status
 
-The repository is implementing the first exact-calibration gates. It covers:
+The repository implements the exact symbolic study lifecycle and its
+construct-validation gates. It covers:
 
 - a stationary, lazily generated Rulebook environment;
 - canonical finite-support deployment actions;
@@ -39,7 +40,13 @@ The repository is implementing the first exact-calibration gates. It covers:
   total-information, and useful-information acquisition objectives;
 - typed deterministic experiment configs and named seed banks;
 - restart-safe immutable scientific artifacts and separately cached frontiers;
-- a side-effect-free checkpoint runner and bounded symbolic pilot CLI;
+- a side-effect-free checkpoint runner with pilot, calibration, and
+  fail-closed confirmatory phases;
+- immutable confirmatory seals binding calibration evidence, seed-bank
+  identities, registered analysis, source code, tolerances, and margins;
+- environment-clustered registered analysis, exact canaries, split-sample
+  certified design assurance, diagnostic power simulation, open CSV tables,
+  and accessible SVG figures;
 - and regression tests against analytic frontiers and control semantics.
 
 ## Development
@@ -54,12 +61,35 @@ uv run ruff format --check .
 uv build
 uv run infinite-rulebook pilot configs/pilot-foundation.json
 uv run infinite-rulebook pilot configs/pilot-smoke.json --workers 4
+uv run infinite-rulebook plan \
+  configs/symbolic-calibration-v1.json \
+  configs/symbolic-calibration-analysis-v1.json \
+  configs/symbolic-calibration-canaries-v1.json
 ```
 
 The symbolic control API and its exact identities are documented in
 [docs/symbolic-controls.md](docs/symbolic-controls.md).
 See [docs/experiments.md](docs/experiments.md) for artifact, restart, semantic
-hash, validation, and pilot-boundary contracts.
+hash, validation, and execution contracts. The bounded symbolic
+construct-validation protocol is
+[docs/symbolic-confirmatory-v1.md](docs/symbolic-confirmatory-v1.md).
+
+### Registered study status
+
+Symbolic construct-validation v1 completed its public Stage-0 and registered
+calibration lifecycle. Exact serial/parallel reproduction, all 20 canaries,
+raw-artifact authentication, and the deviation gate passed. Five of six
+effect-adequacy gates passed; the
+`relevant-over-total-trivia-hidden-reward` gate did not. The fail-closed
+protocol therefore selected no confirmatory sample size, created no seal, and
+ran no confirmatory outcomes.
+
+The stopped result is preserved in the
+[calibration summary](results/symbolic-calibration-v1/summary.json),
+[power report](results/symbolic-calibration-v1/power.json), and
+[protocol disposition](docs/symbolic-confirmatory-v1.md#post-calibration-disposition-outcome-record).
+The evidence-bearing publication inventory and reconstruction instructions are
+in the [v0.1.0 release note](docs/releases/v0.1.0.md).
 
 ## Research scope
 

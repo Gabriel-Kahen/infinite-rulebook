@@ -92,6 +92,14 @@ def test_record_validation_rejects_tampering(
         validate_checkpoint_record(tampered)
 
 
+def test_record_validation_rejects_boolean_schema_version() -> None:
+    payload = build_checkpoint_record(**_inputs())
+    payload["schema_version"] = True
+
+    with pytest.raises(ValueError, match="schema_version"):
+        validate_checkpoint_record(payload)
+
+
 def test_record_validation_rejects_nested_runtime_metadata() -> None:
     payload = build_checkpoint_record(**_inputs())
     tampered = copy.deepcopy(payload)

@@ -123,9 +123,16 @@ def build_pilot_frontier(cell: RunCell) -> PilotFrontier:
 
     enumerated = _enumerated_problem(cell)
     problem = enumerated.problem
+    interior = tuple(
+        problem.zero_information_reward
+        + (problem.maximum_reward - problem.zero_information_reward)
+        * index
+        / (cell.solver.reward_grid_points - 1)
+        for index in range(1, cell.solver.reward_grid_points - 1)
+    )
     targets = (
         problem.zero_information_reward,
-        (problem.zero_information_reward + problem.maximum_reward) / 2.0,
+        *interior,
         problem.maximum_reward,
     )
     solutions = tuple(

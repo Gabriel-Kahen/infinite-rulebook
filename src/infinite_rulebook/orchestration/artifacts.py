@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import fcntl
 import json
 import math
@@ -9,26 +10,61 @@ import os
 import re
 import secrets
 import stat
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from infinite_rulebook.agents import CapabilityManifest
 from infinite_rulebook.artifacts import semantic_hash as typed_semantic_hash
 from infinite_rulebook.frontier.blahut_arimoto import solve_lagrangian
-from infinite_rulebook.frontier.finite_problem import FiniteDecisionProblem
+from infinite_rulebook.frontier.finite_problem import (
+    ChannelWitness,
+    FiniteDecisionProblem,
+)
 from infinite_rulebook.frontier.inversion import FrontierSolution
 from infinite_rulebook.metrics import FrontierPoint
 from infinite_rulebook.orchestration.hashing import is_sha256, scientific_hash
+from infinite_rulebook.orchestration.jsonio import parse_json_strict
 
 ARTIFACT_SCHEMA_VERSION = 1
 _EVENT_NAME = re.compile(r"^(\d{8})\.json$")
+_CHECKPOINT_NAME = re.compile(r"^\d{8}\.json$")
+_ORPHAN_TEMP_NAME = re.compile(r"^\.(?P<target>[^/]+\.json)\.[0-9a-f]{24}$")
 
 
 class ScientificArtifactError(ValueError):
     """Raised when an artifact is invalid, incompatible, or would be mutated."""
+
+
+class ArtifactRootBusyError(ScientificArtifactError):
+    """Raised when another workflow already owns an artifact root."""
+
+
+@dataclass(slots=True)
+class ArtifactValidationSession:
+    """Caller-owned cache populated only by successful frontier validation."""
+
+    _validated_frontiers: dict[tuple[str, str], str] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _validated_frontier_trees: dict[tuple[str, str], tuple[ArtifactEnvelope, ...]] = (
+        field(default_factory=dict, init=False, repr=False)
+    )
+    _frontier_inflight: dict[tuple[str, str], threading.Event] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock,
+        init=False,
+        repr=False,
+    )
 
 
 class _ArtifactNotFound(ScientificArtifactError):
@@ -88,7 +124,11 @@ class ArtifactEnvelope:
         self,
         expected_semantic_hashes: dict[str, str] | None = None,
     ) -> None:
-        if self.schema_version != ARTIFACT_SCHEMA_VERSION:
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != ARTIFACT_SCHEMA_VERSION
+        ):
             raise ScientificArtifactError("unsupported artifact schema version")
         if not isinstance(self.artifact_type, str) or not self.artifact_type:
             raise ScientificArtifactError("artifact_type must not be empty")
@@ -184,8 +224,14 @@ def _open_directory(
                     raise _ArtifactNotFound(
                         f"artifact path does not exist: {path}"
                     ) from error
-                with suppress(FileExistsError):
+                created = False
+                try:
                     os.mkdir(part, mode=0o755, dir_fd=descriptor)
+                    created = True
+                except FileExistsError:
+                    pass
+                if created:
+                    os.fsync(descriptor)
                 child = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
@@ -231,6 +277,38 @@ def artifact_tree_lock(path: Path) -> Iterator[None]:
         os.close(parent)
 
 
+@contextmanager
+def artifact_root_lock(
+    path: Path,
+    *,
+    shared: bool = False,
+    nonblocking: bool = False,
+    create: bool = True,
+) -> Iterator[int]:
+    """Coordinate workflow ownership through the artifact-root directory inode."""
+
+    descriptor = _open_directory(path, create=create)
+    assert descriptor is not None
+    try:
+        operation = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+        if nonblocking:
+            operation |= fcntl.LOCK_NB
+        try:
+            fcntl.flock(descriptor, operation)
+        except BlockingIOError as error:
+            raise ArtifactRootBusyError(
+                f"artifact root is already owned by another workflow: {path}"
+            ) from error
+        try:
+            yield descriptor
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError as error:
+        raise ScientificArtifactError(f"cannot lock artifact root: {path}") from error
+    finally:
+        os.close(descriptor)
+
+
 def _read_json(path: Path) -> object:
     parent = _open_directory(path.parent)
     assert parent is not None
@@ -245,12 +323,15 @@ def _read_json(path: Path) -> object:
             raise ScientificArtifactError(f"artifact is not a regular file: {path}")
         with os.fdopen(descriptor, encoding="utf-8") as stream:
             descriptor = None
-            return json.load(stream)
+            return parse_json_strict(
+                stream.read(),
+                label=f"artifact {path}",
+            )
     except FileNotFoundError as error:
         raise _ArtifactNotFound(f"artifact does not exist: {path}") from error
     except ScientificArtifactError:
         raise
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         raise ScientificArtifactError(f"cannot read artifact {path}") from error
     finally:
         if descriptor is not None:
@@ -280,6 +361,7 @@ def _list_json_files(path: Path, *, missing_ok: bool = False) -> tuple[Path, ...
                     f"artifact tree contains a symbolic link: {path / member}"
                 )
             if stat.S_ISDIR(metadata.st_mode):
+                before = len(result)
                 try:
                     child = os.open(name, _DIRECTORY_FLAGS, dir_fd=descriptor)
                 except OSError as error:
@@ -290,18 +372,94 @@ def _list_json_files(path: Path, *, missing_ok: bool = False) -> tuple[Path, ...
                     walk(child, member)
                 finally:
                     os.close(child)
+                if len(result) == before:
+                    raise ScientificArtifactError(
+                        f"artifact tree contains an empty directory: {path / member}"
+                    )
             elif name.endswith(".json"):
                 if not stat.S_ISREG(metadata.st_mode):
                     raise ScientificArtifactError(
                         f"artifact is not a regular file: {path / member}"
                     )
                 result.append(path / member)
+            elif member == Path(".run.lock") and stat.S_ISREG(metadata.st_mode):
+                continue
+            else:
+                raise ScientificArtifactError(
+                    f"artifact tree contains an unexpected member: {path / member}"
+                )
 
     try:
         walk(root, Path())
     finally:
         os.close(root)
     return tuple(result)
+
+
+def cleanup_orphaned_artifact_temporaries(path: Path) -> None:
+    """Remove only this store's interrupted private JSON publications.
+
+    The caller must hold ``artifact_tree_lock(path)``. The private filename
+    pattern is reserved to ``_exclusive_json`` and is never a user artifact.
+    """
+
+    root = _open_directory(path, missing_ok=True)
+    if root is None:
+        return
+
+    def walk(descriptor: int) -> None:
+        for name in sorted(os.listdir(descriptor)):
+            try:
+                metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except OSError as error:
+                raise ScientificArtifactError(
+                    "cannot inspect interrupted artifact publication"
+                ) from error
+            if stat.S_ISDIR(metadata.st_mode):
+                child = os.open(name, _DIRECTORY_FLAGS, dir_fd=descriptor)
+                try:
+                    walk(child)
+                finally:
+                    os.close(child)
+                continue
+            match = _ORPHAN_TEMP_NAME.fullmatch(name)
+            if match is None:
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ScientificArtifactError(
+                    "interrupted artifact publication is not a regular file"
+                )
+            target = match.group("target")
+            try:
+                target_metadata = os.stat(
+                    target,
+                    dir_fd=descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                target_metadata = None
+            except OSError as error:
+                raise ScientificArtifactError(
+                    "cannot inspect interrupted artifact target"
+                ) from error
+            if target_metadata is not None and not stat.S_ISREG(
+                target_metadata.st_mode
+            ):
+                raise ScientificArtifactError(
+                    "interrupted artifact target is not a regular file"
+                )
+            try:
+                os.unlink(name, dir_fd=descriptor)
+                os.fsync(descriptor)
+            except OSError as error:
+                raise ScientificArtifactError(
+                    "cannot remove interrupted artifact publication"
+                ) from error
+
+    try:
+        walk(root)
+    finally:
+        os.close(root)
 
 
 def read_artifact(
@@ -442,8 +600,9 @@ class ArtifactStore:
         runtime_metadata: dict[str, Any] | None = None,
     ) -> ArtifactEnvelope:
         members = []
+        resolved_configs: list[Any] = []
         for path in self.list_artifacts():
-            if path.name == "manifest.json":
+            if path == self.path / "manifest.json":
                 continue
             artifact = read_artifact(path)
             if artifact.semantic_hashes != semantic_hashes:
@@ -457,6 +616,8 @@ class ArtifactStore:
                     "scientific_hash": artifact.scientific_hash,
                 }
             )
+            if artifact.artifact_type == "resolved-run-config":
+                resolved_configs.append(artifact.payload)
         required = {
             "resolved-run-config",
             "frontier-reference",
@@ -470,6 +631,11 @@ class ArtifactStore:
             raise ScientificArtifactError(
                 f"cannot finalize incomplete run; missing {sorted(missing)}"
             )
+        _validate_run_member_inventory(
+            self.path,
+            members,
+            resolved_configs=resolved_configs,
+        )
         payload = {
             "members": members,
             "scientific_content_hash": scientific_hash(
@@ -485,6 +651,97 @@ class ArtifactStore:
         )
 
 
+def _validate_run_member_inventory(
+    root: Path,
+    members: list[dict[str, str]],
+    *,
+    resolved_configs: list[Any],
+) -> None:
+    by_type: dict[str, list[str]] = {}
+    for member in members:
+        by_type.setdefault(member["artifact_type"], []).append(member["path"])
+    singleton_paths = {
+        "resolved-run-config": "config.resolved.json",
+        "frontier-reference": "frontier-reference.json",
+        "run-metrics": "metrics.json",
+    }
+    for artifact_type, expected_path in singleton_paths.items():
+        if by_type.get(artifact_type) != [expected_path]:
+            raise ScientificArtifactError(
+                f"cannot finalize run with invalid {artifact_type} inventory"
+            )
+    events = by_type.get("training-event", [])
+    checkpoints = by_type.get("run-checkpoint", [])
+    if not events or any(
+        Path(path).parent != Path("events")
+        or _EVENT_NAME.fullmatch(Path(path).name) is None
+        for path in events
+    ):
+        raise ScientificArtifactError(
+            "cannot finalize run with invalid training-event inventory"
+        )
+    if not checkpoints or any(
+        Path(path).parent != Path("checkpoints")
+        or _CHECKPOINT_NAME.fullmatch(Path(path).name) is None
+        for path in checkpoints
+    ):
+        raise ScientificArtifactError(
+            "cannot finalize run with invalid run-checkpoint inventory"
+        )
+    allowed = {*singleton_paths, "training-event", "run-checkpoint"}
+    unexpected = set(by_type) - allowed
+    if unexpected:
+        raise ScientificArtifactError(
+            f"cannot finalize run with unexpected artifact types: {sorted(unexpected)}"
+        )
+    if len({member["path"] for member in members}) != len(members):
+        raise ScientificArtifactError(
+            f"cannot finalize run with duplicate member paths under {root}"
+        )
+    if len(resolved_configs) != 1 or not isinstance(resolved_configs[0], dict):
+        raise ScientificArtifactError(
+            "cannot finalize run with an invalid resolved config"
+        )
+    run_settings = resolved_configs[0].get("run_settings")
+    if not isinstance(run_settings, dict):
+        raise ScientificArtifactError(
+            "cannot finalize run with invalid resolved run settings"
+        )
+    horizon = run_settings.get("horizon")
+    checkpoint_config = run_settings.get("checkpoints")
+    rounds = (
+        None
+        if not isinstance(checkpoint_config, dict)
+        else checkpoint_config.get("rounds")
+    )
+    if (
+        isinstance(horizon, bool)
+        or not isinstance(horizon, int)
+        or horizon < 1
+        or not isinstance(rounds, list)
+        or any(
+            isinstance(round_index, bool)
+            or not isinstance(round_index, int)
+            or not 0 <= round_index <= horizon
+            for round_index in rounds
+        )
+        or rounds != sorted(set(rounds))
+    ):
+        raise ScientificArtifactError(
+            "cannot finalize run with invalid horizon or checkpoints"
+        )
+    expected_events = [
+        f"events/{round_index:08d}.json" for round_index in range(horizon)
+    ]
+    expected_checkpoints = [
+        f"checkpoints/{round_index:08d}.json" for round_index in rounds
+    ]
+    if events != expected_events or checkpoints != expected_checkpoints:
+        raise ScientificArtifactError(
+            "cannot finalize run with an incomplete or extra event/checkpoint inventory"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class JournalEvent:
     sequence: int
@@ -493,6 +750,59 @@ class JournalEvent:
     previous_hash: str | None
     payload: Any
     event_hash: str
+
+
+def _validated_journal_events(
+    records: Iterator[tuple[int, ArtifactEnvelope]],
+) -> list[JournalEvent]:
+    result: list[JournalEvent] = []
+    event_keys: set[str] = set()
+    previous_hash = None
+    required = {
+        "sequence",
+        "event_key",
+        "event_kind",
+        "previous_hash",
+        "payload",
+        "event_hash",
+    }
+    for expected_sequence, (sequence, envelope) in enumerate(records):
+        if sequence != expected_sequence:
+            raise ScientificArtifactError("event journal has a sequence gap")
+        if envelope.artifact_type != "training-event":
+            raise ScientificArtifactError("event journal contains a wrong type")
+        payload = envelope.payload
+        if not isinstance(payload, dict):
+            raise ScientificArtifactError("event payload must be an object")
+        if set(payload) != required:
+            raise ScientificArtifactError("training event fields are invalid")
+        if (
+            isinstance(payload["sequence"], bool)
+            or not isinstance(payload["sequence"], int)
+            or not isinstance(payload["event_key"], str)
+            or not payload["event_key"]
+            or not isinstance(payload["event_kind"], str)
+            or not payload["event_kind"]
+            or (
+                payload["previous_hash"] is not None
+                and not is_sha256(payload["previous_hash"])
+            )
+            or not is_sha256(payload["event_hash"])
+        ):
+            raise ScientificArtifactError("training event values are invalid")
+        scientific_event = {name: payload[name] for name in required - {"event_hash"}}
+        event_hash = scientific_hash(scientific_event, domain="training-event")
+        if payload["sequence"] != sequence or payload["previous_hash"] != previous_hash:
+            raise ScientificArtifactError("event journal hash chain is invalid")
+        if payload["event_hash"] != event_hash:
+            raise ScientificArtifactError("training event hash mismatch")
+        event = JournalEvent(**payload)
+        if event.event_key in event_keys:
+            raise ScientificArtifactError("event journal has duplicate event keys")
+        event_keys.add(event.event_key)
+        result.append(event)
+        previous_hash = event.event_hash
+    return result
 
 
 class EventJournal:
@@ -523,48 +833,20 @@ class EventJournal:
             if match:
                 paths.append((int(match.group(1)), path))
         paths.sort()
-        result: list[JournalEvent] = []
-        previous_hash = None
-        for expected_sequence, (sequence, path) in enumerate(paths):
-            if sequence != expected_sequence:
-                raise ScientificArtifactError("event journal has a sequence gap")
-            envelope = read_artifact(
-                path, expected_semantic_hashes=self.semantic_hashes
+        result = _validated_journal_events(
+            (
+                (
+                    sequence,
+                    read_artifact(
+                        path,
+                        expected_semantic_hashes=self.semantic_hashes,
+                    ),
+                )
+                for sequence, path in paths
             )
-            if envelope.artifact_type != "training-event":
-                raise ScientificArtifactError("event journal contains a wrong type")
-            payload = envelope.payload
-            if not isinstance(payload, dict):
-                raise ScientificArtifactError("event payload must be an object")
-            required = {
-                "sequence",
-                "event_key",
-                "event_kind",
-                "previous_hash",
-                "payload",
-                "event_hash",
-            }
-            if set(payload) != required:
-                raise ScientificArtifactError("training event fields are invalid")
-            scientific_event = {
-                name: payload[name] for name in required - {"event_hash"}
-            }
-            event_hash = scientific_hash(scientific_event, domain="training-event")
-            invalid_chain = (
-                payload["sequence"] != sequence
-                or payload["previous_hash"] != previous_hash
-            )
-            if invalid_chain:
-                raise ScientificArtifactError("event journal hash chain is invalid")
-            if payload["event_hash"] != event_hash:
-                raise ScientificArtifactError("training event hash mismatch")
-            event = JournalEvent(**payload)
-            result.append(event)
-            previous_hash = event.event_hash
+        )
         self._events = result
         self._events_by_key = {event.event_key: event for event in result}
-        if len(self._events_by_key) != len(result):
-            raise ScientificArtifactError("event journal has duplicate event keys")
         return result
 
     def append(self, event_key: str, event_kind: str, payload: Any) -> JournalEvent:
@@ -652,6 +934,22 @@ def write_frontier_bundle(
         diagnostics,
     )
     members.sort(key=lambda member: member["path"])
+    observed = []
+    for path in store.list_artifacts():
+        if path == store.path / "frontier/manifest.json":
+            continue
+        artifact = read_artifact(path)
+        observed.append(
+            {
+                "path": path.relative_to(store.path).as_posix(),
+                "artifact_type": artifact.artifact_type,
+                "scientific_hash": artifact.scientific_hash,
+            }
+        )
+    if observed != members:
+        raise ScientificArtifactError(
+            "cannot finalize frontier with an unexpected artifact inventory"
+        )
     return store.write(
         "frontier/manifest.json",
         "frontier-manifest",
@@ -670,8 +968,76 @@ def validate_artifact_tree(
     root: str | Path,
     *,
     expected_semantic_hashes: dict[str, str] | None = None,
+    session: ArtifactValidationSession | None = None,
 ) -> tuple[ArtifactEnvelope, ...]:
+    """Validate a tree, single-flighting shared frontier work per session."""
+
+    if session is not None and not isinstance(session, ArtifactValidationSession):
+        raise TypeError("session must be an ArtifactValidationSession or None")
     path = Path(root)
+    if (
+        session is None
+        or expected_semantic_hashes is None
+        or set(expected_semantic_hashes) != {"frontier"}
+        or not is_sha256(expected_semantic_hashes["frontier"])
+    ):
+        return _validate_artifact_tree_uncached(
+            path,
+            expected_semantic_hashes=expected_semantic_hashes,
+            session=session,
+        )
+    frontier_cache_key = (
+        os.path.abspath(path),
+        expected_semantic_hashes["frontier"],
+    )
+    while True:
+        with session._lock:
+            cached = session._validated_frontier_trees.get(frontier_cache_key)
+            if cached is not None:
+                return _copy_artifact_envelopes(cached)
+            pending = session._frontier_inflight.get(frontier_cache_key)
+            if pending is None:
+                pending = threading.Event()
+                session._frontier_inflight[frontier_cache_key] = pending
+                break
+        pending.wait()
+    try:
+        artifacts = _validate_artifact_tree_uncached(
+            path,
+            expected_semantic_hashes=expected_semantic_hashes,
+            session=session,
+        )
+    except BaseException:
+        with session._lock:
+            session._frontier_inflight.pop(frontier_cache_key, None)
+            pending.set()
+        raise
+    with session._lock:
+        session._validated_frontier_trees[frontier_cache_key] = (
+            _copy_artifact_envelopes(artifacts)
+        )
+        session._frontier_inflight.pop(frontier_cache_key, None)
+        pending.set()
+    return artifacts
+
+
+def _copy_artifact_envelopes(
+    artifacts: tuple[ArtifactEnvelope, ...],
+) -> tuple[ArtifactEnvelope, ...]:
+    """Keep mutable public envelope graphs outside the trusted cache."""
+
+    return tuple(
+        ArtifactEnvelope.from_dict(copy.deepcopy(artifact.to_dict()))
+        for artifact in artifacts
+    )
+
+
+def _validate_artifact_tree_uncached(
+    path: Path,
+    *,
+    expected_semantic_hashes: dict[str, str] | None,
+    session: ArtifactValidationSession | None,
+) -> tuple[ArtifactEnvelope, ...]:
     try:
         files = _list_json_files(path)
     except _ArtifactNotFound as error:
@@ -716,19 +1082,21 @@ def validate_artifact_tree(
         ]
         if manifest_records != [path / "manifest.json"]:
             raise ScientificArtifactError("run manifest must be at the tree root")
-        expected_members = manifest.payload["members"]
-        actual_members = []
-        for file in files:
-            if file.name == "manifest.json" and file.parent == path:
-                continue
-            artifact = read_artifact(file)
-            actual_members.append(
-                {
-                    "path": file.relative_to(path).as_posix(),
-                    "artifact_type": artifact.artifact_type,
-                    "scientific_hash": artifact.scientific_hash,
-                }
-            )
+        try:
+            expected_members = manifest.payload["members"]
+        except (KeyError, TypeError) as error:
+            raise ScientificArtifactError(
+                "run manifest scientific structure is malformed"
+            ) from error
+        actual_members = [
+            {
+                "path": file.relative_to(path).as_posix(),
+                "artifact_type": artifact.artifact_type,
+                "scientific_hash": artifact.scientific_hash,
+            }
+            for file, artifact in records
+            if file != path / "manifest.json"
+        ]
         if actual_members != expected_members:
             raise ScientificArtifactError("run manifest member list is invalid")
         expected_content_hash = scientific_hash(
@@ -739,9 +1107,20 @@ def validate_artifact_tree(
                 "run manifest scientific content hash is invalid"
             )
         _validate_completed_run(path, records, manifest)
-    _validate_frontier_records(path, records)
-    if manifests:
-        _validate_frontier_reference(path, records)
+    try:
+        _validate_frontier_records(path, records)
+        if manifests:
+            _validate_frontier_reference(
+                path,
+                records,
+                session=session,
+            )
+    except ScientificArtifactError:
+        raise
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+        raise ScientificArtifactError(
+            "artifact tree scientific structure is malformed"
+        ) from error
     return artifacts
 
 
@@ -750,7 +1129,21 @@ def _validate_completed_run(
     records: tuple[tuple[Path, ArtifactEnvelope], ...],
     manifest: ArtifactEnvelope,
 ) -> None:
-    del manifest
+    try:
+        _validate_completed_run_payload(root, records, manifest)
+    except ScientificArtifactError:
+        raise
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+        raise ScientificArtifactError(
+            "completed run scientific structure is malformed"
+        ) from error
+
+
+def _validate_completed_run_payload(
+    root: Path,
+    records: tuple[tuple[Path, ArtifactEnvelope], ...],
+    manifest: ArtifactEnvelope,
+) -> None:
     by_type: dict[str, list[tuple[Path, ArtifactEnvelope]]] = {}
     for file, artifact in records:
         by_type.setdefault(artifact.artifact_type, []).append((file, artifact))
@@ -799,23 +1192,114 @@ def _validate_completed_run(
             "completed run training events must be stored under events/"
         )
     if any(
-        file.parent != root / "checkpoints"
-        for file, _ in by_type["run-checkpoint"]
+        file.parent != root / "checkpoints" for file, _ in by_type["run-checkpoint"]
     ):
         raise ScientificArtifactError(
             "completed run checkpoints must be stored under checkpoints/"
         )
 
     config = by_type["resolved-run-config"][0][1].payload
+    base_config_fields = {
+        "cell",
+        "provenance",
+        "run_hash",
+        "run_settings",
+        "seeds",
+    }
+    if set(config) != base_config_fields:
+        raise ScientificArtifactError(
+            "completed run resolved config fields are invalid"
+        )
     metrics = by_type["run-metrics"][0][1].payload
     run_settings = config["run_settings"]
+    cell = config["cell"]
     seeds = config["seeds"]
-    horizon = run_settings["horizon"]
-    journal = EventJournal(
-        ArtifactStore(root),
-        by_type["run-manifest"][0][1].semantic_hashes,
+    provenance = config["provenance"]
+    recorded_run_hash = config.get("run_hash")
+    try:
+        from infinite_rulebook.orchestration.config import (
+            run_cell_from_dict,
+            run_cell_identity_payload,
+        )
+        from infinite_rulebook.orchestration.provenance import ScientificProvenance
+        from infinite_rulebook.orchestration.seeds import RunSeeds, SeedBank
+        from infinite_rulebook.orchestration.semantics import semantic_hashes
+
+        typed_cell = run_cell_from_dict(cell)
+        typed_cell_payload = run_cell_identity_payload(cell)
+        typed_seeds = RunSeeds(**seeds)
+        typed_provenance = ScientificProvenance(**provenance)
+    except (TypeError, ValueError) as error:
+        raise ScientificArtifactError(
+            "completed run identity inputs are malformed"
+        ) from error
+    seed_bank = SeedBank(
+        run_settings["master_seed"],
+        run_settings.get("algorithm_master_seed"),
     )
-    events = journal.events()
+    expected_seeds = (
+        seed_bank.for_cell(typed_cell)
+        if "algorithm_master_seed" in run_settings
+        else seed_bank.legacy_for_cell(typed_cell)
+    )
+    if typed_seeds != expected_seeds:
+        raise ScientificArtifactError(
+            "completed run seeds do not match the registered seed-bank policy"
+        )
+    expected_semantics = semantic_hashes(
+        typed_cell,
+        analysis_code_hash=typed_provenance.analysis_code_hash,
+        solver_identity_payload=cell["solver"],
+    )
+    if manifest.semantic_hashes != expected_semantics:
+        raise ScientificArtifactError(
+            "completed run semantics do not match its typed cell and provenance"
+        )
+    expected_run_hash = scientific_hash(
+        {
+            "runner_version": "symbolic-runner.v1",
+            "run_settings": run_settings,
+            "cell": typed_cell_payload,
+            "seeds": asdict(typed_seeds),
+            "provenance": typed_provenance.to_dict(),
+        },
+        domain="run-identity",
+    )
+    if recorded_run_hash != expected_run_hash or root.name != expected_run_hash:
+        raise ScientificArtifactError(
+            "completed run identity does not match its scientific inputs"
+        )
+    horizon = run_settings["horizon"]
+    phase = run_settings.get("phase")
+    confirmatory = phase == "confirmatory"
+    freeze_hash = run_settings.get("confirmatory_freeze_hash")
+    registration_hash = run_settings.get("analysis_registration_hash")
+    if (
+        phase not in {"pilot", "calibration", "confirmatory"}
+        or metrics.get("phase") != phase
+        or metrics.get("confirmatory_frozen") is not confirmatory
+        or run_settings.get("confirmatory_frozen", False) is not confirmatory
+        or (confirmatory and not is_sha256(freeze_hash))
+        or (confirmatory and not is_sha256(registration_hash))
+        or (
+            confirmatory
+            and run_settings.get("adapter_contract") != "exact-symbolic-adapter.v1"
+        )
+        or (not confirmatory and freeze_hash is not None)
+        or (not confirmatory and registration_hash is not None)
+    ):
+        raise ScientificArtifactError(
+            "completed run phase and confirmatory freeze metadata are invalid"
+        )
+    events = _validated_journal_events(
+        (
+            (int(file.stem), envelope)
+            for file, envelope in sorted(
+                by_type["training-event"],
+                key=lambda item: item[0].name,
+            )
+        )
+    )
     if (
         len(events) != horizon
         or metrics.get("event_count") != horizon
@@ -855,6 +1339,15 @@ def _validate_completed_run(
             raise ScientificArtifactError(
                 "completed run typed checkpoint record is invalid"
             ) from error
+        from infinite_rulebook.orchestration.symbolic import (
+            recompute_reward_components,
+        )
+
+        recomputed_reward = recompute_reward_components(
+            typed_cell,
+            typed_seeds,
+            typed.deployment_witness,
+        )
         typed_semantics = {
             name: getattr(typed.semantic_hashes, name)
             for name in ("environment", "reward", "action", "feedback", "frontier")
@@ -873,6 +1366,12 @@ def _validate_completed_run(
             or typed_semantics != checkpoint.semantic_hashes
             or typed.deployment_seed != payload["deployment_seed"]
             or result.get("expected_reward") != typed.reward_samples[0]
+            or (
+                result.get("expected_reward"),
+                result.get("hidden_expected_reward"),
+                result.get("public_reward"),
+            )
+            != recomputed_reward
             or result.get("deployment") != readable_deployment
             or result.get("information") != asdict(typed.realized_information)
             or result.get("novelty") != asdict(typed.novelty)
@@ -896,11 +1395,111 @@ def _validate_completed_run(
         checkpoint_rounds.append(round_index)
     if sorted(checkpoint_rounds) != expected_rounds:
         raise ScientificArtifactError("completed run checkpoint schedule is incomplete")
+    if phase in {"calibration", "confirmatory"}:
+        _validate_exact_symbolic_replay(
+            typed_cell=typed_cell,
+            typed_seeds=typed_seeds,
+            semantic_hashes=manifest.semantic_hashes,
+            events=events,
+            checkpoints=tuple(artifact for _, artifact in by_type["run-checkpoint"]),
+            metrics=metrics,
+            horizon=horizon,
+            expected_rounds=tuple(expected_rounds),
+            phase=phase,
+            confirmatory=confirmatory,
+        )
+
+
+def _validate_exact_symbolic_replay(
+    *,
+    typed_cell: Any,
+    typed_seeds: Any,
+    semantic_hashes: dict[str, str],
+    events: tuple[Any, ...],
+    checkpoints: tuple[ArtifactEnvelope, ...],
+    metrics: dict[str, Any],
+    horizon: int,
+    expected_rounds: tuple[int, ...],
+    phase: str,
+    confirmatory: bool,
+) -> None:
+    """Replay every registered study transition and evaluation from first principles."""
+
+    from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
+
+    adapter = ExactSymbolicAdapter()
+    state = adapter.initial_state(typed_cell, typed_seeds)
+    checkpoint_by_round = {
+        checkpoint.payload["round"]: checkpoint for checkpoint in checkpoints
+    }
+    for round_index in range(horizon + 1):
+        if round_index in expected_rounds:
+            current = adapter.state_fingerprint(state)
+            evaluation_adapter, evaluation_state = copy.deepcopy((adapter, state))
+            if evaluation_adapter.state_fingerprint(evaluation_state) != current:
+                raise ScientificArtifactError(
+                    "registered checkpoint clone differs during exact replay"
+                )
+            result = evaluation_adapter.checkpoint(
+                evaluation_state,
+                round_index,
+                typed_cell,
+                typed_seeds,
+                semantic_hashes,
+            )
+            if evaluation_adapter.state_fingerprint(evaluation_state) != current:
+                raise ScientificArtifactError(
+                    "registered checkpoint mutates state during exact replay"
+                )
+            expected_checkpoint = {
+                "round": round_index,
+                "training_state_before": current,
+                "training_state_after": current,
+                "evaluation_seed": typed_seeds.evaluation,
+                "deployment_seed": typed_seeds.deployment,
+                "result": result,
+            }
+            if checkpoint_by_round[round_index].payload != expected_checkpoint:
+                raise ScientificArtifactError(
+                    "completed run checkpoint differs from exact adapter replay"
+                )
+        if round_index == horizon:
+            break
+        event = events[round_index]
+        expected_event = adapter.training_event(
+            state,
+            round_index,
+            typed_cell,
+            typed_seeds,
+        )
+        if (
+            event.sequence != round_index
+            or event.event_key != f"round:{round_index}"
+            or event.event_kind != "training-step"
+            or event.payload != expected_event
+        ):
+            raise ScientificArtifactError(
+                "completed run event differs from exact adapter replay"
+            )
+        state = adapter.apply_training_event(state, event.payload)
+    expected_metrics = {
+        "completed_rounds": horizon,
+        "event_count": horizon,
+        "final_state_hash": adapter.state_fingerprint(state),
+        "phase": phase,
+        "confirmatory_frozen": confirmatory,
+    }
+    if metrics != expected_metrics:
+        raise ScientificArtifactError(
+            "completed run metrics differ from exact adapter replay"
+        )
 
 
 def _validate_frontier_reference(
     run_root: Path,
     records: tuple[tuple[Path, ArtifactEnvelope], ...],
+    *,
+    session: ArtifactValidationSession | None,
 ) -> None:
     references = [
         artifact
@@ -919,9 +1518,23 @@ def _validate_frontier_reference(
         artifact_root = run_root.parents[1]
     except IndexError as error:
         raise ScientificArtifactError("run artifact path is invalid") from error
+    frontier_root = artifact_root / "_frontiers" / frontier_hash
+    cache_key = (os.path.abspath(frontier_root), frontier_hash)
+    validated_frontiers = None if session is None else session._validated_frontiers
+    if validated_frontiers is not None:
+        assert session is not None
+        with session._lock:
+            cached_hash = validated_frontiers.get(cache_key)
+        if cached_hash is not None:
+            if cached_hash != reference.payload["artifact_hash"]:
+                raise ScientificArtifactError(
+                    "cached frontier manifest hash is incompatible"
+                )
+            return
     frontier_artifacts = validate_artifact_tree(
-        artifact_root / "_frontiers" / frontier_hash,
+        frontier_root,
         expected_semantic_hashes={"frontier": frontier_hash},
+        session=session,
     )
     manifest = next(
         artifact
@@ -932,6 +1545,10 @@ def _validate_frontier_reference(
         raise ScientificArtifactError(
             "referenced frontier manifest hash is incompatible"
         )
+    if validated_frontiers is not None:
+        assert session is not None
+        with session._lock:
+            validated_frontiers[cache_key] = manifest.scientific_hash
 
 
 def _validate_frontier_records(
@@ -1044,7 +1661,13 @@ def _validate_frontier_records(
         witness_artifact = witnesses[name]
         certificate = certificates[name].payload
         witness_payload = witness_artifact.payload
-        evaluated = problem.evaluate(witness_payload["channel"])
+        persisted_witness = ChannelWitness(
+            channel=tuple(tuple(row) for row in witness_payload["channel"]),
+            action_marginal=tuple(witness_payload["action_marginal"]),
+            expected_reward=witness_payload["expected_reward"],
+            mutual_information=witness_payload["mutual_information"],
+        )
+        evaluated = problem.evaluate(persisted_witness.channel)
         if not math.isclose(
             evaluated.expected_reward,
             witness_payload["expected_reward"],
@@ -1093,7 +1716,7 @@ def _validate_frontier_records(
             solution = FrontierSolution(
                 target_reward=certificate["requested_target_reward"],
                 effective_target_reward=certificate["effective_target_reward"],
-                witness=evaluated,
+                witness=persisted_witness,
                 lower_bound=certificate["lower_bound"],
                 upper_bound=certificate["upper_bound"],
                 duality_gap=(

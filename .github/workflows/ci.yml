@@ -22,4 +22,7 @@ jobs:
           enable-cache: true
       - run: uv sync --all-groups --locked
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest
+      - if: matrix.python-version == '3.11'
+        run: uv build

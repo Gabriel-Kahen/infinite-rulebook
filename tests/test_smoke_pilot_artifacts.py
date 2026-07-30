@@ -94,14 +94,14 @@ def test_full_smoke_pilot_is_valid_and_restart_deterministic(
 
     assert observed == set(
         product(
-            (kind.value for kind in EnvironmentKind),
-            (kind.value for kind in AgentKind),
+            (environment.kind.value for environment in config.environments),
+            (agent.kind.value for agent in config.agents),
         )
     )
     assert typed_checkpoints == 72
     assert all(value > 0.0 for value in alea_cosmetics)
     assert trivia_information and trivia_information[0] > 0.0
-    for agent in AgentKind:
+    for agent in (configured.kind for configured in config.agents):
         assert (
             prediction_errors[(EnvironmentKind.ALEA.value, agent.value)]
             > (prediction_errors[(EnvironmentKind.IND.value, agent.value)])

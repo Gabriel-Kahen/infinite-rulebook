@@ -1,0 +1,102 @@
+{
+  "artifact_type": "symbolic-study-release-manifest",
+  "calibration_evidence_hash": "367ed44965060742db9a61739ed231200936cdfcf63ac7ba537f5c3ac4da9c01",
+  "config_hash": "d8fdc37bb0b55fc94b969ee4eef405ce7d3869e2bb8e705fe862d6ff6fd5139c",
+  "freeze_hash": null,
+  "members": [
+    {
+      "byte_size": 24335,
+      "path": "analysis-plan.json",
+      "sha256": "1725dddbaa772922525227ee398531665fcdbeeb38511ca64947ee898d3401da"
+    },
+    {
+      "byte_size": 28524057,
+      "path": "analysis.json",
+      "sha256": "0b6daede06d7b91d0b0939fb007e6ac315eee969f5972486b07855cc76f2aeb1"
+    },
+    {
+      "byte_size": 66522,
+      "path": "analysis.md",
+      "sha256": "7ff7aeb51f870cdd75cc99ef4193cad6de84aebf7059b945c5478fad748e63f0"
+    },
+    {
+      "byte_size": 30972771,
+      "path": "canaries.json",
+      "sha256": "9e5ea487693316e5c962f91b3534462e5ef2c9b868a4df19a8bff3e726cd83d0"
+    },
+    {
+      "byte_size": 11412,
+      "path": "canary-plan.json",
+      "sha256": "0d205dfc08be06ec1758f32cb3da75700b98ba09c0107e2af2d9c276e95b6e03"
+    },
+    {
+      "byte_size": 9479,
+      "path": "canary-results.csv",
+      "sha256": "82db5cf19989cd4a14cbab9f3e7b195b97621a2bc46d336e05bad850683e6976"
+    },
+    {
+      "byte_size": 361,
+      "path": "deviations.json",
+      "sha256": "9156be94ed7d8492b7eba2a397155cf49841d607cf98dad556e9c4b1debd8a4c"
+    },
+    {
+      "byte_size": 2961,
+      "path": "experiment-config.json",
+      "sha256": "a38c87b00fa9a1aed613af1f6edb1ad2711451e8db936cb93e9c522c143c6a02"
+    },
+    {
+      "byte_size": 59223,
+      "path": "power-calibration.csv",
+      "sha256": "9314f81706c73b77be974b4f27e296804f7eb741898bae53bea4030b0759da71"
+    },
+    {
+      "byte_size": 225575,
+      "path": "power.json",
+      "sha256": "e586bebf481df64450b090cf569ebdef1ebaa701d3960d2ef193123e499b448a"
+    },
+    {
+      "byte_size": 10185771,
+      "path": "raw-parallel-inventory.json",
+      "sha256": "66e6c2b6ebe970e09747fdd684339f6a7633c78efcdb9e99b5fd96df747f7a33"
+    },
+    {
+      "byte_size": 10185767,
+      "path": "raw-serial-inventory.json",
+      "sha256": "03fbb07ee84048790aba90f57b1ca4b54a7d5a6b9724cdc3f3d29b4d457602df"
+    },
+    {
+      "byte_size": 6930,
+      "path": "registered-gates.csv",
+      "sha256": "fc308fd4a75287d07b0babd0643c2e1dc9f4fa9ddfeb8745ff42bd93df2d95b4"
+    },
+    {
+      "byte_size": 6138799,
+      "path": "reproducibility.json",
+      "sha256": "ea51fe8a5c6a2cad9088a2920662fe673edcc82e413008fe3f5183c9ab9a8640"
+    },
+    {
+      "byte_size": 45811,
+      "path": "smoke-prerequisite.json",
+      "sha256": "2a97e89e50e23ccc0b7c43e15bf6df13f5e8601b790ffcb41b392033bb3af196"
+    },
+    {
+      "byte_size": 3384,
+      "path": "summary.json",
+      "sha256": "9bf41a16273a7cb7c2844d4759a199147e0ab6133fc1b852ae5d2d7039196bbd"
+    },
+    {
+      "byte_size": 700713,
+      "path": "terminal-summary.csv",
+      "sha256": "e67c11275df38012fb71811f97cf4dedca5f201c98442879f75973393283579f"
+    },
+    {
+      "byte_size": 47109,
+      "path": "trajectories.svg",
+      "sha256": "0a8442d63d3a534b262cdf868bfdda8bbd3b1a063b005b077ef65d707db55764"
+    }
+  ],
+  "phase": "calibration",
+  "schema_version": 1,
+  "scientific_hash": "e48c6194ce5cb63ce9d504e3a5b4efa7ef3e96f647b7e3c30eef10db48975d32",
+  "study_contract": "bounded-symbolic-construct-validation.v1"
+}

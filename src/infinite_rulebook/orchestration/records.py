@@ -226,7 +226,11 @@ def validate_checkpoint_record(payload: object) -> RunCheckpoint:
         {"schema_version", "run_checkpoint", "population_status"},
         "checkpoint record",
     )
-    if record["schema_version"] != 1:
+    if (
+        isinstance(record["schema_version"], bool)
+        or not isinstance(record["schema_version"], int)
+        or record["schema_version"] != 1
+    ):
         raise ValueError("checkpoint record schema_version must be 1")
     if record["population_status"] != _POPULATION_STATUS:
         raise ValueError("checkpoint record population_status is not recognized")

@@ -1,0 +1,585 @@
+{
+  "artifact_type": "scientific-canary-plan",
+  "canaries": [
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "name": "alea-frontier-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "name": "trivia-frontier-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "TRIVIA"
+      }
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "metric": "hidden_expected_reward",
+      "name": "alea-hidden-reward-path-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      },
+      "tolerance": 1e-12
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "metric": "relevant_information_nats",
+      "name": "alea-useful-information-path-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      },
+      "tolerance": 1e-12
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "metric": "hidden_expected_reward",
+      "name": "trivia-hidden-reward-path-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "TRIVIA"
+      },
+      "tolerance": 1e-12
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "metric": "relevant_information_nats",
+      "name": "trivia-useful-information-path-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "TRIVIA"
+      },
+      "tolerance": 1e-12
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "metric": "hidden_expected_reward",
+      "name": "public-hidden-reward-path-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "tolerance": 1e-12
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "left": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "IND"
+      },
+      "metric": "relevant_information_nats",
+      "name": "public-useful-information-path-is-ind",
+      "right": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "tolerance": 1e-12
+    },
+    {
+      "base_metric": "hidden_expected_reward",
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "expected_shift": 0.5,
+      "name": "public-reward-decomposition-fixed",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "fixed",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "shift_metric": "public_reward",
+      "tolerance": 1e-12,
+      "total_metric": "expected_reward"
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "metric": "distractor_information_nats",
+      "name": "alea-has-no-persistent-distractor-information-fixed",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "fixed",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    },
+    {
+      "base_metric": "hidden_expected_reward",
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "expected_shift": 0.5,
+      "name": "public-reward-decomposition-scheduled",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "scheduled",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "shift_metric": "public_reward",
+      "tolerance": 1e-12,
+      "total_metric": "expected_reward"
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "metric": "distractor_information_nats",
+      "name": "alea-has-no-persistent-distractor-information-scheduled",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "scheduled",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    },
+    {
+      "base_metric": "hidden_expected_reward",
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "expected_shift": 0.5,
+      "name": "public-reward-decomposition",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "shift_metric": "public_reward",
+      "tolerance": 1e-12,
+      "total_metric": "expected_reward"
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "metric": "distractor_information_nats",
+      "name": "alea-has-no-persistent-distractor-information-reward",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "reward",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    },
+    {
+      "base_metric": "hidden_expected_reward",
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "expected_shift": 0.5,
+      "name": "public-reward-decomposition-relevant-information",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "relevant-information",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "shift_metric": "public_reward",
+      "tolerance": 1e-12,
+      "total_metric": "expected_reward"
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "metric": "distractor_information_nats",
+      "name": "alea-has-no-persistent-distractor-information-relevant-information",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "relevant-information",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    },
+    {
+      "base_metric": "hidden_expected_reward",
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "expected_shift": 0.5,
+      "name": "public-reward-decomposition-total-information",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "total-information",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "shift_metric": "public_reward",
+      "tolerance": 1e-12,
+      "total_metric": "expected_reward"
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "metric": "distractor_information_nats",
+      "name": "alea-has-no-persistent-distractor-information-total-information",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "total-information",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    },
+    {
+      "base_metric": "hidden_expected_reward",
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "expected_shift": 0.5,
+      "name": "public-reward-decomposition-novelty",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "novelty",
+        "condition_hash": null,
+        "environment_kind": "PUBLIC-C"
+      },
+      "shift_metric": "public_reward",
+      "tolerance": 1e-12,
+      "total_metric": "expected_reward"
+    },
+    {
+      "checkpoints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "metric": "distractor_information_nats",
+      "name": "alea-has-no-persistent-distractor-information",
+      "selector": {
+        "agent_hash": null,
+        "agent_kind": "novelty",
+        "condition_hash": null,
+        "environment_kind": "ALEA"
+      }
+    }
+  ],
+  "name": "bounded-symbolic-construct-validation.v1-canaries-calibration",
+  "phase": "calibration",
+  "schema_version": 1,
+  "scientific_hash": "15c56506f14341ca941d631aa632b472290e9c3ac4896a2e033ed6236a471ba9"
+}

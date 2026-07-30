@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import platform
 import subprocess
 import sys
@@ -75,6 +76,34 @@ def _dirty_tree_hash(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _execution_environment_payload(
+    dependency_lock_hash: str,
+) -> dict[str, object]:
+    libc_name, libc_version = platform.libc_ver()
+    python_build_number, python_build_date = platform.python_build()
+    return {
+        "dependency_lock_hash": dependency_lock_hash,
+        "python_implementation": platform.python_implementation(),
+        "python_version": platform.python_version(),
+        "python_build_number": python_build_number,
+        "python_build_date": python_build_date,
+        "python_compiler": platform.python_compiler(),
+        "system": platform.system(),
+        "release": platform.release(),
+        "machine": platform.machine(),
+        "libc_name": libc_name,
+        "libc_version": libc_version,
+        "byteorder": sys.byteorder,
+        "float_info": {
+            "radix": sys.float_info.radix,
+            "mant_dig": sys.float_info.mant_dig,
+            "max_exp": sys.float_info.max_exp,
+            "min_exp": sys.float_info.min_exp,
+            "rounds": sys.float_info.rounds,
+        },
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ScientificProvenance:
     code_commit: str
@@ -84,14 +113,45 @@ class ScientificProvenance:
     environment_digest: str
     python_implementation: str
     python_version: str
+    environment_fingerprint: str = ""
     numeric_precision: str = "python-float64"
     deterministic_mode: str = "counter-rng+semantic-keys"
     blas: str = "not-applicable-stdlib"
     cuda: str = "not-applicable"
     cudnn: str = "not-applicable"
 
+    def __post_init__(self) -> None:
+        if not self.environment_fingerprint:
+            return
+        try:
+            payload = json.loads(self.environment_fingerprint)
+        except json.JSONDecodeError as error:
+            raise ValueError("environment_fingerprint is not valid JSON") from error
+        canonical = json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        if (
+            not isinstance(payload, dict)
+            or canonical != self.environment_fingerprint
+            or payload.get("dependency_lock_hash") != self.dependency_lock_hash
+            or payload.get("python_implementation") != self.python_implementation
+            or payload.get("python_version") != self.python_version
+            or scientific_hash(payload, domain="execution-environment")
+            != self.environment_digest
+        ):
+            raise ValueError(
+                "environment_fingerprint does not reproduce environment_digest"
+            )
+
     def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+        result = asdict(self)
+        if not self.environment_fingerprint:
+            del result["environment_fingerprint"]
+        return result
 
 
 def collect_provenance() -> ScientificProvenance:
@@ -100,12 +160,16 @@ def collect_provenance() -> ScientificProvenance:
     dependency_lock_hash = _file_hash(root / "uv.lock")
     python_implementation = platform.python_implementation()
     python_version = platform.python_version()
+    environment_payload = _execution_environment_payload(dependency_lock_hash)
+    environment_fingerprint = json.dumps(
+        environment_payload,
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     environment_digest = scientific_hash(
-        {
-            "dependency_lock_hash": dependency_lock_hash,
-            "python_implementation": python_implementation,
-            "python_version": python_version,
-        },
+        environment_payload,
         domain="execution-environment",
     )
     return ScientificProvenance(
@@ -116,6 +180,7 @@ def collect_provenance() -> ScientificProvenance:
         environment_digest=environment_digest,
         python_implementation=python_implementation,
         python_version=python_version,
+        environment_fingerprint=environment_fingerprint,
     )
 
 

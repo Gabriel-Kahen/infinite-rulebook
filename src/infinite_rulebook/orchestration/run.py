@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -11,13 +12,22 @@ from typing import Any, Protocol
 
 from infinite_rulebook.orchestration.artifacts import (
     ArtifactStore,
+    ArtifactValidationSession,
     EventJournal,
     ScientificArtifactError,
+    artifact_root_lock,
     artifact_tree_lock,
+    cleanup_orphaned_artifact_temporaries,
     validate_artifact_tree,
     write_frontier_bundle,
 )
-from infinite_rulebook.orchestration.config import ExperimentConfig, RunCell
+from infinite_rulebook.orchestration.config import (
+    REPRODUCIBILITY_OPERATIONAL_DIRECTORY,
+    SYMBOLIC_ADAPTER_CONTRACT_VERSION,
+    ExperimentConfig,
+    RunCell,
+)
+from infinite_rulebook.orchestration.freeze import ConfirmatoryFreezeError
 from infinite_rulebook.orchestration.hashing import scientific_hash
 from infinite_rulebook.orchestration.provenance import (
     ScientificProvenance,
@@ -32,6 +42,8 @@ RUNNER_VERSION = "symbolic-runner.v1"
 
 class ExperimentAdapter(Protocol):
     """Replayable scientific logic owned by a simulator/agent integration."""
+
+    contract_version: str
 
     def initial_state(self, cell: RunCell, seeds: RunSeeds) -> Any: ...
 
@@ -91,6 +103,34 @@ class RunExecutor:
     artifact_root: Path
     adapter_factory: Callable[[], ExperimentAdapter]
     provenance: ScientificProvenance = field(default_factory=collect_provenance)
+    validation_session: ArtifactValidationSession | None = field(
+        default=None,
+        repr=False,
+    )
+    reproducibility_mode: bool = False
+    _verified_current_provenance: ScientificProvenance | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _validation_session: ArtifactValidationSession = field(
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reproducibility_mode, bool):
+            raise TypeError("reproducibility_mode must be a boolean")
+        if self.validation_session is not None and not isinstance(
+            self.validation_session,
+            ArtifactValidationSession,
+        ):
+            raise TypeError(
+                "validation_session must be ArtifactValidationSession or None"
+            )
+        self._validation_session = (
+            self.validation_session or ArtifactValidationSession()
+        )
 
     def _frontier_store(
         self,
@@ -112,9 +152,100 @@ class RunExecutor:
         runtime_metadata: dict[str, Any] | None = None,
     ) -> RunResult:
         started = time.perf_counter()
+        if self.reproducibility_mode:
+            return self._execute_at_coordinated_root(
+                experiment,
+                cell,
+                started=started,
+                stop_after_new_events=stop_after_new_events,
+                runtime_metadata=runtime_metadata,
+            )
+        with artifact_root_lock(
+            Path(self.artifact_root),
+            shared=True,
+            nonblocking=True,
+        ) as root_descriptor:
+            try:
+                os.stat(
+                    REPRODUCIBILITY_OPERATIONAL_DIRECTORY,
+                    dir_fd=root_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            else:
+                raise ScientificArtifactError(
+                    "receipt-bound roots require the paired reproducibility workflow"
+                )
+            return self._execute_at_coordinated_root(
+                experiment,
+                cell,
+                started=started,
+                stop_after_new_events=stop_after_new_events,
+                runtime_metadata=runtime_metadata,
+            )
+
+    def _execute_at_coordinated_root(
+        self,
+        experiment: ExperimentConfig,
+        cell: RunCell,
+        *,
+        started: float,
+        stop_after_new_events: int | None,
+        runtime_metadata: dict[str, Any] | None,
+    ) -> RunResult:
+        if not experiment.contains_cell(cell):
+            raise ValueError("run cell is not in the experiment inventory")
         adapter = self.adapter_factory()
-        seeds = SeedBank(experiment.master_seed).for_cell(cell)
+        if adapter.contract_version != SYMBOLIC_ADAPTER_CONTRACT_VERSION:
+            raise ValueError("adapter does not implement the configured contract")
+        if experiment.phase == "calibration":
+            from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
+
+            if type(adapter) is not ExactSymbolicAdapter:
+                raise ConfirmatoryFreezeError(
+                    "calibration execution requires the registered exact adapter"
+                )
+        if experiment.confirmatory_freeze is not None:
+            from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
+            from infinite_rulebook.studies.symbolic_construct import (
+                verify_symbolic_confirmatory_contract,
+            )
+
+            if type(adapter) is not ExactSymbolicAdapter:
+                raise ConfirmatoryFreezeError(
+                    "confirmatory execution requires the registered exact adapter"
+                )
+            current = self._verified_current_provenance
+            if current is None:
+                current = collect_provenance()
+                self._verified_current_provenance = current
+            if self.provenance != current:
+                raise ConfirmatoryFreezeError(
+                    "confirmatory provenance is not the current scientific source"
+                )
+            verify_symbolic_confirmatory_contract(
+                experiment,
+                analysis_code_hash=current.analysis_code_hash,
+                dependency_lock_hash=current.dependency_lock_hash,
+                environment_digest=current.environment_digest,
+            )
+        seeds = SeedBank(
+            experiment.master_seed,
+            experiment.algorithm_master_seed,
+        ).for_cell(cell)
         provenance = self.provenance
+        if experiment.confirmatory_freeze is not None and (
+            provenance.analysis_code_hash
+            != experiment.confirmatory_freeze.analysis_code_hash
+            or provenance.dependency_lock_hash
+            != experiment.confirmatory_freeze.dependency_lock_hash
+            or provenance.environment_digest
+            != experiment.confirmatory_freeze.environment_digest
+        ):
+            raise ConfirmatoryFreezeError(
+                "confirmatory provenance differs from the frozen scientific environment"
+            )
         run_hash = run_identity(experiment, cell, seeds, provenance)
         hashes = semantic_hashes(
             cell,
@@ -151,10 +282,13 @@ class RunExecutor:
         stop_after_new_events: int | None,
         runtime_metadata: dict[str, Any] | None,
     ) -> RunResult:
+        cleanup_orphaned_artifact_temporaries(store.path)
         manifest_path = store.path / "manifest.json"
         if manifest_path.exists():
             artifacts = validate_artifact_tree(
-                store.path, expected_semantic_hashes=hashes
+                store.path,
+                expected_semantic_hashes=hashes,
+                session=self._validation_session,
             )
             manifest = next(
                 artifact
@@ -182,19 +316,29 @@ class RunExecutor:
             },
         )
         frontier_store = self._frontier_store(experiment, cell, hashes)
-        frontier = adapter.frontier(cell)
-        write_frontier_bundle(
-            frontier_store,
-            {"frontier": hashes["frontier"]},
-            curve=frontier["curve"],
-            witnesses=frontier["witnesses"],
-            certificates=frontier["certificates"],
-            diagnostics=frontier["diagnostics"],
-        )
-        frontier_artifacts = validate_artifact_tree(
-            frontier_store.path,
-            expected_semantic_hashes={"frontier": hashes["frontier"]},
-        )
+        with artifact_tree_lock(frontier_store.path):
+            cleanup_orphaned_artifact_temporaries(frontier_store.path)
+            if (frontier_store.path / "frontier/manifest.json").exists():
+                frontier_artifacts = validate_artifact_tree(
+                    frontier_store.path,
+                    expected_semantic_hashes={"frontier": hashes["frontier"]},
+                    session=self._validation_session,
+                )
+            else:
+                frontier = adapter.frontier(cell)
+                write_frontier_bundle(
+                    frontier_store,
+                    {"frontier": hashes["frontier"]},
+                    curve=frontier["curve"],
+                    witnesses=frontier["witnesses"],
+                    certificates=frontier["certificates"],
+                    diagnostics=frontier["diagnostics"],
+                )
+                frontier_artifacts = validate_artifact_tree(
+                    frontier_store.path,
+                    expected_semantic_hashes={"frontier": hashes["frontier"]},
+                    session=self._validation_session,
+                )
         frontier_manifest = next(
             artifact
             for artifact in frontier_artifacts
@@ -269,7 +413,7 @@ class RunExecutor:
                 "event_count": len(journal.events()),
                 "final_state_hash": final_fingerprint,
                 "phase": experiment.phase,
-                "confirmatory_frozen": False,
+                "confirmatory_frozen": experiment.confirmatory_frozen,
             },
         )
         recorded_runtime = collect_runtime_metadata(
@@ -280,7 +424,11 @@ class RunExecutor:
             hashes,
             runtime_metadata=recorded_runtime,
         )
-        validate_artifact_tree(store.path, expected_semantic_hashes=hashes)
+        validate_artifact_tree(
+            store.path,
+            expected_semantic_hashes=hashes,
+            session=self._validation_session,
+        )
         return RunResult(
             run_hash,
             store.path,

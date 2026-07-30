@@ -1,0 +1,598 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1164" viewBox="0 0 1200 1164" role="img" aria-labelledby="figure-title figure-description">
+<title id="figure-title">bounded-symbolic-construct-validation.v1-calibration: registered trajectories (calibration)</title>
+<desc id="figure-description">Registered trajectory summaries for the bounded symbolic study. Lines are environment-cluster means. Whiskers are pointwise exact median intervals where finite. Algorithm replicas are averaged within each environment cluster; trajectories alone do not establish a registered contrast.</desc>
+<metadata>phase=calibration; report_hash=07dabc814e26f8ace0ae6cf86ab10cfd6558bc9f32d2f48a751c5694bf35381c; dataset_hash=eac4823bf31745572c74e75b5f98978ed84471f5e602e2ce1076e0e43fcf366e</metadata>
+<style>
+text { font-family: ui-sans-serif, system-ui, sans-serif; fill: #17202a; }
+.figure-title { font-size: 24px; font-weight: 700; }
+.figure-subtitle, .note { font-size: 13px; fill: #43515e; }
+.panel { fill: #ffffff; stroke: #c9d2d9; stroke-width: 1; }
+.panel-title { font-size: 15px; font-weight: 700; }
+.panel-subtitle { font-size: 11px; fill: #52616d; }
+.axis { stroke: #45535f; stroke-width: 1; }
+.grid { stroke: #dfe5e9; stroke-width: 1; }
+.tick { font-size: 10px; fill: #52616d; }
+.x-tick { text-anchor: middle; }
+.y-tick { text-anchor: end; }
+.axis-label { font-size: 11px; text-anchor: middle; font-weight: 600; }
+.trajectory { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
+.interval { stroke-width: 1.25; }
+.point { stroke: #ffffff; stroke-width: 1.25; }
+</style>
+<rect width="100%" height="100%" fill="#f5f7f8"/>
+<text id="visible-title" x="48" y="42" class="figure-title">bounded-symbolic-construct-validation.v1-calibration</text>
+<text x="48" y="67" class="figure-subtitle">Phase: calibration · descriptive registered trajectories</text>
+<text x="48" y="90" class="figure-subtitle">Cluster means with pointwise exact median intervals where finite.</text>
+<g role="group" aria-labelledby="trajectory-panel-0-title">
+<title id="trajectory-panel-0-title">ind-scheduled-hidden-reward-trajectory: hidden_expected_reward</title>
+<rect x="48.000" y="112.000" width="541.000" height="300.000" rx="8" class="panel"/>
+<text x="66.000" y="139.000" class="panel-title">ind-scheduled-hidden-reward-trajectory</text>
+<text x="66.000" y="159.000" class="panel-subtitle">hidden_expected_reward · IND/scheduled/*/*</text>
+<line x1="120.000" y1="352.000" x2="567.000" y2="352.000" class="grid"/>
+<text x="112.000" y="356.000" class="tick y-tick">0</text>
+<line x1="120.000" y1="308.500" x2="567.000" y2="308.500" class="grid"/>
+<text x="112.000" y="312.500" class="tick y-tick">0.81</text>
+<line x1="120.000" y1="265.000" x2="567.000" y2="265.000" class="grid"/>
+<text x="112.000" y="269.000" class="tick y-tick">1.62</text>
+<line x1="120.000" y1="221.500" x2="567.000" y2="221.500" class="grid"/>
+<text x="112.000" y="225.500" class="tick y-tick">2.43</text>
+<line x1="120.000" y1="178.000" x2="567.000" y2="178.000" class="grid"/>
+<text x="112.000" y="182.000" class="tick y-tick">3.24</text>
+<line x1="120.000" y1="352.000" x2="120.000" y2="357.000" class="axis"/>
+<text x="120.000" y="372.000" class="tick x-tick">0</text>
+<line x1="231.750" y1="352.000" x2="231.750" y2="357.000" class="axis"/>
+<text x="231.750" y="372.000" class="tick x-tick">3</text>
+<line x1="343.500" y1="352.000" x2="343.500" y2="357.000" class="axis"/>
+<text x="343.500" y="372.000" class="tick x-tick">6</text>
+<line x1="455.250" y1="352.000" x2="455.250" y2="357.000" class="axis"/>
+<text x="455.250" y="372.000" class="tick x-tick">9</text>
+<line x1="567.000" y1="352.000" x2="567.000" y2="357.000" class="axis"/>
+<text x="567.000" y="372.000" class="tick x-tick">12</text>
+<line x1="120.000" y1="178.000" x2="120.000" y2="352.000" class="axis"/>
+<line x1="120.000" y1="352.000" x2="567.000" y2="352.000" class="axis"/>
+<text x="343.500" y="394.000" class="axis-label">Round</text>
+<polyline points="120.000,352.000 157.250,309.485 194.500,306.128 231.750,298.856 269.000,298.856 306.250,258.019 343.500,256.061 380.750,247.949 418.000,246.271 455.250,205.993 492.500,203.196 529.750,195.364 567.000,193.127" style="stroke:#0072B2" class="trajectory"/>
+<line x1="120.000" y1="352.000" x2="120.000" y2="352.000" style="stroke:#0072B2" class="interval"/>
+<line x1="116.000" y1="352.000" x2="124.000" y2="352.000" style="stroke:#0072B2" class="interval"/>
+<line x1="116.000" y1="352.000" x2="124.000" y2="352.000" style="stroke:#0072B2" class="interval"/>
+<circle cx="120.000" cy="352.000" r="4" style="fill:#0072B2" class="point">
+<title>Round 0; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="157.250" y1="298.296" x2="157.250" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="153.250" y1="298.296" x2="161.250" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="153.250" y1="298.296" x2="161.250" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<circle cx="157.250" cy="309.485" r="4" style="fill:#0072B2" class="point">
+<title>Round 1; cluster mean 0.7917; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="194.500" y1="298.296" x2="194.500" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="190.500" y1="298.296" x2="198.500" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="190.500" y1="298.296" x2="198.500" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<circle cx="194.500" cy="306.128" r="4" style="fill:#0072B2" class="point">
+<title>Round 2; cluster mean 0.8542; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="231.750" y1="298.296" x2="231.750" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="227.750" y1="298.296" x2="235.750" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="227.750" y1="298.296" x2="235.750" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<circle cx="231.750" cy="298.856" r="4" style="fill:#0072B2" class="point">
+<title>Round 3; cluster mean 0.9896; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="269.000" y1="298.296" x2="269.000" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="265.000" y1="298.296" x2="273.000" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<line x1="265.000" y1="298.296" x2="273.000" y2="298.296" style="stroke:#0072B2" class="interval"/>
+<circle cx="269.000" cy="298.856" r="4" style="fill:#0072B2" class="point">
+<title>Round 4; cluster mean 0.9896; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="306.250" y1="244.593" x2="306.250" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="302.250" y1="244.593" x2="310.250" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="302.250" y1="244.593" x2="310.250" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<circle cx="306.250" cy="258.019" r="4" style="fill:#0072B2" class="point">
+<title>Round 5; cluster mean 1.75; exact median interval [2, 2]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="343.500" y1="244.593" x2="343.500" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="339.500" y1="244.593" x2="347.500" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="339.500" y1="244.593" x2="347.500" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<circle cx="343.500" cy="256.061" r="4" style="fill:#0072B2" class="point">
+<title>Round 6; cluster mean 1.786; exact median interval [2, 2]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="380.750" y1="244.593" x2="380.750" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="376.750" y1="244.593" x2="384.750" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="376.750" y1="244.593" x2="384.750" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<circle cx="380.750" cy="247.949" r="4" style="fill:#0072B2" class="point">
+<title>Round 7; cluster mean 1.938; exact median interval [2, 2]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="418.000" y1="244.593" x2="418.000" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="414.000" y1="244.593" x2="422.000" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<line x1="414.000" y1="244.593" x2="422.000" y2="244.593" style="stroke:#0072B2" class="interval"/>
+<circle cx="418.000" cy="246.271" r="4" style="fill:#0072B2" class="point">
+<title>Round 8; cluster mean 1.969; exact median interval [2, 2]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="455.250" y1="190.889" x2="455.250" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="451.250" y1="190.889" x2="459.250" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="451.250" y1="190.889" x2="459.250" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<circle cx="455.250" cy="205.993" r="4" style="fill:#0072B2" class="point">
+<title>Round 9; cluster mean 2.719; exact median interval [3, 3]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="492.500" y1="190.889" x2="492.500" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="488.500" y1="190.889" x2="496.500" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="488.500" y1="190.889" x2="496.500" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<circle cx="492.500" cy="203.196" r="4" style="fill:#0072B2" class="point">
+<title>Round 10; cluster mean 2.771; exact median interval [3, 3]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="529.750" y1="190.889" x2="529.750" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="525.750" y1="190.889" x2="533.750" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="525.750" y1="190.889" x2="533.750" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<circle cx="529.750" cy="195.364" r="4" style="fill:#0072B2" class="point">
+<title>Round 11; cluster mean 2.917; exact median interval [3, 3]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="567.000" y1="190.889" x2="567.000" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="563.000" y1="190.889" x2="571.000" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<line x1="563.000" y1="190.889" x2="571.000" y2="190.889" style="stroke:#0072B2" class="interval"/>
+<circle cx="567.000" cy="193.127" r="4" style="fill:#0072B2" class="point">
+<title>Round 12; cluster mean 2.958; exact median interval [3, 3]; 192 environment clusters; 576 cells</title>
+</circle>
+</g>
+<g role="group" aria-labelledby="trajectory-panel-1-title">
+<title id="trajectory-panel-1-title">ind-fixed-hidden-reward-trajectory: hidden_expected_reward</title>
+<rect x="611.000" y="112.000" width="541.000" height="300.000" rx="8" class="panel"/>
+<text x="629.000" y="139.000" class="panel-title">ind-fixed-hidden-reward-trajectory</text>
+<text x="629.000" y="159.000" class="panel-subtitle">hidden_expected_reward · IND/fixed/*/*</text>
+<line x1="683.000" y1="352.000" x2="1130.000" y2="352.000" class="grid"/>
+<text x="675.000" y="356.000" class="tick y-tick">0</text>
+<line x1="683.000" y1="308.500" x2="1130.000" y2="308.500" class="grid"/>
+<text x="675.000" y="312.500" class="tick y-tick">0.27</text>
+<line x1="683.000" y1="265.000" x2="1130.000" y2="265.000" class="grid"/>
+<text x="675.000" y="269.000" class="tick y-tick">0.54</text>
+<line x1="683.000" y1="221.500" x2="1130.000" y2="221.500" class="grid"/>
+<text x="675.000" y="225.500" class="tick y-tick">0.81</text>
+<line x1="683.000" y1="178.000" x2="1130.000" y2="178.000" class="grid"/>
+<text x="675.000" y="182.000" class="tick y-tick">1.08</text>
+<line x1="683.000" y1="352.000" x2="683.000" y2="357.000" class="axis"/>
+<text x="683.000" y="372.000" class="tick x-tick">0</text>
+<line x1="794.750" y1="352.000" x2="794.750" y2="357.000" class="axis"/>
+<text x="794.750" y="372.000" class="tick x-tick">3</text>
+<line x1="906.500" y1="352.000" x2="906.500" y2="357.000" class="axis"/>
+<text x="906.500" y="372.000" class="tick x-tick">6</text>
+<line x1="1018.250" y1="352.000" x2="1018.250" y2="357.000" class="axis"/>
+<text x="1018.250" y="372.000" class="tick x-tick">9</text>
+<line x1="1130.000" y1="352.000" x2="1130.000" y2="357.000" class="axis"/>
+<text x="1130.000" y="372.000" class="tick x-tick">12</text>
+<line x1="683.000" y1="178.000" x2="683.000" y2="352.000" class="axis"/>
+<line x1="683.000" y1="352.000" x2="1130.000" y2="352.000" class="axis"/>
+<text x="906.500" y="394.000" class="axis-label">Round</text>
+<polyline points="683.000,352.000 720.250,224.454 757.500,214.384 794.750,192.567 832.000,192.567 869.250,191.728 906.500,190.889 943.750,190.889 981.000,190.889 1018.250,190.889 1055.500,190.889 1092.750,190.889 1130.000,190.889" style="stroke:#D55E00" class="trajectory"/>
+<line x1="683.000" y1="352.000" x2="683.000" y2="352.000" style="stroke:#D55E00" class="interval"/>
+<line x1="679.000" y1="352.000" x2="687.000" y2="352.000" style="stroke:#D55E00" class="interval"/>
+<line x1="679.000" y1="352.000" x2="687.000" y2="352.000" style="stroke:#D55E00" class="interval"/>
+<circle cx="683.000" cy="352.000" r="4" style="fill:#D55E00" class="point">
+<title>Round 0; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="720.250" y1="190.889" x2="720.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="716.250" y1="190.889" x2="724.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="716.250" y1="190.889" x2="724.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="720.250" cy="224.454" r="4" style="fill:#D55E00" class="point">
+<title>Round 1; cluster mean 0.7917; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="757.500" y1="190.889" x2="757.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="753.500" y1="190.889" x2="761.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="753.500" y1="190.889" x2="761.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="757.500" cy="214.384" r="4" style="fill:#D55E00" class="point">
+<title>Round 2; cluster mean 0.8542; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="794.750" y1="190.889" x2="794.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="790.750" y1="190.889" x2="798.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="790.750" y1="190.889" x2="798.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="794.750" cy="192.567" r="4" style="fill:#D55E00" class="point">
+<title>Round 3; cluster mean 0.9896; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="832.000" y1="190.889" x2="832.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="828.000" y1="190.889" x2="836.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="828.000" y1="190.889" x2="836.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="832.000" cy="192.567" r="4" style="fill:#D55E00" class="point">
+<title>Round 4; cluster mean 0.9896; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="869.250" y1="190.889" x2="869.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="865.250" y1="190.889" x2="873.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="865.250" y1="190.889" x2="873.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="869.250" cy="191.728" r="4" style="fill:#D55E00" class="point">
+<title>Round 5; cluster mean 0.9948; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="906.500" y1="190.889" x2="906.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="902.500" y1="190.889" x2="910.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="902.500" y1="190.889" x2="910.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="906.500" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 6; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="943.750" y1="190.889" x2="943.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="939.750" y1="190.889" x2="947.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="939.750" y1="190.889" x2="947.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="943.750" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 7; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="981.000" y1="190.889" x2="981.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="977.000" y1="190.889" x2="985.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="977.000" y1="190.889" x2="985.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="981.000" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 8; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1018.250" y1="190.889" x2="1018.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1014.250" y1="190.889" x2="1022.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1014.250" y1="190.889" x2="1022.250" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="1018.250" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 9; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1055.500" y1="190.889" x2="1055.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1051.500" y1="190.889" x2="1059.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1051.500" y1="190.889" x2="1059.500" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="1055.500" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 10; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1092.750" y1="190.889" x2="1092.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1088.750" y1="190.889" x2="1096.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1088.750" y1="190.889" x2="1096.750" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="1092.750" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 11; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1130.000" y1="190.889" x2="1130.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1126.000" y1="190.889" x2="1134.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<line x1="1126.000" y1="190.889" x2="1134.000" y2="190.889" style="stroke:#D55E00" class="interval"/>
+<circle cx="1130.000" cy="190.889" r="4" style="fill:#D55E00" class="point">
+<title>Round 12; cluster mean 1; exact median interval [1, 1]; 192 environment clusters; 576 cells</title>
+</circle>
+</g>
+<g role="group" aria-labelledby="trajectory-panel-2-title">
+<title id="trajectory-panel-2-title">trivia-total-distractor-information-trajectory: distractor_information_nats</title>
+<rect x="48.000" y="434.000" width="541.000" height="300.000" rx="8" class="panel"/>
+<text x="66.000" y="461.000" class="panel-title">trivia-total-distractor-information-trajectory</text>
+<text x="66.000" y="481.000" class="panel-subtitle">distractor_information_nats · TRIVIA/total-information/*/*</text>
+<line x1="120.000" y1="674.000" x2="567.000" y2="674.000" class="grid"/>
+<text x="112.000" y="678.000" class="tick y-tick">0</text>
+<line x1="120.000" y1="630.500" x2="567.000" y2="630.500" class="grid"/>
+<text x="112.000" y="634.500" class="tick y-tick">1.723</text>
+<line x1="120.000" y1="587.000" x2="567.000" y2="587.000" class="grid"/>
+<text x="112.000" y="591.000" class="tick y-tick">3.446</text>
+<line x1="120.000" y1="543.500" x2="567.000" y2="543.500" class="grid"/>
+<text x="112.000" y="547.500" class="tick y-tick">5.169</text>
+<line x1="120.000" y1="500.000" x2="567.000" y2="500.000" class="grid"/>
+<text x="112.000" y="504.000" class="tick y-tick">6.892</text>
+<line x1="120.000" y1="674.000" x2="120.000" y2="679.000" class="axis"/>
+<text x="120.000" y="694.000" class="tick x-tick">0</text>
+<line x1="231.750" y1="674.000" x2="231.750" y2="679.000" class="axis"/>
+<text x="231.750" y="694.000" class="tick x-tick">3</text>
+<line x1="343.500" y1="674.000" x2="343.500" y2="679.000" class="axis"/>
+<text x="343.500" y="694.000" class="tick x-tick">6</text>
+<line x1="455.250" y1="674.000" x2="455.250" y2="679.000" class="axis"/>
+<text x="455.250" y="694.000" class="tick x-tick">9</text>
+<line x1="567.000" y1="674.000" x2="567.000" y2="679.000" class="axis"/>
+<text x="567.000" y="694.000" class="tick x-tick">12</text>
+<line x1="120.000" y1="500.000" x2="120.000" y2="674.000" class="axis"/>
+<line x1="120.000" y1="674.000" x2="567.000" y2="674.000" class="axis"/>
+<text x="343.500" y="716.000" class="axis-label">Round</text>
+<polyline points="120.000,674.000 157.250,665.993 194.500,665.993 231.750,649.980 269.000,625.961 306.250,601.941 343.500,593.934 380.750,569.915 418.000,553.901 455.250,529.882 492.500,525.481 529.750,518.704 567.000,514.365" style="stroke:#009E73" class="trajectory"/>
+<line x1="120.000" y1="674.000" x2="120.000" y2="674.000" style="stroke:#009E73" class="interval"/>
+<line x1="116.000" y1="674.000" x2="124.000" y2="674.000" style="stroke:#009E73" class="interval"/>
+<line x1="116.000" y1="674.000" x2="124.000" y2="674.000" style="stroke:#009E73" class="interval"/>
+<circle cx="120.000" cy="674.000" r="4" style="fill:#009E73" class="point">
+<title>Round 0; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="157.250" y1="665.993" x2="157.250" y2="665.993" style="stroke:#009E73" class="interval"/>
+<line x1="153.250" y1="665.993" x2="161.250" y2="665.993" style="stroke:#009E73" class="interval"/>
+<line x1="153.250" y1="665.993" x2="161.250" y2="665.993" style="stroke:#009E73" class="interval"/>
+<circle cx="157.250" cy="665.993" r="4" style="fill:#009E73" class="point">
+<title>Round 1; cluster mean 0.3171; exact median interval [0.3171, 0.3171]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="194.500" y1="665.993" x2="194.500" y2="665.993" style="stroke:#009E73" class="interval"/>
+<line x1="190.500" y1="665.993" x2="198.500" y2="665.993" style="stroke:#009E73" class="interval"/>
+<line x1="190.500" y1="665.993" x2="198.500" y2="665.993" style="stroke:#009E73" class="interval"/>
+<circle cx="194.500" cy="665.993" r="4" style="fill:#009E73" class="point">
+<title>Round 2; cluster mean 0.3171; exact median interval [0.3171, 0.3171]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="231.750" y1="649.980" x2="231.750" y2="649.980" style="stroke:#009E73" class="interval"/>
+<line x1="227.750" y1="649.980" x2="235.750" y2="649.980" style="stroke:#009E73" class="interval"/>
+<line x1="227.750" y1="649.980" x2="235.750" y2="649.980" style="stroke:#009E73" class="interval"/>
+<circle cx="231.750" cy="649.980" r="4" style="fill:#009E73" class="point">
+<title>Round 3; cluster mean 0.9514; exact median interval [0.9514, 0.9514]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="269.000" y1="625.961" x2="269.000" y2="625.961" style="stroke:#009E73" class="interval"/>
+<line x1="265.000" y1="625.961" x2="273.000" y2="625.961" style="stroke:#009E73" class="interval"/>
+<line x1="265.000" y1="625.961" x2="273.000" y2="625.961" style="stroke:#009E73" class="interval"/>
+<circle cx="269.000" cy="625.961" r="4" style="fill:#009E73" class="point">
+<title>Round 4; cluster mean 1.903; exact median interval [1.903, 1.903]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="306.250" y1="601.941" x2="306.250" y2="601.941" style="stroke:#009E73" class="interval"/>
+<line x1="302.250" y1="601.941" x2="310.250" y2="601.941" style="stroke:#009E73" class="interval"/>
+<line x1="302.250" y1="601.941" x2="310.250" y2="601.941" style="stroke:#009E73" class="interval"/>
+<circle cx="306.250" cy="601.941" r="4" style="fill:#009E73" class="point">
+<title>Round 5; cluster mean 2.854; exact median interval [2.854, 2.854]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="343.500" y1="593.934" x2="343.500" y2="593.934" style="stroke:#009E73" class="interval"/>
+<line x1="339.500" y1="593.934" x2="347.500" y2="593.934" style="stroke:#009E73" class="interval"/>
+<line x1="339.500" y1="593.934" x2="347.500" y2="593.934" style="stroke:#009E73" class="interval"/>
+<circle cx="343.500" cy="593.934" r="4" style="fill:#009E73" class="point">
+<title>Round 6; cluster mean 3.171; exact median interval [3.171, 3.171]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="380.750" y1="569.915" x2="380.750" y2="569.915" style="stroke:#009E73" class="interval"/>
+<line x1="376.750" y1="569.915" x2="384.750" y2="569.915" style="stroke:#009E73" class="interval"/>
+<line x1="376.750" y1="569.915" x2="384.750" y2="569.915" style="stroke:#009E73" class="interval"/>
+<circle cx="380.750" cy="569.915" r="4" style="fill:#009E73" class="point">
+<title>Round 7; cluster mean 4.123; exact median interval [4.123, 4.123]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="418.000" y1="553.901" x2="418.000" y2="553.901" style="stroke:#009E73" class="interval"/>
+<line x1="414.000" y1="553.901" x2="422.000" y2="553.901" style="stroke:#009E73" class="interval"/>
+<line x1="414.000" y1="553.901" x2="422.000" y2="553.901" style="stroke:#009E73" class="interval"/>
+<circle cx="418.000" cy="553.901" r="4" style="fill:#009E73" class="point">
+<title>Round 8; cluster mean 4.757; exact median interval [4.757, 4.757]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="455.250" y1="529.882" x2="455.250" y2="529.882" style="stroke:#009E73" class="interval"/>
+<line x1="451.250" y1="529.882" x2="459.250" y2="529.882" style="stroke:#009E73" class="interval"/>
+<line x1="451.250" y1="529.882" x2="459.250" y2="529.882" style="stroke:#009E73" class="interval"/>
+<circle cx="455.250" cy="529.882" r="4" style="fill:#009E73" class="point">
+<title>Round 9; cluster mean 5.708; exact median interval [5.708, 5.708]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="492.500" y1="523.085" x2="492.500" y2="523.085" style="stroke:#009E73" class="interval"/>
+<line x1="488.500" y1="523.085" x2="496.500" y2="523.085" style="stroke:#009E73" class="interval"/>
+<line x1="488.500" y1="523.085" x2="496.500" y2="523.085" style="stroke:#009E73" class="interval"/>
+<circle cx="492.500" cy="525.481" r="4" style="fill:#009E73" class="point">
+<title>Round 10; cluster mean 5.882; exact median interval [5.977, 5.977]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="529.750" y1="516.287" x2="529.750" y2="517.488" style="stroke:#009E73" class="interval"/>
+<line x1="525.750" y1="516.287" x2="533.750" y2="516.287" style="stroke:#009E73" class="interval"/>
+<line x1="525.750" y1="517.488" x2="533.750" y2="517.488" style="stroke:#009E73" class="interval"/>
+<circle cx="529.750" cy="518.704" r="4" style="fill:#009E73" class="point">
+<title>Round 11; cluster mean 6.151; exact median interval [6.199, 6.247]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="567.000" y1="512.889" x2="567.000" y2="514.090" style="stroke:#009E73" class="interval"/>
+<line x1="563.000" y1="512.889" x2="571.000" y2="512.889" style="stroke:#009E73" class="interval"/>
+<line x1="563.000" y1="514.090" x2="571.000" y2="514.090" style="stroke:#009E73" class="interval"/>
+<circle cx="567.000" cy="514.365" r="4" style="fill:#009E73" class="point">
+<title>Round 12; cluster mean 6.323; exact median interval [6.334, 6.381]; 192 environment clusters; 576 cells</title>
+</circle>
+</g>
+<g role="group" aria-labelledby="trajectory-panel-3-title">
+<title id="trajectory-panel-3-title">trivia-relevant-distractor-information-trajectory: distractor_information_nats</title>
+<rect x="611.000" y="434.000" width="541.000" height="300.000" rx="8" class="panel"/>
+<text x="629.000" y="461.000" class="panel-title">trivia-relevant-distractor-information-trajectory</text>
+<text x="629.000" y="481.000" class="panel-subtitle">distractor_information_nats · TRIVIA/relevant-information/*/*</text>
+<line x1="683.000" y1="674.000" x2="1130.000" y2="674.000" class="grid"/>
+<text x="675.000" y="678.000" class="tick y-tick">-0.5</text>
+<line x1="683.000" y1="630.500" x2="1130.000" y2="630.500" class="grid"/>
+<text x="675.000" y="634.500" class="tick y-tick">-0.25</text>
+<line x1="683.000" y1="587.000" x2="1130.000" y2="587.000" class="grid"/>
+<text x="675.000" y="591.000" class="tick y-tick">0</text>
+<line x1="683.000" y1="543.500" x2="1130.000" y2="543.500" class="grid"/>
+<text x="675.000" y="547.500" class="tick y-tick">0.25</text>
+<line x1="683.000" y1="500.000" x2="1130.000" y2="500.000" class="grid"/>
+<text x="675.000" y="504.000" class="tick y-tick">0.5</text>
+<line x1="683.000" y1="674.000" x2="683.000" y2="679.000" class="axis"/>
+<text x="683.000" y="694.000" class="tick x-tick">0</text>
+<line x1="794.750" y1="674.000" x2="794.750" y2="679.000" class="axis"/>
+<text x="794.750" y="694.000" class="tick x-tick">3</text>
+<line x1="906.500" y1="674.000" x2="906.500" y2="679.000" class="axis"/>
+<text x="906.500" y="694.000" class="tick x-tick">6</text>
+<line x1="1018.250" y1="674.000" x2="1018.250" y2="679.000" class="axis"/>
+<text x="1018.250" y="694.000" class="tick x-tick">9</text>
+<line x1="1130.000" y1="674.000" x2="1130.000" y2="679.000" class="axis"/>
+<text x="1130.000" y="694.000" class="tick x-tick">12</text>
+<line x1="683.000" y1="500.000" x2="683.000" y2="674.000" class="axis"/>
+<line x1="683.000" y1="674.000" x2="1130.000" y2="674.000" class="axis"/>
+<text x="906.500" y="716.000" class="axis-label">Round</text>
+<polyline points="683.000,587.000 720.250,587.000 757.500,587.000 794.750,587.000 832.000,587.000 869.250,587.000 906.500,587.000 943.750,587.000 981.000,587.000 1018.250,587.000 1055.500,587.000 1092.750,587.000 1130.000,587.000" style="stroke:#CC79A7" class="trajectory"/>
+<line x1="683.000" y1="587.000" x2="683.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="679.000" y1="587.000" x2="687.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="679.000" y1="587.000" x2="687.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="683.000" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 0; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="720.250" y1="587.000" x2="720.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="716.250" y1="587.000" x2="724.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="716.250" y1="587.000" x2="724.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="720.250" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 1; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="757.500" y1="587.000" x2="757.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="753.500" y1="587.000" x2="761.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="753.500" y1="587.000" x2="761.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="757.500" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 2; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="794.750" y1="587.000" x2="794.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="790.750" y1="587.000" x2="798.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="790.750" y1="587.000" x2="798.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="794.750" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 3; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="832.000" y1="587.000" x2="832.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="828.000" y1="587.000" x2="836.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="828.000" y1="587.000" x2="836.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="832.000" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 4; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="869.250" y1="587.000" x2="869.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="865.250" y1="587.000" x2="873.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="865.250" y1="587.000" x2="873.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="869.250" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 5; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="906.500" y1="587.000" x2="906.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="902.500" y1="587.000" x2="910.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="902.500" y1="587.000" x2="910.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="906.500" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 6; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="943.750" y1="587.000" x2="943.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="939.750" y1="587.000" x2="947.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="939.750" y1="587.000" x2="947.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="943.750" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 7; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="981.000" y1="587.000" x2="981.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="977.000" y1="587.000" x2="985.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="977.000" y1="587.000" x2="985.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="981.000" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 8; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1018.250" y1="587.000" x2="1018.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1014.250" y1="587.000" x2="1022.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1014.250" y1="587.000" x2="1022.250" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="1018.250" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 9; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1055.500" y1="587.000" x2="1055.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1051.500" y1="587.000" x2="1059.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1051.500" y1="587.000" x2="1059.500" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="1055.500" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 10; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1092.750" y1="587.000" x2="1092.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1088.750" y1="587.000" x2="1096.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1088.750" y1="587.000" x2="1096.750" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="1092.750" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 11; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+<line x1="1130.000" y1="587.000" x2="1130.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1126.000" y1="587.000" x2="1134.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<line x1="1126.000" y1="587.000" x2="1134.000" y2="587.000" style="stroke:#CC79A7" class="interval"/>
+<circle cx="1130.000" cy="587.000" r="4" style="fill:#CC79A7" class="point">
+<title>Round 12; cluster mean 0; exact median interval [0, 0]; 192 environment clusters; 576 cells</title>
+</circle>
+</g>
+<g role="group" aria-labelledby="trajectory-panel-4-title">
+<title id="trajectory-panel-4-title">ind-reward-bit-equivalent-upper-trajectory: bit_equivalent_upper_nats</title>
+<rect x="48.000" y="756.000" width="541.000" height="300.000" rx="8" class="panel"/>
+<text x="66.000" y="783.000" class="panel-title">ind-reward-bit-equivalent-upper-trajectory</text>
+<text x="66.000" y="803.000" class="panel-subtitle">bit_equivalent_upper_nats · IND/reward/*/*</text>
+<line x1="120.000" y1="996.000" x2="567.000" y2="996.000" class="grid"/>
+<text x="112.000" y="1000.000" class="tick y-tick">0</text>
+<line x1="120.000" y1="952.500" x2="567.000" y2="952.500" class="grid"/>
+<text x="112.000" y="956.500" class="tick y-tick">1.099</text>
+<line x1="120.000" y1="909.000" x2="567.000" y2="909.000" class="grid"/>
+<text x="112.000" y="913.000" class="tick y-tick">2.199</text>
+<line x1="120.000" y1="865.500" x2="567.000" y2="865.500" class="grid"/>
+<text x="112.000" y="869.500" class="tick y-tick">3.298</text>
+<line x1="120.000" y1="822.000" x2="567.000" y2="822.000" class="grid"/>
+<text x="112.000" y="826.000" class="tick y-tick">4.398</text>
+<line x1="120.000" y1="996.000" x2="120.000" y2="1001.000" class="axis"/>
+<text x="120.000" y="1016.000" class="tick x-tick">0</text>
+<line x1="231.750" y1="996.000" x2="231.750" y2="1001.000" class="axis"/>
+<text x="231.750" y="1016.000" class="tick x-tick">3</text>
+<line x1="343.500" y1="996.000" x2="343.500" y2="1001.000" class="axis"/>
+<text x="343.500" y="1016.000" class="tick x-tick">6</text>
+<line x1="455.250" y1="996.000" x2="455.250" y2="1001.000" class="axis"/>
+<text x="455.250" y="1016.000" class="tick x-tick">9</text>
+<line x1="567.000" y1="996.000" x2="567.000" y2="1001.000" class="axis"/>
+<text x="567.000" y="1016.000" class="tick x-tick">12</text>
+<line x1="120.000" y1="822.000" x2="120.000" y2="996.000" class="axis"/>
+<line x1="120.000" y1="996.000" x2="567.000" y2="996.000" class="axis"/>
+<text x="343.500" y="1038.000" class="axis-label">Round</text>
+<polyline points="120.000,996.000 157.250,962.194 194.500,927.148 231.750,881.292 269.000,883.418 306.250,869.013 343.500,860.998 380.750,852.036 418.000,844.275 455.250,839.762 492.500,836.333 529.750,834.889 567.000,834.889" style="stroke:#E69F00" class="trajectory"/>
+<circle cx="120.000" cy="996.000" r="4" style="fill:#E69F00" class="point">
+<title>Round 0; cluster mean 0; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="157.250" cy="962.194" r="4" style="fill:#E69F00" class="point">
+<title>Round 1; cluster mean 0.8545; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="194.500" cy="927.148" r="4" style="fill:#E69F00" class="point">
+<title>Round 2; cluster mean 1.74; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="231.750" cy="881.292" r="4" style="fill:#E69F00" class="point">
+<title>Round 3; cluster mean 2.899; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="269.000" cy="883.418" r="4" style="fill:#E69F00" class="point">
+<title>Round 4; cluster mean 2.846; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="306.250" cy="869.013" r="4" style="fill:#E69F00" class="point">
+<title>Round 5; cluster mean 3.21; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="343.500" cy="860.998" r="4" style="fill:#E69F00" class="point">
+<title>Round 6; cluster mean 3.412; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="380.750" cy="852.036" r="4" style="fill:#E69F00" class="point">
+<title>Round 7; cluster mean 3.639; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="418.000" cy="844.275" r="4" style="fill:#E69F00" class="point">
+<title>Round 8; cluster mean 3.835; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="455.250" cy="839.762" r="4" style="fill:#E69F00" class="point">
+<title>Round 9; cluster mean 3.949; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="492.500" cy="836.333" r="4" style="fill:#E69F00" class="point">
+<title>Round 10; cluster mean 4.036; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="529.750" cy="834.889" r="4" style="fill:#E69F00" class="point">
+<title>Round 11; cluster mean 4.072; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="567.000" cy="834.889" r="4" style="fill:#E69F00" class="point">
+<title>Round 12; cluster mean 4.072; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+</g>
+<g role="group" aria-labelledby="trajectory-panel-5-title">
+<title id="trajectory-panel-5-title">red-reward-bit-equivalent-upper-trajectory: bit_equivalent_upper_nats</title>
+<rect x="611.000" y="756.000" width="541.000" height="300.000" rx="8" class="panel"/>
+<text x="629.000" y="783.000" class="panel-title">red-reward-bit-equivalent-upper-trajectory</text>
+<text x="629.000" y="803.000" class="panel-subtitle">bit_equivalent_upper_nats · RED-C/reward/*/*</text>
+<line x1="683.000" y1="996.000" x2="1130.000" y2="996.000" class="grid"/>
+<text x="675.000" y="1000.000" class="tick y-tick">0</text>
+<line x1="683.000" y1="952.500" x2="1130.000" y2="952.500" class="grid"/>
+<text x="675.000" y="956.500" class="tick y-tick">0.3665</text>
+<line x1="683.000" y1="909.000" x2="1130.000" y2="909.000" class="grid"/>
+<text x="675.000" y="913.000" class="tick y-tick">0.733</text>
+<line x1="683.000" y1="865.500" x2="1130.000" y2="865.500" class="grid"/>
+<text x="675.000" y="869.500" class="tick y-tick">1.099</text>
+<line x1="683.000" y1="822.000" x2="1130.000" y2="822.000" class="grid"/>
+<text x="675.000" y="826.000" class="tick y-tick">1.466</text>
+<line x1="683.000" y1="996.000" x2="683.000" y2="1001.000" class="axis"/>
+<text x="683.000" y="1016.000" class="tick x-tick">0</text>
+<line x1="794.750" y1="996.000" x2="794.750" y2="1001.000" class="axis"/>
+<text x="794.750" y="1016.000" class="tick x-tick">3</text>
+<line x1="906.500" y1="996.000" x2="906.500" y2="1001.000" class="axis"/>
+<text x="906.500" y="1016.000" class="tick x-tick">6</text>
+<line x1="1018.250" y1="996.000" x2="1018.250" y2="1001.000" class="axis"/>
+<text x="1018.250" y="1016.000" class="tick x-tick">9</text>
+<line x1="1130.000" y1="996.000" x2="1130.000" y2="1001.000" class="axis"/>
+<text x="1130.000" y="1016.000" class="tick x-tick">12</text>
+<line x1="683.000" y1="822.000" x2="683.000" y2="996.000" class="axis"/>
+<line x1="683.000" y1="996.000" x2="1130.000" y2="996.000" class="axis"/>
+<text x="906.500" y="1038.000" class="axis-label">Round</text>
+<polyline points="683.000,996.000 720.250,962.194 757.500,927.148 794.750,881.292 832.000,883.418 869.250,869.013 906.500,860.998 943.750,852.036 981.000,844.275 1018.250,839.762 1055.500,836.333 1092.750,834.889 1130.000,834.889" style="stroke:#56B4E9" class="trajectory"/>
+<circle cx="683.000" cy="996.000" r="4" style="fill:#56B4E9" class="point">
+<title>Round 0; cluster mean 0; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="720.250" cy="962.194" r="4" style="fill:#56B4E9" class="point">
+<title>Round 1; cluster mean 0.2848; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="757.500" cy="927.148" r="4" style="fill:#56B4E9" class="point">
+<title>Round 2; cluster mean 0.5801; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="794.750" cy="881.292" r="4" style="fill:#56B4E9" class="point">
+<title>Round 3; cluster mean 0.9664; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="832.000" cy="883.418" r="4" style="fill:#56B4E9" class="point">
+<title>Round 4; cluster mean 0.9485; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="869.250" cy="869.013" r="4" style="fill:#56B4E9" class="point">
+<title>Round 5; cluster mean 1.07; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="906.500" cy="860.998" r="4" style="fill:#56B4E9" class="point">
+<title>Round 6; cluster mean 1.137; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="943.750" cy="852.036" r="4" style="fill:#56B4E9" class="point">
+<title>Round 7; cluster mean 1.213; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="981.000" cy="844.275" r="4" style="fill:#56B4E9" class="point">
+<title>Round 8; cluster mean 1.278; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="1018.250" cy="839.762" r="4" style="fill:#56B4E9" class="point">
+<title>Round 9; cluster mean 1.316; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="1055.500" cy="836.333" r="4" style="fill:#56B4E9" class="point">
+<title>Round 10; cluster mean 1.345; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="1092.750" cy="834.889" r="4" style="fill:#56B4E9" class="point">
+<title>Round 11; cluster mean 1.357; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+<circle cx="1130.000" cy="834.889" r="4" style="fill:#56B4E9" class="point">
+<title>Round 12; cluster mean 1.357; exact median interval unbounded; 192 environment clusters; 576 cells</title>
+</circle>
+</g>
+<text x="48" y="1114" class="note">Inference scope: environment replicas are independent clusters; algorithm replicas are averaged within cluster.</text>
+<text x="48" y="1136" class="note">Report 07dabc814e26 · figure contains no additional hypothesis tests.</text>
+</svg>
