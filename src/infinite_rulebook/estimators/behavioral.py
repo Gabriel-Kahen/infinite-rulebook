@@ -117,6 +117,37 @@ def _validate_problem_size(
         raise ValueError("problem exceeds config.maximum_actions")
 
 
+def _unit_sum_row(row: tuple[float, ...]) -> tuple[float, ...]:
+    values = list(row)
+    pivot = max(range(len(values)), key=values.__getitem__)
+    other_total = math.fsum(
+        value for index, value in enumerate(values) if index != pivot
+    )
+    values[pivot] = max(0.0, 1.0 - other_total)
+    for _ in range(16):
+        total = math.fsum(values)
+        if total == 1.0:
+            return tuple(values)
+        direction = math.inf if total < 1.0 else 0.0
+        updated = math.nextafter(values[pivot], direction)
+        if updated == values[pivot] or updated < 0.0:
+            break
+        values[pivot] = updated
+    raise EstimatorError("could not construct an idempotent probability row")
+
+
+def _public_witness(
+    problem: FiniteDecisionProblem,
+    channel: Sequence[Sequence[Real]],
+) -> ChannelWitness:
+    canonical = problem.validate_channel(channel)
+    stabilized = tuple(_unit_sum_row(row) for row in canonical)
+    witness = problem.evaluate(stabilized)
+    if witness.channel != stabilized or problem.evaluate(witness.channel) != witness:
+        raise EstimatorError("retained channel witness is not exactly reproducible")
+    return witness
+
+
 @dataclass(frozen=True, slots=True)
 class BehavioralFit:
     """One bounded direct-channel fit at a fixed Lagrange multiplier."""
@@ -209,13 +240,42 @@ def _updated_reference(
     return tuple(value / total for value in updated)
 
 
+def _weighted_log_ratio(
+    factors: tuple[float, ...],
+    numerator: float,
+    denominator: float,
+) -> float:
+    ratio = numerator / denominator
+    log_ratio = (
+        math.log(ratio)
+        if math.isfinite(ratio) and ratio > 0.0
+        else math.log(numerator) - math.log(denominator)
+    )
+    if log_ratio == 0.0:
+        return 0.0
+    weight = 1.0
+    for factor in factors:
+        weight *= factor
+    term = weight * log_ratio
+    if weight > 0.0 and term != 0.0:
+        return term
+    log_magnitude = math.fsum(math.log(factor) for factor in factors) + math.log(
+        abs(log_ratio)
+    )
+    return math.copysign(math.exp(log_magnitude), log_ratio)
+
+
 def _reference_kl(
     problem: FiniteDecisionProblem,
     witness: ChannelWitness,
     reference: tuple[float, ...],
 ) -> float:
     return math.fsum(
-        problem.prior[state] * conditional * math.log(conditional / reference[action])
+        _weighted_log_ratio(
+            (problem.prior[state], conditional),
+            conditional,
+            reference[action],
+        )
         for state, row in enumerate(witness.channel)
         if problem.prior[state] > 0.0
         for action, conditional in enumerate(row)
@@ -228,7 +288,11 @@ def _marginal_kl(
     reference: tuple[float, ...],
 ) -> float:
     return math.fsum(
-        probability * math.log(probability / reference[action])
+        _weighted_log_ratio(
+            (probability,),
+            probability,
+            reference[action],
+        )
         for action, probability in enumerate(marginal)
         if probability > 0.0
     )
@@ -266,7 +330,10 @@ def fit_behavioral_channel(
             reference,
             settings,
         )
-    witness = problem.evaluate(_gibbs_channel(problem, multiplier, reference))
+    witness = _public_witness(
+        problem,
+        _gibbs_channel(problem, multiplier, reference),
+    )
 
     direct_reference_kl = _reference_kl(problem, witness, reference)
     raw_compression_gap = _marginal_kl(witness.action_marginal, reference)
@@ -372,7 +439,7 @@ def _mixed_witness(
             )
             for state in range(problem.state_count)
         )
-        witness = problem.evaluate(channel)
+        witness = _public_witness(problem, channel)
         if witness.expected_reward >= target or weight >= 1.0:
             return witness
         weight = math.nextafter(weight, 1.0)

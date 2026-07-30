@@ -30,7 +30,10 @@ The code independently evaluates all three terms. The reference quantity is
 therefore an upper bound on that channel's mutual information. In this
 finite-only foundation, the final reward and mutual information are also
 computed exactly from the complete channel; no sampled confidence statement
-is needed or implied.
+is needed or implied. KL ratios use the ordinary direct path when
+representable and a log-difference path when division underflows or overflows;
+weighted subnormal terms are recovered in log space when their direct product
+rounds to zero.
 
 For a requested reward \(\rho\):
 
@@ -43,7 +46,13 @@ For a requested reward \(\rho\):
 - the zero-information region and targets above maximum reward are reported
   explicitly; and
 - optimizer convergence is only a diagnostic. A lower certificate remains
-  valid when the fixed optimization budget ends early.
+valid when the fixed optimization budget ends early.
+
+Before a channel is retained, one pivot probability per row absorbs any final
+floating-point normalization residual. Every public row must then sum to
+exactly one under `math.fsum`, and a second evaluation of the stored channel
+must reproduce the complete witness exactly. Construction fails closed if
+that serialize-and-re-evaluate contract cannot be met.
 
 The estimator never repairs, smooths, or narrows bounds to make a curve look
 better. A lower certificate that exceeds a feasible witness beyond numerical
@@ -62,14 +71,16 @@ certified exact finite solver on named reward grids. Cases are tagged
 - normalized achieved-reward overshoot; and
 - exact-solver convergence.
 
-Each split reports the fraction and count of prespecified grid points whose
+Each split reports the fraction and count of all prespecified grid points whose
 certified exact envelopes are contained, maximum partial-identification width,
-maximum upper excess, and maximum normalized reward overshoot. The grid
-fraction is a descriptive diagnostic only. Target points and cases need not be
-independent or exchangeable, so no binomial interval or population coverage
-claim is reported. Development-case tuning can bias even the descriptive
-fraction, and the function cannot enforce that an operator refrained from
-looking at a held-out report before changing a later configuration.
+maximum upper excess, and maximum normalized reward overshoot. A point where
+the exact comparator does not converge is not counted as covered; the separate
+exact-convergence count exposes that distinction. The grid fraction is a
+descriptive diagnostic only. Target points and cases need not be independent
+or exchangeable, so no binomial interval or population coverage claim is
+reported. Development-case tuning can bias even the descriptive fraction, and
+the function cannot enforce that an operator refrained from looking at a
+held-out report before changing a later configuration.
 
 ```python
 from infinite_rulebook.estimators import (

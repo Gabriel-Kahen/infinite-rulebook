@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -16,6 +17,7 @@ from infinite_rulebook.estimators import (
     estimate_behavioral_frontier,
     fit_behavioral_channel,
 )
+from infinite_rulebook.estimators.calibration import _summarize
 from infinite_rulebook.frontier import (
     FiniteDecisionProblem,
     one_coordinate_problem,
@@ -109,6 +111,42 @@ def test_weak_grid_reports_partial_identification_without_false_convergence() ->
     assert point.upper_bound >= exact.upper_bound
     assert point.interval_width > 0.0
     assert "exactly-evaluated-feasible" in point.upper_bound_method
+
+
+def test_retained_mixed_witness_is_exactly_reproducible_and_feasible() -> None:
+    problem = FiniteDecisionProblem(
+        prior=(
+            0.26608193554876375,
+            0.31114972852923584,
+            0.2738592564308415,
+            0.14890907949115892,
+        ),
+        rewards=(
+            (9.657750052104575, -5.483867461874411, -9.07042011017882),
+            (-6.958036943680277, 5.151793337152245, 6.100361128514216),
+            (-8.052067886344672, 13.381747969330256, -12.83163368163406),
+            (-19.44085306061497, -3.2334031048107974, -13.018592006116968),
+        ),
+    )
+    config = BehavioralEstimatorConfig(
+        betas=(0.0, 0.2, 1.0, 4.0, 16.0),
+        optimizer_steps=9,
+        reference_update_rate=0.63,
+        reference_smoothing=1e-10,
+    )
+    target = float.fromhex("0x1.3b533a1fa479dp+2")
+
+    point = estimate_behavioral_frontier(
+        problem,
+        (target,),
+        config=config,
+    ).points[0]
+
+    assert point.witness is not None
+    assert all(math.fsum(row) == 1.0 for row in point.witness.channel)
+    assert problem.evaluate(point.witness.channel) == point.witness
+    assert point.witness.expected_reward >= target
+    assert point.upper_bound == point.witness.mutual_information
 
 
 def test_zero_information_and_infeasible_targets_are_explicit() -> None:
@@ -251,6 +289,20 @@ def test_calibration_report_is_deterministic() -> None:
     assert left == right
     assert semantic_hash(left) == semantic_hash(right)
 
+    nonconverged = replace(
+        left.points[1],
+        exact_converged=False,
+        envelope_covered=None,
+    )
+    conservative = _summarize(
+        CalibrationSplit.HELD_OUT,
+        (left.points[0], nonconverged),
+    )
+    assert conservative.point_count == 2
+    assert conservative.exact_converged_count == 1
+    assert conservative.covered_count == 1
+    assert conservative.descriptive_grid_coverage == 0.5
+
 
 @pytest.mark.parametrize(
     "config",
@@ -325,3 +377,32 @@ def test_positive_smoothing_preserves_reference_support_under_underflow() -> Non
 
     assert all(probability > 0.0 for probability in fit.reference_marginal)
     assert math.isfinite(fit.reference_kl_upper_bound)
+
+
+def test_subnormal_reference_kl_uses_finite_log_differences() -> None:
+    subnormal = float.fromhex("0x0.0000000000001p-1022")
+    problem = FiniteDecisionProblem(
+        (1.0, subnormal),
+        ((0.0, -1_000.0), (-1_000.0, 0.0)),
+    )
+    config = BehavioralEstimatorConfig(
+        betas=(0.0, 1.0),
+        optimizer_steps=2,
+        reference_smoothing=1e-310,
+        maximum_actions=2,
+    )
+
+    fit = fit_behavioral_channel(problem, 1.0, config=config)
+    estimate = estimate_behavioral_frontier(
+        problem,
+        (problem.maximum_reward,),
+        config=config,
+    )
+
+    assert math.isfinite(fit.direct_reference_kl)
+    assert math.isfinite(fit.reference_kl_upper_bound)
+    assert fit.reference_kl_upper_bound >= fit.witness.mutual_information
+    assert estimate.points[0].witness is not None
+    assert problem.evaluate(estimate.points[0].witness.channel) == (
+        estimate.points[0].witness
+    )

@@ -111,17 +111,15 @@ def _summarize(
     points: tuple[CalibrationPoint, ...],
 ) -> CalibrationSummary:
     selected = tuple(point for point in points if point.split is split)
-    covered = tuple(
-        point.envelope_covered
-        for point in selected
-        if point.envelope_covered is not None
+    exact_converged_count = sum(
+        point.envelope_covered is not None for point in selected
     )
-    covered_count = sum(covered)
-    coverage = covered_count / len(covered) if covered else None
+    covered_count = sum(point.envelope_covered is True for point in selected)
+    coverage = covered_count / len(selected) if selected else None
     return CalibrationSummary(
         split=split,
         point_count=len(selected),
-        exact_converged_count=len(covered),
+        exact_converged_count=exact_converged_count,
         covered_count=covered_count,
         descriptive_grid_coverage=coverage,
         maximum_upper_excess=max(
