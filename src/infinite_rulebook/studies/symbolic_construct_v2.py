@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from infinite_rulebook.analysis.canaries import (
+    ConstantAdditiveMetricCanary,
+    ExactZeroMetricCanary,
+    FrontierIdentityCanary,
+    MetricTrajectoryIdentityCanary,
+)
+from infinite_rulebook.analysis.compact_canaries_v2 import (
+    AggregateMetricCanary,
+    CompactCanaryPlan,
+)
 from infinite_rulebook.analysis.loading import (
     analysis_agent_hash,
     analysis_condition_hash,
@@ -29,6 +39,7 @@ from infinite_rulebook.analysis.power import (
     PowerHypothesis,
 )
 from infinite_rulebook.analysis.reporting import AnalysisReport
+from infinite_rulebook.analysis.supplemental_v2 import SupplementalEvidencePlan
 from infinite_rulebook.orchestration.config import (
     AgentKind,
     EnvironmentConfig,
@@ -219,6 +230,185 @@ def _selector_payload(selector: GroupSelector) -> dict[str, str | None]:
     }
 
 
+def _expected_group_selector(group: ExpectedGroup) -> GroupSelector:
+    return GroupSelector(
+        environment_kind=group.environment_kind,
+        agent_kind=group.agent_kind,
+        condition_hash=group.condition_hash,
+        agent_hash=group.agent_hash,
+    )
+
+
+def _build_symbolic_canary_plan(
+    config: ExperimentConfig,
+    *,
+    phase: AnalysisPhase,
+) -> CompactCanaryPlan:
+    checkpoints = config.checkpoints.rounds
+    positive_checkpoints = tuple(item for item in checkpoints if item > 0)
+    ind = _selector(config, EnvironmentKind.IND, AgentKind.REWARD)
+    paired_environments = (
+        (
+            "alea",
+            _selector(config, EnvironmentKind.ALEA, AgentKind.REWARD),
+        ),
+        (
+            "trivia-d6",
+            _selector(
+                config,
+                EnvironmentKind.TRIVIA,
+                AgentKind.REWARD,
+                distractor_dimensions=6,
+            ),
+        ),
+        (
+            "trivia-d12",
+            _selector(
+                config,
+                EnvironmentKind.TRIVIA,
+                AgentKind.REWARD,
+                distractor_dimensions=12,
+            ),
+        ),
+        (
+            "trivia-d24",
+            _selector(
+                config,
+                EnvironmentKind.TRIVIA,
+                AgentKind.REWARD,
+                distractor_dimensions=24,
+            ),
+        ),
+    )
+    public = _selector(config, EnvironmentKind.PUBLIC_C, AgentKind.REWARD)
+    public_config = _environment(config, EnvironmentKind.PUBLIC_C)
+    canaries = [
+        FrontierIdentityCanary(
+            f"{name}-frontier-is-ind",
+            ind,
+            selector,
+            checkpoints,
+        )
+        for name, selector in paired_environments
+    ]
+    for name, selector in (*paired_environments, ("public", public)):
+        canaries.extend(
+            (
+                MetricTrajectoryIdentityCanary(
+                    f"{name}-hidden-reward-path-is-ind",
+                    "hidden_expected_reward",
+                    ind,
+                    selector,
+                    checkpoints,
+                    PAIRED_PATH_ABSOLUTE_TOLERANCE,
+                ),
+                MetricTrajectoryIdentityCanary(
+                    f"{name}-useful-information-path-is-ind",
+                    "relevant_information_nats",
+                    ind,
+                    selector,
+                    checkpoints,
+                    PAIRED_PATH_ABSOLUTE_TOLERANCE,
+                ),
+            )
+        )
+    for agent in config.agents:
+        suffix = "" if agent.kind is AgentKind.REWARD else f"-{agent.kind.value}"
+        canaries.extend(
+            (
+                ConstantAdditiveMetricCanary(
+                    f"public-reward-decomposition{suffix}",
+                    _selector(config, EnvironmentKind.PUBLIC_C, agent.kind),
+                    total_metric="expected_reward",
+                    base_metric="hidden_expected_reward",
+                    shift_metric="public_reward",
+                    expected_shift=public_config.public_reward_cap,
+                    checkpoints=checkpoints,
+                    tolerance=PAIRED_PATH_ABSOLUTE_TOLERANCE,
+                ),
+                ExactZeroMetricCanary(
+                    f"alea-has-no-persistent-distractor-information{suffix}",
+                    _selector(config, EnvironmentKind.ALEA, agent.kind),
+                    "distractor_information_nats",
+                    checkpoints,
+                ),
+            )
+        )
+    return CompactCanaryPlan(
+        name=f"{STUDY_CONTRACT}-compact-canaries-{phase.value}",
+        phase=phase,
+        canaries=tuple(canaries),
+        aggregate_canaries=(
+            AggregateMetricCanary(
+                "post-query-mean-hidden-reward-derivation",
+                tuple(
+                    _expected_group_selector(group)
+                    for group in expected_analysis_groups(config)
+                ),
+                aggregate_metric="post_query_mean_hidden_expected_reward",
+                source_metric="post_query_hidden_expected_reward",
+                checkpoints=positive_checkpoints,
+                tolerance=AGGREGATE_METRIC_ABSOLUTE_TOLERANCE,
+            ),
+        ),
+    )
+
+
+def _build_symbolic_supplemental_plan(
+    config: ExperimentConfig,
+    *,
+    phase: AnalysisPhase,
+) -> SupplementalEvidencePlan:
+    relevant_d6 = _selector(
+        config,
+        EnvironmentKind.TRIVIA,
+        AgentKind.RELEVANT_INFORMATION,
+        distractor_dimensions=6,
+    )
+    total_d6 = _selector(
+        config,
+        EnvironmentKind.TRIVIA,
+        AgentKind.TOTAL_INFORMATION,
+        distractor_dimensions=6,
+    )
+    relevant_d12 = _selector(
+        config,
+        EnvironmentKind.TRIVIA,
+        AgentKind.RELEVANT_INFORMATION,
+        distractor_dimensions=12,
+    )
+    total_d12 = _selector(
+        config,
+        EnvironmentKind.TRIVIA,
+        AgentKind.TOTAL_INFORMATION,
+        distractor_dimensions=12,
+    )
+    return SupplementalEvidencePlan(
+        name=f"{STUDY_CONTRACT}-supplemental-{phase.value}",
+        phase=phase,
+        legacy_replications=(
+            ContrastSpec(
+                LEGACY_D6_REPLICATION,
+                "hidden_expected_reward",
+                relevant_d6,
+                total_d6,
+                config.horizon,
+                Alternative.GREATER,
+            ),
+        ),
+        descriptive_comparisons=(
+            ContrastSpec(
+                SECONDARY_D12,
+                "hidden_expected_reward",
+                relevant_d12,
+                total_d12,
+                config.horizon,
+                Alternative.GREATER,
+            ),
+        ),
+    )
+
+
 def registration_component_payload(config: ExperimentConfig) -> dict[str, object]:
     """Bind registered v2 features that live outside the primary plan schema."""
 
@@ -246,6 +436,20 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
         AgentKind.TOTAL_INFORMATION,
         distractor_dimensions=12,
     )
+    canary_plan_hashes = {
+        phase.value: _build_symbolic_canary_plan(
+            config,
+            phase=phase,
+        ).scientific_hash
+        for phase in (AnalysisPhase.CALIBRATION, AnalysisPhase.CONFIRMATORY)
+    }
+    supplemental_plan_hashes = {
+        phase.value: _build_symbolic_supplemental_plan(
+            config,
+            phase=phase,
+        ).scientific_hash
+        for phase in (AnalysisPhase.CALIBRATION, AnalysisPhase.CONFIRMATORY)
+    }
     return {
         "study_contract": STUDY_CONTRACT,
         "post_query_metric": {
@@ -298,7 +502,15 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
                 "all-exact-registered-condition-agent-groups"
             ),
             "detail_chunk_records": COMPACT_CANARY_DETAIL_CHUNK_RECORDS,
+            "plan_hashes": canary_plan_hashes,
             "raw_roots_remain_authoritative": True,
+        },
+        "supplemental_evidence": {
+            "plan_hashes": supplemental_plan_hashes,
+            "legacy_replication": LEGACY_D6_REPLICATION,
+            "descriptive_comparison": SECONDARY_D12,
+            "family_membership": "outside-primary-holm",
+            "may_rescue_compound_s2": False,
         },
         "power": {
             "seed": POWER_SEED,
@@ -320,6 +532,46 @@ def registration_component_hash(config: ExperimentConfig) -> str:
         registration_component_payload(config),
         domain="symbolic-v2-registration-components",
     )
+
+
+def build_symbolic_canary_plan(
+    config: ExperimentConfig,
+    *,
+    phase: AnalysisPhase,
+) -> CompactCanaryPlan:
+    """Build the exact 27-gate compact v2 canary registration."""
+
+    plan = _build_symbolic_canary_plan(config, phase=phase)
+    if config.phase != phase.value:
+        raise ValueError("canary phase must match the experiment config")
+    if phase is AnalysisPhase.CALIBRATION:
+        verify_symbolic_calibration_design(config)
+    elif phase is AnalysisPhase.CONFIRMATORY:
+        verify_symbolic_confirmatory_contract(config)
+    else:
+        raise ValueError("v2 canaries require calibration or confirmation")
+    return plan
+
+
+def build_symbolic_supplemental_plan(
+    config: ExperimentConfig,
+    *,
+    phase: AnalysisPhase,
+) -> SupplementalEvidencePlan:
+    """Build the exact outside-Holm paired v2 evidence registration."""
+
+    plan = _build_symbolic_supplemental_plan(config, phase=phase)
+    if config.phase != phase.value:
+        raise ValueError("supplemental phase must match the experiment config")
+    if phase is AnalysisPhase.CALIBRATION:
+        verify_symbolic_calibration_design(config)
+    elif phase is AnalysisPhase.CONFIRMATORY:
+        verify_symbolic_confirmatory_contract(config)
+    else:
+        raise ValueError(
+            "v2 supplemental evidence requires calibration or confirmation"
+        )
+    return plan
 
 
 def _verify_scientific_design(config: ExperimentConfig) -> None:
@@ -689,6 +941,10 @@ def calibration_evidence_hash(
     config: ExperimentConfig,
     report: AnalysisReport,
     canary_report_hash: str,
+    canary_detail_root_hash: str,
+    canary_detail_record_count: int,
+    supplemental_plan_hash: str,
+    supplemental_report_hash: str,
     power_calibration_hash: str,
     reproducibility_report_hash: str,
     raw_serial_inventory_hash: str,
@@ -709,6 +965,10 @@ def calibration_evidence_hash(
         config_hash=config.config_hash,
         analysis_report_hash=report.scientific_hash,
         canary_report_hash=canary_report_hash,
+        canary_detail_root_hash=canary_detail_root_hash,
+        canary_detail_record_count=canary_detail_record_count,
+        supplemental_plan_hash=supplemental_plan_hash,
+        supplemental_report_hash=supplemental_report_hash,
         power_calibration_hash=power_calibration_hash,
         reproducibility_report_hash=reproducibility_report_hash,
         raw_serial_inventory_hash=raw_serial_inventory_hash,
@@ -729,6 +989,10 @@ def calibration_evidence_hash_from_hashes(
     config_hash: str,
     analysis_report_hash: str,
     canary_report_hash: str,
+    canary_detail_root_hash: str,
+    canary_detail_record_count: int,
+    supplemental_plan_hash: str,
+    supplemental_report_hash: str,
     power_calibration_hash: str,
     reproducibility_report_hash: str,
     raw_serial_inventory_hash: str,
@@ -749,6 +1013,12 @@ def calibration_evidence_hash_from_hashes(
         or smoke_config_hash != SYMBOLIC_V2_SMOKE_CONFIG_HASH
     ):
         raise ValueError("v2 calibration changed its registered Stage-0 prerequisite")
+    if (
+        isinstance(canary_detail_record_count, bool)
+        or not isinstance(canary_detail_record_count, int)
+        or canary_detail_record_count < 1
+    ):
+        raise ValueError("v2 canary detail record count must be positive")
     return scientific_hash(
         {
             "study_contract": STUDY_CONTRACT,
@@ -757,6 +1027,10 @@ def calibration_evidence_hash_from_hashes(
             "config_hash": config_hash,
             "analysis_report_hash": analysis_report_hash,
             "canary_report_hash": canary_report_hash,
+            "canary_detail_root_hash": canary_detail_root_hash,
+            "canary_detail_record_count": canary_detail_record_count,
+            "supplemental_plan_hash": supplemental_plan_hash,
+            "supplemental_report_hash": supplemental_report_hash,
             "power_calibration_hash": power_calibration_hash,
             "reproducibility_report_hash": reproducibility_report_hash,
             "raw_serial_inventory_hash": raw_serial_inventory_hash,
@@ -807,6 +1081,8 @@ __all__ = [
     "SYMBOLIC_V2_SMOKE_CONFIG_HASH",
     "SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH",
     "build_symbolic_analysis_plan",
+    "build_symbolic_canary_plan",
+    "build_symbolic_supplemental_plan",
     "calibration_evidence_hash",
     "calibration_evidence_hash_from_hashes",
     "expected_analysis_groups",
