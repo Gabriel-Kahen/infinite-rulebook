@@ -1218,8 +1218,12 @@ def _validate_completed_run_payload(
     recorded_run_hash = config.get("run_hash")
     try:
         from infinite_rulebook.orchestration.config import (
+            SYMBOLIC_ADAPTER_CONTRACT_V1,
+            SYMBOLIC_ADAPTER_CONTRACT_V2,
+            registered_symbolic_v2_phase,
             run_cell_from_dict,
             run_cell_identity_payload,
+            symbolic_adapter_contract,
         )
         from infinite_rulebook.orchestration.provenance import ScientificProvenance
         from infinite_rulebook.orchestration.seeds import RunSeeds, SeedBank
@@ -1271,6 +1275,26 @@ def _validate_completed_run_payload(
         )
     horizon = run_settings["horizon"]
     phase = run_settings.get("phase")
+    adapter_contract = run_settings.get("adapter_contract")
+    experiment_name = run_settings.get("experiment_name")
+    if adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V1:
+        if experiment_name is not None:
+            raise ScientificArtifactError(
+                "legacy adapter runs cannot claim a v2 experiment name"
+            )
+    elif adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V2:
+        if (
+            not isinstance(experiment_name, str)
+            or registered_symbolic_v2_phase(experiment_name) != phase
+            or symbolic_adapter_contract(experiment_name) != adapter_contract
+        ):
+            raise ScientificArtifactError(
+                "v2 adapter contract is not bound to an exact registered experiment"
+            )
+    else:
+        raise ScientificArtifactError(
+            "completed run has an unregistered adapter contract"
+        )
     confirmatory = phase == "confirmatory"
     freeze_hash = run_settings.get("confirmatory_freeze_hash")
     registration_hash = run_settings.get("analysis_registration_hash")
@@ -1283,7 +1307,8 @@ def _validate_completed_run_payload(
         or (confirmatory and not is_sha256(registration_hash))
         or (
             confirmatory
-            and run_settings.get("adapter_contract") != "exact-symbolic-adapter.v1"
+            and adapter_contract
+            not in {SYMBOLIC_ADAPTER_CONTRACT_V1, SYMBOLIC_ADAPTER_CONTRACT_V2}
         )
         or (not confirmatory and freeze_hash is not None)
         or (not confirmatory and registration_hash is not None)
@@ -1307,6 +1332,34 @@ def _validate_completed_run_payload(
     ):
         raise ScientificArtifactError(
             "completed run event count does not match its horizon"
+        )
+    post_query_hidden_rewards: tuple[float, ...] = ()
+    if adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V2:
+        parsed_rewards = []
+        for event in events:
+            payload = event.payload
+            value = (
+                payload.get("post_query_hidden_expected_reward")
+                if isinstance(payload, dict)
+                else None
+            )
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise ScientificArtifactError(
+                    "v2 training event has an invalid post-query hidden reward"
+                )
+            parsed_rewards.append(float(value))
+        post_query_hidden_rewards = tuple(parsed_rewards)
+    elif any(
+        isinstance(event.payload, dict)
+        and "post_query_hidden_expected_reward" in event.payload
+        for event in events
+    ):
+        raise ScientificArtifactError(
+            "legacy training event contains a v2 post-query hidden reward"
         )
     expected_rounds = list(run_settings["checkpoints"]["rounds"])
     checkpoint_rounds = []
@@ -1333,6 +1386,36 @@ def _validate_completed_run_payload(
         result = payload.get("result")
         if not isinstance(result, dict):
             raise ScientificArtifactError("completed run checkpoint result is invalid")
+        post_query_source_name = "post_query_hidden_expected_reward"
+        post_query_mean_name = "post_query_mean_hidden_expected_reward"
+        if adapter_contract == SYMBOLIC_ADAPTER_CONTRACT_V2:
+            if round_index == 0:
+                valid_post_query_metrics = (
+                    post_query_source_name not in result
+                    and post_query_mean_name not in result
+                )
+            else:
+                post_query_source = result.get(post_query_source_name)
+                post_query_mean = result.get(post_query_mean_name)
+                valid_post_query_metrics = (
+                    not isinstance(post_query_source, bool)
+                    and isinstance(post_query_source, (int, float))
+                    and math.isfinite(post_query_source)
+                    and post_query_source == post_query_hidden_rewards[round_index - 1]
+                    and not isinstance(post_query_mean, bool)
+                    and isinstance(post_query_mean, (int, float))
+                    and math.isfinite(post_query_mean)
+                    and post_query_mean
+                    == math.fsum(post_query_hidden_rewards[:round_index]) / round_index
+                )
+            if not valid_post_query_metrics:
+                raise ScientificArtifactError(
+                    "v2 checkpoint post-query hidden-reward metrics are invalid"
+                )
+        elif post_query_source_name in result or post_query_mean_name in result:
+            raise ScientificArtifactError(
+                "legacy checkpoint contains a v2 post-query hidden-reward metric"
+            )
         try:
             typed = validate_checkpoint_record(result["scientific_records"])
         except (KeyError, TypeError, ValueError) as error:
@@ -1407,6 +1490,7 @@ def _validate_completed_run_payload(
             expected_rounds=tuple(expected_rounds),
             phase=phase,
             confirmatory=confirmatory,
+            adapter_contract=adapter_contract,
         )
 
 
@@ -1422,12 +1506,13 @@ def _validate_exact_symbolic_replay(
     expected_rounds: tuple[int, ...],
     phase: str,
     confirmatory: bool,
+    adapter_contract: str,
 ) -> None:
     """Replay every registered study transition and evaluation from first principles."""
 
-    from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
+    from infinite_rulebook.orchestration.symbolic import exact_symbolic_adapter_class
 
-    adapter = ExactSymbolicAdapter()
+    adapter = exact_symbolic_adapter_class(adapter_contract)()
     state = adapter.initial_state(typed_cell, typed_seeds)
     checkpoint_by_round = {
         checkpoint.payload["round"]: checkpoint for checkpoint in checkpoints

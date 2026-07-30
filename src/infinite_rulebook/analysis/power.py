@@ -974,6 +974,7 @@ def calibrate_environment_count(
     simulation_error_alpha: float = DEFAULT_SIMULATION_ERROR_ALPHA,
     design_confidence_alpha: float = DEFAULT_DESIGN_CONFIDENCE_ALPHA,
     center_environment_count: int | None = None,
+    rng_stream: str = "analysis.cluster-power.v1",
 ) -> PowerCalibration:
     """Choose the smallest environment count with certified operating bounds.
 
@@ -1066,7 +1067,7 @@ def calibrate_environment_count(
     if len(set(candidates)) != len(candidates):
         raise ValueError("candidate environment counts must be unique")
     candidates = tuple(sorted(candidates))
-    rng = CounterRNG(seed, stream="analysis.cluster-power.v1")
+    rng = CounterRNG(seed, stream=_identifier("rng_stream", rng_stream))
     population = len(environment_ids)
     center_count = (
         population // 2

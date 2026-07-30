@@ -10,7 +10,7 @@ from pathlib import Path
 from infinite_rulebook.orchestration.config import load_experiment_config
 from infinite_rulebook.orchestration.run import RunExecutor
 from infinite_rulebook.orchestration.sweep import SweepRunner
-from infinite_rulebook.orchestration.symbolic import ExactSymbolicAdapter
+from infinite_rulebook.studies.symbolic_registry import registered_symbolic_study
 from scripts.generate_ingestion_probe import build_ingestion_probe
 
 
@@ -23,9 +23,9 @@ def main() -> int:
     arguments = parser.parse_args()
     if arguments.workers < 1:
         parser.error("--workers must be positive")
-    expected = build_ingestion_probe(
-        load_experiment_config(arguments.calibration_config)
-    )
+    calibration = load_experiment_config(arguments.calibration_config)
+    study = registered_symbolic_study(calibration.name)
+    expected = build_ingestion_probe(calibration)
     observed = load_experiment_config(arguments.probe_config)
     if observed != expected:
         raise ValueError("probe config differs from the registered-shape derivation")
@@ -34,7 +34,7 @@ def main() -> int:
             f"probe artifact root must not already exist: {arguments.artifact_root}"
         )
     results = SweepRunner(
-        RunExecutor(arguments.artifact_root, ExactSymbolicAdapter)
+        RunExecutor(arguments.artifact_root, study.adapter_factory)
     ).run(observed, max_workers=arguments.workers)
     print(
         json.dumps(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -440,7 +440,6 @@ def _prepare_report(
         lambda *_args, **_kwargs: smoke,
     )
     monkeypatch.setattr(cli, "load_run_trees", load_run_trees)
-    monkeypatch.setattr(cli, "evaluate_canaries", evaluate_canaries)
     monkeypatch.setattr(cli, "build_report", build_report)
     monkeypatch.setattr(cli, "calibrate_environment_count", calibrate)
     monkeypatch.setattr(
@@ -449,6 +448,28 @@ def _prepare_report(
         classmethod(create_inventory),
     )
     monkeypatch.setattr(RawArtifactInventory, "verify", verify_inventory)
+    registered = cli.registered_symbolic_study
+    test_study = replace(
+        cli.SYMBOLIC_STUDY_V1,
+        evidence=replace(
+            cli.SYMBOLIC_STUDY_V1.evidence,
+            evaluate_canaries=evaluate_canaries,
+        ),
+        power=replace(
+            cli.SYMBOLIC_STUDY_V1.power,
+            simulations=_TEST_POWER_SIMULATIONS,
+            candidate_environment_counts=(32,),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "registered_symbolic_study",
+        lambda name: (
+            test_study
+            if registered(name) is cli.SYMBOLIC_STUDY_V1
+            else registered(name)
+        ),
+    )
     monkeypatch.setattr(cli, "POWER_SIMULATIONS", _TEST_POWER_SIMULATIONS)
     monkeypatch.setattr(cli, "POWER_CANDIDATE_ENVIRONMENTS", (32,))
 
@@ -748,7 +769,7 @@ def test_freeze_rejects_boolean_deviation_schema_version(
     ("component", "message"),
     [
         ("analysis", "analysis evidence does not derive from raw roots"),
-        ("canaries", "canary evidence does not derive from raw roots"),
+        ("canaries", "v1 canary artifact bundle differs from raw evidence"),
     ],
 )
 def test_freeze_rejects_rehashed_resealed_evidence_not_derived_from_raw_roots(

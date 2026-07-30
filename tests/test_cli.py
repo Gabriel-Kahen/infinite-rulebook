@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import infinite_rulebook.cli as cli
 from infinite_rulebook.analysis import AnalysisPhase, load_analysis_plan
 from infinite_rulebook.cli import (
     _completed_run_roots,
@@ -39,6 +40,31 @@ from infinite_rulebook.studies.symbolic_construct import (
     build_symbolic_analysis_plan,
     build_symbolic_canary_plan,
 )
+from infinite_rulebook.studies.symbolic_registry import (
+    SYMBOLIC_STUDY_V1,
+    SYMBOLIC_STUDY_V2,
+)
+
+
+def test_v1_cli_module_constants_remain_backward_compatible() -> None:
+    expected = {
+        "POWER_CENTER_ENVIRONMENTS": SYMBOLIC_STUDY_V1.power.center_environment_count,
+        "POWER_PROBABILITY_ENVIRONMENTS": (
+            SYMBOLIC_STUDY_V1.power.probability_environment_count
+        ),
+        "POWER_DESIGN_CONFIDENCE_ALPHA": (
+            SYMBOLIC_STUDY_V1.power.design_confidence_alpha
+        ),
+        "S5_BOOTSTRAP_DIAGNOSTIC_LOCATION": (
+            SYMBOLIC_STUDY_V1.power.equivalence_diagnostic_location
+        ),
+        "SYMBOLIC_V1_CONFIRMATORY_MASTER_SEED": (
+            SYMBOLIC_STUDY_V1.confirmatory_master_seed
+        ),
+        "SYMBOLIC_V1_CONFIRMATORY_NAME": SYMBOLIC_STUDY_V1.confirmatory_name,
+    }
+
+    assert expected == {name: getattr(cli, name) for name in expected}
 
 
 def test_json_output_is_verified_before_publication(tmp_path: Path) -> None:
@@ -96,6 +122,75 @@ def test_run_command_accepts_phase_aware_arguments(tmp_path: Path) -> None:
     assert arguments.artifact_root == tmp_path
 
 
+def test_v2_run_selects_registered_adapter_and_exact_stage_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+    smoke = SimpleNamespace(
+        scientific_hash=SYMBOLIC_STUDY_V2.smoke_prerequisite_hash,
+        config=SimpleNamespace(config_hash=SYMBOLIC_STUDY_V2.smoke_config_hash),
+        reproducibility=SimpleNamespace(
+            serial_root=tmp_path / "smoke-serial",
+            parallel_root=tmp_path / "smoke-parallel",
+        ),
+    )
+
+    class CapturingSweep:
+        def __init__(self, executor: RunExecutor) -> None:
+            observed["adapter_factory"] = executor.adapter_factory
+
+        def run(
+            self,
+            experiment: ExperimentConfig,
+            *,
+            max_workers: int,
+        ) -> tuple[object, ...]:
+            observed["experiment"] = experiment.name
+            observed["workers"] = max_workers
+            return ()
+
+    monkeypatch.setattr(
+        "infinite_rulebook.cli._load_smoke_prerequisite",
+        lambda _: smoke,
+    )
+    monkeypatch.setattr("infinite_rulebook.cli.SweepRunner", CapturingSweep)
+
+    assert (
+        main(
+            [
+                "run",
+                "configs/symbolic-calibration-v2.json",
+                "--artifact-root",
+                str(tmp_path / "raw"),
+                "--workers",
+                "3",
+                "--smoke-evidence",
+                str(tmp_path / "stage-zero.json"),
+            ]
+        )
+        == 0
+    )
+    assert observed == {
+        "adapter_factory": SYMBOLIC_STUDY_V2.adapter_factory,
+        "experiment": SYMBOLIC_STUDY_V2.calibration_name,
+        "workers": 3,
+    }
+
+    smoke.scientific_hash = "0" * 64
+    with pytest.raises(ValueError, match="exact registered Stage-0"):
+        main(
+            [
+                "run",
+                "configs/symbolic-calibration-v2.json",
+                "--artifact-root",
+                str(tmp_path / "other-raw"),
+                "--smoke-evidence",
+                str(tmp_path / "stage-zero.json"),
+            ]
+        )
+
+
 def test_legacy_pilot_alias_rejects_calibration_config() -> None:
     with pytest.raises(ValueError, match="phase='pilot'"):
         main(["pilot", "configs/symbolic-calibration-v1.json"])
@@ -130,6 +225,63 @@ def test_plan_command_writes_and_authenticates_analysis_and_canary_plans(
     canary_path.write_text("{}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="immutable"):
         main(arguments)
+
+
+def test_v2_plan_command_requires_and_authenticates_supplemental_registration(
+    tmp_path: Path,
+) -> None:
+    analysis_path = tmp_path / "analysis-v2.json"
+    canary_path = tmp_path / "canaries-v2.json"
+    supplemental_path = tmp_path / "supplemental-v2.json"
+    arguments = [
+        "plan",
+        "configs/symbolic-calibration-v2.json",
+        str(analysis_path),
+        str(canary_path),
+        "--supplemental-output",
+        str(supplemental_path),
+    ]
+
+    assert main(arguments) == 0
+    assert main(arguments) == 0
+    config = load_experiment_config("configs/symbolic-calibration-v2.json")
+    expected_analysis = SYMBOLIC_STUDY_V2.build_analysis_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    expected_canaries = SYMBOLIC_STUDY_V2.evidence.build_canary_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+    supplemental = SYMBOLIC_STUDY_V2.evidence.supplemental
+    assert supplemental is not None
+    expected_supplemental = supplemental.build_plan(
+        config,
+        phase=AnalysisPhase.CALIBRATION,
+    )
+
+    assert load_analysis_plan(analysis_path) == expected_analysis
+    SYMBOLIC_STUDY_V2.evidence.verify_canary_plan_json(
+        canary_path.read_text(encoding="utf-8"),
+        expected_canaries,
+    )
+    supplemental.verify_plan_json(
+        supplemental_path.read_text(encoding="utf-8"),
+        expected_supplemental,
+    )
+    with pytest.raises(ValueError, match="requires --supplemental-output"):
+        main(arguments[:4])
+    with pytest.raises(ValueError, match="does not register supplemental"):
+        main(
+            [
+                "plan",
+                "configs/symbolic-calibration-v1.json",
+                str(tmp_path / "analysis-v1.json"),
+                str(tmp_path / "canaries-v1.json"),
+                "--supplemental-output",
+                str(tmp_path / "unexpected.json"),
+            ]
+        )
 
 
 def test_cli_lifecycle_requires_explicit_reproducibility_and_canary_inputs(

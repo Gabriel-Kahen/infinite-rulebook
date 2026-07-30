@@ -44,7 +44,8 @@ from infinite_rulebook.feedback.qary import (
 )
 from infinite_rulebook.metrics import ComputeMetrics, NoveltyMetrics, SupportMetrics
 from infinite_rulebook.orchestration.config import (
-    SYMBOLIC_ADAPTER_CONTRACT_VERSION,
+    SYMBOLIC_ADAPTER_CONTRACT_V1,
+    SYMBOLIC_ADAPTER_CONTRACT_V2,
     AgentKind,
     EnvironmentKind,
     RunCell,
@@ -100,6 +101,12 @@ class PilotState:
     query_observation_seed: int
     observations: tuple[ReplayQueryObservation, ...] = ()
     prediction_errors: tuple[float, ...] = ()
+
+
+@dataclass(slots=True)
+class PilotStateV2(PilotState):
+    post_query_hidden_expected_rewards: tuple[float, ...] = ()
+    cell: RunCell | None = None
 
 
 def _public_schedule(cell: RunCell) -> PublicBonusSchedule:
@@ -439,7 +446,7 @@ def _novelty_metrics(
 class ExactSymbolicAdapter:
     """Execute all registered smoke-pilot conditions against merged APIs."""
 
-    contract_version = SYMBOLIC_ADAPTER_CONTRACT_VERSION
+    contract_version = SYMBOLIC_ADAPTER_CONTRACT_V1
 
     def initial_state(self, cell: RunCell, seeds: RunSeeds) -> PilotState:
         environment = _environment(cell, seeds)
@@ -572,3 +579,134 @@ class ExactSymbolicAdapter:
 
     def frontier(self, cell: RunCell) -> dict[str, Any]:
         return build_pilot_frontier(cell).bundle
+
+
+@dataclass(slots=True)
+class ExactSymbolicAdapterV2(ExactSymbolicAdapter):
+    """Authenticate the v2 post-query hidden-reward trajectory."""
+
+    contract_version = SYMBOLIC_ADAPTER_CONTRACT_V2
+
+    def initial_state(self, cell: RunCell, seeds: RunSeeds) -> PilotStateV2:
+        state = ExactSymbolicAdapter.initial_state(self, cell, seeds)
+        return PilotStateV2(
+            agent=state.agent,
+            environment=state.environment,
+            channel=state.channel,
+            candidates=state.candidates,
+            query_observation_seed=state.query_observation_seed,
+            observations=state.observations,
+            prediction_errors=state.prediction_errors,
+            cell=cell,
+        )
+
+    def training_event(
+        self,
+        state: PilotState,
+        round_index: int,
+        cell: RunCell,
+        seeds: RunSeeds,
+    ) -> dict[str, Any]:
+        del seeds
+        if not isinstance(state, PilotStateV2):
+            raise TypeError("v2 execution requires PilotStateV2")
+        if state.cell != cell:
+            raise ValueError("v2 state belongs to a different run cell")
+        if state.agent.completed_rounds != round_index:
+            raise ValueError("training round does not match replayed agent state")
+        clone = copy.deepcopy(state)
+        trace, errors = _execute_round(clone)
+        deployment = _project_deployment(clone.agent.deployment(), cell)
+        _, hidden_reward, _ = _reward_components(clone.environment, deployment)
+        return {
+            **_trace_payload(trace, errors),
+            "post_query_hidden_expected_reward": hidden_reward,
+        }
+
+    def apply_training_event(
+        self,
+        state: PilotState,
+        payload: dict[str, Any],
+    ) -> PilotStateV2:
+        if not isinstance(state, PilotStateV2):
+            raise TypeError("v2 execution requires PilotStateV2")
+        if state.cell is None:
+            raise ValueError("v2 state is missing its run cell")
+        trace, errors = _execute_round(state)
+        deployment = _project_deployment(
+            state.agent.deployment(),
+            state.cell,
+        )
+        _, hidden_reward, _ = _reward_components(state.environment, deployment)
+        expected = {
+            **_trace_payload(trace, errors),
+            "post_query_hidden_expected_reward": hidden_reward,
+        }
+        if expected != payload:
+            raise ValueError(
+                "persisted training event does not match deterministic replay"
+            )
+        _append_trace(state, trace, errors)
+        state.post_query_hidden_expected_rewards += (hidden_reward,)
+        return state
+
+    def checkpoint(
+        self,
+        state: PilotState,
+        round_index: int,
+        cell: RunCell,
+        seeds: RunSeeds,
+        semantic_hashes: dict[str, str],
+    ) -> dict[str, Any]:
+        if not isinstance(state, PilotStateV2):
+            raise TypeError("v2 execution requires PilotStateV2")
+        if state.cell != cell:
+            raise ValueError("v2 state belongs to a different run cell")
+        if (
+            state.agent.completed_rounds != round_index
+            or len(state.post_query_hidden_expected_rewards) != round_index
+        ):
+            raise ValueError("checkpoint round does not match v2 reward history")
+        result = ExactSymbolicAdapter.checkpoint(
+            self,
+            state,
+            round_index,
+            cell,
+            seeds,
+            semantic_hashes,
+        )
+        if round_index > 0:
+            result["post_query_hidden_expected_reward"] = (
+                state.post_query_hidden_expected_rewards[-1]
+            )
+            result["post_query_mean_hidden_expected_reward"] = (
+                math.fsum(state.post_query_hidden_expected_rewards) / round_index
+            )
+        return result
+
+    def state_fingerprint(self, state: PilotState) -> str:
+        if not isinstance(state, PilotStateV2):
+            raise TypeError("v2 execution requires PilotStateV2")
+        return scientific_hash(
+            {
+                **_agent_state_payload(state),
+                "post_query_hidden_expected_rewards": list(
+                    state.post_query_hidden_expected_rewards
+                ),
+            },
+            domain="symbolic-agent-state.v2",
+        )
+
+
+def exact_symbolic_adapter_class(
+    contract_version: str,
+) -> type[ExactSymbolicAdapter] | type[ExactSymbolicAdapterV2]:
+    """Return the only exact adapter registered for a recorded contract."""
+
+    if contract_version == SYMBOLIC_ADAPTER_CONTRACT_V1:
+        return ExactSymbolicAdapter
+    if contract_version == SYMBOLIC_ADAPTER_CONTRACT_V2:
+        return ExactSymbolicAdapterV2
+    raise ValueError(
+        f"unregistered exact symbolic adapter contract: {contract_version}"
+    )
