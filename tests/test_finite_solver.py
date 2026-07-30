@@ -55,6 +55,122 @@ def test_direct_channel_witness_uses_nats() -> None:
     assert math.fsum(witness.action_marginal) == pytest.approx(1.0)
 
 
+def test_normal_channel_preserves_legacy_mutual_information_float() -> None:
+    problem = FiniteDecisionProblem(
+        prior=(0.25, 0.75),
+        rewards=((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    )
+    channel = ((0.125, 0.625, 0.25), (0.5, 0.25, 0.25))
+    marginal = (0.40625, 0.34375, 0.25)
+    expected = max(
+        0.0,
+        math.fsum(
+            problem.prior[state]
+            * conditional
+            * math.log(conditional / marginal[action])
+            for state, row in enumerate(channel)
+            for action, conditional in enumerate(row)
+        ),
+    )
+
+    witness = problem.evaluate(channel)
+
+    assert expected.hex() == "0x1.321c043e5ca5dp-4"
+    assert witness.mutual_information == expected
+
+
+def test_direct_channel_ignores_joint_mass_below_float_range() -> None:
+    smallest_positive = math.ulp(0.0)
+    problem = FiniteDecisionProblem(
+        prior=(0.7, 0.3),
+        rewards=((0.0, 0.0), (0.0, 0.0)),
+    )
+
+    witness = problem.evaluate(
+        (
+            (0.0, 1.0),
+            (smallest_positive, 1.0),
+        )
+    )
+
+    assert witness.action_marginal == (0.0, 1.0)
+    assert witness.mutual_information == 0.0
+
+
+def test_direct_channel_uses_log_difference_for_extreme_probability_ratio() -> None:
+    smallest_positive = math.ulp(0.0)
+    problem = FiniteDecisionProblem(
+        prior=(smallest_positive, 1.0),
+        rewards=((0.0, 0.0), (0.0, 0.0)),
+    )
+
+    witness = problem.evaluate(((1.0, 0.0), (0.0, 1.0)))
+
+    assert math.isfinite(witness.mutual_information)
+    assert witness.mutual_information > 0.0
+
+
+def test_direct_channel_recovers_representable_information_from_tiny_joint() -> None:
+    smallest_positive = math.ulp(0.0)
+    problem = FiniteDecisionProblem(
+        prior=(smallest_positive, 1.0),
+        rewards=((0.0, 0.0), (0.0, 0.0)),
+    )
+
+    witness = problem.evaluate(((0.25, 0.75), (0.0, 1.0)))
+
+    assert witness.action_marginal == (0.0, 1.0)
+    assert math.isfinite(witness.mutual_information)
+    assert witness.mutual_information > 0.0
+
+
+def test_warm_start_subnormal_channel_retains_certified_solver_semantics() -> None:
+    problem = FiniteDecisionProblem(
+        prior=(0.7, 0.3),
+        rewards=(
+            (-1.5, -1.75, 1.7),
+            (0.83, -1.84, -0.32),
+        ),
+    )
+    face = solve_lagrangian(problem, 1.0, tolerance=1e-12)
+
+    assert face.converged
+    assert face.witness.action_marginal == (0.0, 0.0, 1.0)
+
+    warm = solve_lagrangian(
+        problem,
+        2.0,
+        tolerance=1e-12,
+        initial_action_marginal=face.witness.action_marginal,
+    )
+    cold = solve_lagrangian(problem, 2.0, tolerance=1e-12)
+
+    assert warm.converged
+    assert warm.objective_lower_bound <= warm.objective <= warm.objective_upper_bound
+    assert warm.duality_gap <= 1e-12
+    assert warm.witness.expected_reward == pytest.approx(
+        cold.witness.expected_reward,
+        abs=1e-11,
+    )
+    assert warm.witness.mutual_information == pytest.approx(
+        cold.witness.mutual_information,
+        abs=1e-11,
+    )
+    target = problem.zero_information_reward + 0.37 * (
+        problem.maximum_reward - problem.zero_information_reward
+    )
+    frontier = solve_frontier(
+        problem,
+        target,
+        tolerance=2e-7,
+        bound_tolerance=2e-7,
+    )
+    assert frontier.converged
+    assert frontier.witness is not None
+    assert frontier.witness.expected_reward >= target
+    assert frontier.lower_bound <= frontier.upper_bound
+
+
 def test_zero_information_endpoint_selects_best_constant_action() -> None:
     problem = FiniteDecisionProblem(
         prior=(0.8, 0.2),
@@ -120,6 +236,37 @@ def test_active_set_eliminates_slowly_decaying_actions() -> None:
     assert result.converged
     assert result.iterations < 1_000
     assert result.duality_gap <= 1e-12
+
+
+def test_randomized_small_frontiers_remain_finite_and_certified() -> None:
+    generator = random.Random(20260730)
+    for _ in range(20):
+        state_count = generator.randint(2, 5)
+        action_count = generator.randint(2, 6)
+        problem = FiniteDecisionProblem(
+            tuple(generator.random() + 0.1 for _ in range(state_count)),
+            tuple(
+                tuple(generator.uniform(-2.0, 2.0) for _ in range(action_count))
+                for _ in range(state_count)
+            ),
+        )
+        target = problem.zero_information_reward + 0.37 * (
+            problem.maximum_reward - problem.zero_information_reward
+        )
+
+        result = solve_frontier(
+            problem,
+            target,
+            tolerance=2e-7,
+            bound_tolerance=2e-7,
+        )
+
+        assert result.converged
+        assert result.witness is not None
+        assert result.witness.expected_reward >= target - 1e-12
+        assert math.isfinite(result.witness.mutual_information)
+        assert result.lower_bound <= result.upper_bound
+        assert result.duality_gap <= 2e-7
 
 
 def test_log_space_certificate_survives_large_excluded_action_slack() -> None:
