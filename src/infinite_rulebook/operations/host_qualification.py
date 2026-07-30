@@ -20,6 +20,7 @@ import time
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from importlib import metadata as importlib_metadata
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -107,16 +108,6 @@ sys.path.insert(0, repository)
 os.fchdir(descriptor)
 runpy.run_module("scripts.benchmark_artifact_ingestion", run_name="__main__")
 """.strip()
-
-_INJECTION_ENVIRONMENT_NAMES = frozenset(
-    {
-        "GCONV_PATH",
-        "GLIBC_TUNABLES",
-        "LIBPATH",
-        "SHLIB_PATH",
-        "VIRTUAL_ENV",
-    }
-)
 
 _NETWORK_FILESYSTEMS = frozenset(
     {
@@ -370,13 +361,28 @@ def _read_record_at(directory_fd: int, name: str) -> str | None:
         os.close(descriptor)
 
 
+def _make_record_read_only_at(directory_fd: int, name: str) -> None:
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        dir_fd=directory_fd,
+    )
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("qualification record target must be a regular file")
+        os.fchmod(descriptor, 0o400)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def write_record(
     path: Path,
     payload: Mapping[str, Any],
     *,
     forbidden_roots: Sequence[Path] = (),
 ) -> None:
-    """Create one immutable operational JSON record."""
+    """Create one write-once operational JSON record with owner-read-only mode."""
 
     checked = verify_record(dict(payload))
     content = (
@@ -399,6 +405,7 @@ def write_record(
                 raise ValueError(
                     f"refusing to overwrite qualification record: {target}"
                 )
+            _make_record_read_only_at(directory_fd, target.name)
             return
         descriptor = os.open(
             temporary_name,
@@ -411,6 +418,8 @@ def write_record(
                 stream.write(content)
                 stream.flush()
                 os.fsync(descriptor)
+            os.fchmod(descriptor, 0o400)
+            os.fsync(descriptor)
         finally:
             os.close(descriptor)
         try:
@@ -426,6 +435,7 @@ def write_record(
                 raise ValueError(
                     f"refusing to overwrite qualification record: {target}"
                 ) from None
+            _make_record_read_only_at(directory_fd, target.name)
         os.fsync(directory_fd)
     finally:
         with suppress(FileNotFoundError):
@@ -461,16 +471,149 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _tool_identity() -> dict[str, Any]:
+def _git_directory(repository: Path) -> Path:
+    marker = repository / ".git"
+    metadata = marker.lstat()
+    if stat.S_ISLNK(metadata.st_mode):
+        raise ValueError("Git metadata marker cannot be a symlink")
+    if stat.S_ISDIR(metadata.st_mode):
+        return marker.resolve(strict=True)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError("Git metadata marker must be a directory or gitdir file")
+    line = marker.read_text(encoding="utf-8").strip()
+    prefix = "gitdir: "
+    if not line.startswith(prefix) or "\n" in line:
+        raise ValueError("Git worktree metadata marker is malformed")
+    candidate = Path(line.removeprefix(prefix))
+    directory = (
+        candidate if candidate.is_absolute() else repository / candidate
+    ).resolve(strict=True)
+    if not directory.is_dir():
+        raise ValueError("Git metadata directory does not exist")
+    return directory
+
+
+def _git_command(
+    git_path: str,
+    repository: Path,
+    git_directory: Path,
+    *arguments: str,
+) -> tuple[str, ...]:
+    return (
+        git_path,
+        "--no-optional-locks",
+        f"--git-dir={git_directory}",
+        f"--work-tree={repository}",
+        *arguments,
+    )
+
+
+def _stable_regular_file_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    descriptor = os.open(
+        resolved,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"installed dependency is not a regular file: {resolved}")
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, MIB):
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise ValueError(
+                f"installed dependency changed while being hashed: {resolved}"
+            )
+        return {
+            "resolved_path": str(resolved),
+            "sha256": digest.hexdigest(),
+            "size_bytes": before.st_size,
+        }
+    finally:
+        os.close(descriptor)
+
+
+def _dependency_environment_hash() -> str:
+    distributions: list[dict[str, Any]] = []
+    for distribution in importlib_metadata.distributions():
+        name = (distribution.metadata.get("Name") or "").lower()
+        version = distribution.version
+        declared_files = distribution.files
+        if not name or not version or declared_files is None:
+            raise ValueError("installed dependency metadata is incomplete")
+        files = []
+        for declared_path in sorted(declared_files, key=os.fspath):
+            files.append(
+                {
+                    "declared_path": os.fspath(declared_path),
+                    **_stable_regular_file_identity(
+                        Path(distribution.locate_file(declared_path))
+                    ),
+                }
+            )
+        distributions.append(
+            {
+                "name": name,
+                "version": version,
+                "files": files,
+            }
+        )
+    distributions.sort(
+        key=lambda item: (
+            item["name"],
+            item["version"],
+            scientific_hash(
+                item["files"],
+                domain="operations.host-qualification-dependency-files.v1",
+            ),
+        )
+    )
+    return scientific_hash(
+        distributions,
+        domain="operations.host-qualification-dependencies.v1",
+    )
+
+
+def _tool_identity(*, git_path: str) -> dict[str, Any]:
     repository = Path(__file__).resolve().parents[3]
+    git_directory = _git_directory(repository)
     commit = _full_git_sha(
-        _run_text(("git", "rev-parse", "HEAD"), cwd=repository),
+        _run_text(
+            _git_command(
+                git_path,
+                repository,
+                git_directory,
+                "rev-parse",
+                "HEAD",
+            ),
+            cwd=repository,
+        ),
         label="qualification tool commit",
     )
     dirty = _run_text(
-        ("git", "status", "--porcelain", "--untracked-files=normal"),
+        _git_command(
+            git_path,
+            repository,
+            git_directory,
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+        ),
         cwd=repository,
     )
+    python = Path(sys.executable).resolve(strict=True)
     sources = (
         Path(__file__).resolve(),
         repository / "scripts" / "qualify_symbolic_v2_host.py",
@@ -487,6 +630,15 @@ def _tool_identity() -> dict[str, Any]:
         "commit": commit,
         "worktree_clean": not dirty,
         "source_hash": source_hash,
+        "git_directory": str(git_directory),
+        "git_path": git_path,
+        "git_sha256": _sha256_file(Path(git_path)),
+        "python_path": str(python),
+        "python_sha256": _sha256_file(python),
+        "python_prefix": str(Path(sys.prefix).resolve()),
+        "python_version": platform.python_version(),
+        "dependency_lock_sha256": _sha256_file(repository / "uv.lock"),
+        "dependency_environment_hash": _dependency_environment_hash(),
     }
 
 
@@ -524,10 +676,14 @@ def _repository_snapshot(
     *,
     lock: Path,
     execution_python: Path,
+    git_path: str,
+    git_directory: Path,
 ) -> dict[str, Any]:
     status = _run_text(
-        (
-            "git",
+        _git_command(
+            git_path,
+            repository,
+            git_directory,
             "status",
             "--porcelain=v2",
             "--branch",
@@ -678,12 +834,20 @@ def build_exact_plan(
         if execution_python is None
         else execution_python
     )
+    located_git = shutil.which("git")
+    if located_git is None:
+        raise ValueError("git executable is required to build a qualification plan")
+    git = Path(located_git).resolve(strict=True)
+    if not git.is_file() or not os.access(git, os.X_OK):
+        raise ValueError("git executable must be an absolute executable file")
     return _exact_plan_payload(
         repository=repository,
         commit=commit,
         probe=probe,
         uv=uv,
         python=python,
+        git=git,
+        git_directory=_git_directory(repository),
     )
 
 
@@ -694,6 +858,8 @@ def _exact_plan_payload(
     probe: Path,
     uv: Path,
     python: Path,
+    git: Path,
+    git_directory: Path,
 ) -> dict[str, Any]:
     runtime = _runtime_prefix(str(uv), str(python))
     probe_execute = (
@@ -721,8 +887,26 @@ def _exact_plan_payload(
         "working_directory": str(repository),
         "execution_commit": commit,
         "checkout": [
-            _command(("git", "checkout", "--detach", commit)),
-            _command(("git", "status", "--porcelain", "--untracked-files=normal")),
+            _command(
+                _git_command(
+                    str(git),
+                    repository,
+                    git_directory,
+                    "checkout",
+                    "--detach",
+                    commit,
+                )
+            ),
+            _command(
+                _git_command(
+                    str(git),
+                    repository,
+                    git_directory,
+                    "status",
+                    "--porcelain",
+                    "--untracked-files=normal",
+                )
+            ),
         ],
         "capacity": {
             "e192": _command(
@@ -867,6 +1051,7 @@ def _run_text(arguments: Sequence[str], *, cwd: Path | None = None) -> str:
     result = subprocess.run(
         arguments,
         cwd=cwd,
+        env=_sanitized_environment(),
         check=True,
         capture_output=True,
         text=True,
@@ -923,6 +1108,9 @@ def _host_identity_hash(
                 "execution_python": runtime["execution_python"],
                 "execution_python_path": runtime["execution_python_path"],
                 "execution_python_sha256": runtime["execution_python_sha256"],
+                "git": runtime["git"],
+                "git_path": runtime["git_path"],
+                "git_sha256": runtime["git_sha256"],
                 "uv": runtime["uv"],
                 "uv_path": runtime["uv_path"],
                 "uv_sha256": runtime["uv_sha256"],
@@ -931,6 +1119,7 @@ def _host_identity_hash(
                 key: storage[key]
                 for key in (
                     "device",
+                    "directory_device_id",
                     "mount_point",
                     "storage_root",
                     "type",
@@ -1007,6 +1196,20 @@ def _static_requirements(
             required="absolute executable with recorded SHA-256",
         ),
         _requirement(
+            "git",
+            passed=(
+                runtime["git"] is not None
+                and runtime["git_path"] is not None
+                and runtime["git_sha256"] is not None
+                and Path(runtime["git_path"]).is_absolute()
+            ),
+            observed={
+                "path": runtime["git_path"],
+                "version": runtime["git"],
+            },
+            required="absolute executable with recorded SHA-256",
+        ),
+        _requirement(
             "dependency-lock",
             passed=is_sha256(execution["uv_lock_sha256"]),
             observed=execution["uv_lock_sha256"] or "missing",
@@ -1029,6 +1232,20 @@ def _static_requirements(
             passed=is_sha256(tool["source_hash"]),
             observed=tool["source_hash"],
             required="SHA-256-bound reviewed tool sources",
+        ),
+        _requirement(
+            "qualification-tool-dependencies",
+            passed=(
+                is_sha256(tool["dependency_lock_sha256"])
+                and is_sha256(tool["dependency_environment_hash"])
+                and is_sha256(tool["python_sha256"])
+            ),
+            observed={
+                "lock": tool["dependency_lock_sha256"],
+                "environment": tool["dependency_environment_hash"],
+                "python": tool["python_sha256"],
+            },
+            required="hash-bound tool interpreter, lock, and installed environment",
         ),
         _requirement(
             "host-machine-identity",
@@ -1154,10 +1371,19 @@ def inspect_host(
 
     lock = repository / "uv.lock"
     execution_python = repository / ".venv" / "bin" / "python"
+    located_git = shutil.which("git")
+    if located_git is None:
+        raise ValueError("git executable is required for host inspection")
+    git_path = str(Path(located_git).resolve(strict=True))
+    if not os.access(git_path, os.X_OK):
+        raise ValueError("git executable must be executable")
+    git_directory = _git_directory(repository)
     snapshot = _repository_snapshot(
         repository,
         lock=lock,
         execution_python=execution_python,
+        git_path=git_path,
+        git_directory=git_directory,
     )
     calibration = load_experiment_config(
         repository / "configs" / "symbolic-calibration-v2.json"
@@ -1180,12 +1406,15 @@ def inspect_host(
     )
     read_write_mount = "rw" in mount["mount_options"].split(",")
     solid_state = _block_is_solid_state(mount["device"], sys_class_block)
+    storage_metadata = os.stat(storage, follow_symlinks=False)
     located_uv = shutil.which("uv")
     uv_path = (
         str(Path(located_uv).resolve(strict=True)) if located_uv is not None else None
     )
     uv_version = None if uv_path is None else _run_text((uv_path, "--version"))
     uv_sha256 = None if uv_path is None else _sha256_file(Path(uv_path))
+    git_version = _run_text((git_path, "--version"))
+    git_sha256 = _sha256_file(Path(git_path))
     execution_python_version = (
         _run_text(
             (
@@ -1222,12 +1451,19 @@ def inspect_host(
             )
         except (OSError, subprocess.CalledProcessError):
             environment_synced = False
-    plan = build_exact_plan(
-        repo_root=repository,
-        execution_commit=commit,
-        probe_root=probe_root or storage / "symbolic-v2-ingestion-probe",
-        uv_path=None if uv_path is None else Path(uv_path),
-        execution_python=execution_python,
+    if uv_path is None:
+        raise ValueError("uv executable is required for host inspection")
+    plan = _exact_plan_payload(
+        repository=repository,
+        commit=commit,
+        probe=_safe_probe_root(
+            repository,
+            probe_root or storage / "symbolic-v2-ingestion-probe",
+        ),
+        uv=Path(uv_path),
+        python=_absolute_path(execution_python),
+        git=Path(git_path),
+        git_directory=git_directory,
     )
     storage_writable = os.access(storage, os.W_OK | os.X_OK)
     planned_probe_root = Path(plan["probe"]["artifact_root"])
@@ -1244,6 +1480,9 @@ def inspect_host(
         "logical_cpu_count": os.cpu_count(),
         "platform": sys.platform,
         "tool_python": platform.python_version(),
+        "git_path": git_path,
+        "git": git_version,
+        "git_sha256": git_sha256,
         "uv_path": uv_path,
         "uv": uv_version,
         "uv_sha256": uv_sha256,
@@ -1263,6 +1502,8 @@ def inspect_host(
         "available_inodes": available_inodes,
         "additional_storage_bytes": additional_storage_bytes,
         "additional_inodes": additional_inodes,
+        "directory_device_id": storage_metadata.st_dev,
+        "directory_inode": storage_metadata.st_ino,
         "local_filesystem": local_filesystem,
         "paired_raw_reference_bytes": REFERENCE_PAIR_RAW_BYTES,
         "paired_raw_reference_files": REFERENCE_PAIR_RAW_FILES,
@@ -1277,11 +1518,12 @@ def inspect_host(
         "expected_commit": commit,
         "observed_commit": snapshot["commit"],
         "repository": str(repository),
+        "git_directory": str(git_directory),
         "status": snapshot["status"],
         "worktree_clean": snapshot["clean"],
         "uv_lock_sha256": snapshot["uv_lock_sha256"],
     }
-    tool_record = _tool_identity()
+    tool_record = _tool_identity(git_path=git_path)
     tool_hash = _tool_identity_hash(tool_record)
     machine_identity = _machine_boot_identity(
         proc_root=proc_root,
@@ -1349,6 +1591,8 @@ def _capacity_decision(
     stage: str,
     *,
     result: Mapping[str, Any],
+    before_available_memory_bytes: int,
+    after_available_memory_bytes: int,
     minimum_available_memory_bytes: int,
     process_major_faults: int,
     swapout_delta_pages: int,
@@ -1359,6 +1603,7 @@ def _capacity_decision(
         "algorithm_replicas": 8,
         "checkpoint_count": 13,
         "checkpoint_zero_metric_count": 29,
+        "metric_count": 29,
         "positive_checkpoint_metric_count": 31,
         "environment_replicas": spec["environment_replicas"],
         "observation_count": spec["observation_count"],
@@ -1372,31 +1617,83 @@ def _capacity_decision(
         and result.get("dataset_hash") == spec["dataset_hash"]
     )
     maximum_rss = result.get("maximum_rss_mib")
+    rss_before = result.get("rss_before_mib")
+    rss_increment = result.get("rss_increment_upper_bound_mib")
+    dataset_elapsed = result.get("dataset_elapsed_seconds")
+    pool_elapsed = result.get("pool_elapsed_seconds")
+    total_elapsed = result.get("total_elapsed_seconds")
     valid_rss = (
         isinstance(maximum_rss, (int, float))
         and not isinstance(maximum_rss, bool)
         and math.isfinite(maximum_rss)
         and maximum_rss > 0
     )
-    equal_reserve = valid_rss and minimum_available_memory_bytes >= maximum_rss * MIB
+    benchmark_metrics_consistent = (
+        valid_rss
+        and isinstance(rss_before, (int, float))
+        and not isinstance(rss_before, bool)
+        and math.isfinite(rss_before)
+        and 0 < rss_before <= maximum_rss
+        and isinstance(rss_increment, (int, float))
+        and not isinstance(rss_increment, bool)
+        and math.isfinite(rss_increment)
+        and rss_increment >= 0
+        and abs(rss_increment - max(0.0, maximum_rss - rss_before)) <= 0.002
+        and isinstance(dataset_elapsed, (int, float))
+        and not isinstance(dataset_elapsed, bool)
+        and math.isfinite(dataset_elapsed)
+        and dataset_elapsed > 0
+        and isinstance(pool_elapsed, (int, float))
+        and not isinstance(pool_elapsed, bool)
+        and math.isfinite(pool_elapsed)
+        and pool_elapsed >= 0
+        and isinstance(total_elapsed, (int, float))
+        and not isinstance(total_elapsed, bool)
+        and math.isfinite(total_elapsed)
+        and total_elapsed > 0
+        and total_elapsed + 0.003 >= dataset_elapsed
+        and total_elapsed + 0.003 >= pool_elapsed
+        and abs(total_elapsed - dataset_elapsed - pool_elapsed) <= 0.01
+    )
+    memory_measurements_consistent = (
+        type(before_available_memory_bytes) is int
+        and type(after_available_memory_bytes) is int
+        and type(minimum_available_memory_bytes) is int
+        and before_available_memory_bytes > 0
+        and after_available_memory_bytes > 0
+        and minimum_available_memory_bytes > 0
+        and minimum_available_memory_bytes <= before_available_memory_bytes
+        and minimum_available_memory_bytes <= after_available_memory_bytes
+    )
+    equal_reserve = (
+        valid_rss
+        and memory_measurements_consistent
+        and minimum_available_memory_bytes >= maximum_rss * MIB
+    )
     no_swap_dependence = process_major_faults == 0 and swapout_delta_pages == 0
     return {
         "checkout_unchanged_passed": checkout_unchanged,
         "exact_shape_passed": shape_passed,
+        "benchmark_metrics_consistent_passed": benchmark_metrics_consistent,
+        "memory_measurements_consistent_passed": memory_measurements_consistent,
         "equal_physical_reserve_passed": equal_reserve,
         "no_swap_dependence_observed": no_swap_dependence,
         "passed": (
-            checkout_unchanged and shape_passed and equal_reserve and no_swap_dependence
+            checkout_unchanged
+            and shape_passed
+            and benchmark_metrics_consistent
+            and memory_measurements_consistent
+            and equal_reserve
+            and no_swap_dependence
         ),
     }
 
 
 def _sanitized_environment() -> dict[str, str]:
     return {
-        name: value
-        for name, value in os.environ.items()
-        if not name.startswith(("DYLD_", "LD_", "PYTHON", "UV_"))
-        and name not in _INJECTION_ENVIRONMENT_NAMES
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
     }
 
 
@@ -1499,14 +1796,47 @@ def _snapshot_matches_host(
     )
 
 
+def _capacity_execution_identity(host: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "commit": host["execution"]["observed_commit"],
+        "repository": host["execution"]["repository"],
+        "git_directory": host["execution"]["git_directory"],
+        "git_path": host["runtime"]["git_path"],
+        "git_sha256": host["runtime"]["git_sha256"],
+        "uv_lock_sha256": host["execution"]["uv_lock_sha256"],
+        "uv_path": host["runtime"]["uv_path"],
+        "uv_sha256": host["runtime"]["uv_sha256"],
+        "execution_python_path": host["runtime"]["execution_python_path"],
+        "execution_python_sha256": host["runtime"]["execution_python_sha256"],
+    }
+
+
 def _current_uv_matches_host(host: Mapping[str, Any]) -> bool:
-    located = shutil.which("uv")
-    if located is None:
+    path = Path(host["runtime"]["uv_path"])
+    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
         return False
-    resolved = Path(located).resolve(strict=True)
+    return _sha256_file(path.resolve(strict=True)) == host["runtime"]["uv_sha256"]
+
+
+def _current_git_matches_host(host: Mapping[str, Any]) -> bool:
+    path = Path(host["runtime"]["git_path"])
+    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+        return False
+    return _sha256_file(path.resolve(strict=True)) == host["runtime"]["git_sha256"]
+
+
+def _current_execution_python_matches_host(host: Mapping[str, Any]) -> bool:
+    path = Path(host["runtime"]["execution_python_path"])
+    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+        return False
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return False
     return (
-        str(resolved) == host["runtime"]["uv_path"]
-        and _sha256_file(resolved) == host["runtime"]["uv_sha256"]
+        resolved.is_file()
+        and os.access(resolved, os.X_OK)
+        and _sha256_file(resolved) == host["runtime"]["execution_python_sha256"]
     )
 
 
@@ -1566,12 +1896,21 @@ def run_capacity_benchmark(
         repository,
         lock=lock,
         execution_python=execution_python,
+        git_path=host["runtime"]["git_path"],
+        git_directory=Path(host["execution"]["git_directory"]),
     )
     if not _snapshot_matches_host(before_snapshot, host):
         raise ValueError("execution checkout changed after static inspection")
     if not _current_uv_matches_host(host):
         raise ValueError("uv executable changed after static inspection")
-    if _tool_identity_hash(_tool_identity()) != host["tool_identity_hash"]:
+    if not _current_git_matches_host(host):
+        raise ValueError("git executable changed after static inspection")
+    if not _current_execution_python_matches_host(host):
+        raise ValueError("execution Python changed after static inspection")
+    if (
+        _tool_identity_hash(_tool_identity(git_path=host["runtime"]["git_path"]))
+        != host["tool_identity_hash"]
+    ):
         raise ValueError("qualification tool source changed after static inspection")
     if (
         _machine_boot_identity(
@@ -1581,6 +1920,8 @@ def run_capacity_benchmark(
         != host["host_identity"]
     ):
         raise ValueError("host machine or boot changed after static inspection")
+    if not _current_host_resources_match(host, proc_root=proc_root):
+        raise ValueError("host memory or qualified storage changed after inspection")
     command = _capacity_arguments(
         stage,
         uv_path=host["runtime"]["uv_path"],
@@ -1653,6 +1994,8 @@ def run_capacity_benchmark(
         repository,
         lock=lock,
         execution_python=execution_python,
+        git_path=host["runtime"]["git_path"],
+        git_directory=Path(host["execution"]["git_directory"]),
     )
     checkout_unchanged = after_snapshot == before_snapshot and _snapshot_matches_host(
         after_snapshot, host
@@ -1690,21 +2033,15 @@ def run_capacity_benchmark(
     decision = _capacity_decision(
         stage,
         result=result,
+        before_available_memory_bytes=before_memory.get("MemAvailable", 0),
+        after_available_memory_bytes=after_memory.get("MemAvailable", 0),
         minimum_available_memory_bytes=minimum_available,
         process_major_faults=process_major_faults,
         swapout_delta_pages=swapout_delta,
         checkout_unchanged=checkout_unchanged,
     )
     page_size = os.sysconf("SC_PAGE_SIZE")
-    execution_identity = {
-        "commit": host["execution"]["observed_commit"],
-        "repository": host["execution"]["repository"],
-        "uv_lock_sha256": host["execution"]["uv_lock_sha256"],
-        "uv_path": host["runtime"]["uv_path"],
-        "uv_sha256": host["runtime"]["uv_sha256"],
-        "execution_python_path": host["runtime"]["execution_python_path"],
-        "execution_python_sha256": host["runtime"]["execution_python_sha256"],
-    }
+    execution_identity = _capacity_execution_identity(host)
     payload = {
         "schema_version": 1,
         "record_type": _CAPACITY_RECORD_TYPE,
@@ -1853,6 +2190,111 @@ def _probe_execution_shape(
     )
 
 
+def _probe_projection(result: Mapping[str, Any]) -> dict[str, float] | None:
+    probe_runs = result.get("run_count")
+    projected_runs = result.get("projected_runs_per_root")
+    if (
+        type(probe_runs) is not int
+        or probe_runs <= 0
+        or type(projected_runs) is not int
+        or projected_runs <= 0
+    ):
+        return None
+    try:
+        frontier_validation = float(result["fixed_frontier_validation_seconds"])
+        frontier_copy = float(result["fixed_frontier_cache_copy_seconds"])
+        frontier_raw = float(result["fixed_frontier_raw_hash_seconds"])
+        run_validation = float(result["marginal_run_validation_seconds_per_run"])
+        run_raw = float(result["marginal_run_raw_hash_seconds_per_run"])
+        run_load = float(result["marginal_run_load_seconds_per_run"])
+        observed_probe = float(result["observed_probe_report_seconds"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    components = (
+        frontier_validation,
+        frontier_copy,
+        frontier_raw,
+        run_validation,
+        run_raw,
+        run_load,
+        observed_probe,
+    )
+    if any(not math.isfinite(value) or value < 0 for value in components):
+        return None
+    fixed = 7.0 * frontier_validation + 3.0 * frontier_copy + 2.0 * frontier_raw
+    marginal = 4.0 * run_validation + 2.0 * run_raw + run_load
+    modeled_probe = fixed + probe_runs * marginal
+    residual = max(0.0, (observed_probe - modeled_probe) / probe_runs)
+    projected_seconds = fixed + projected_runs * (marginal + residual)
+    return {
+        "fixed_seconds": fixed,
+        "modeled_probe_seconds": modeled_probe,
+        "residual_seconds_per_run": residual,
+        "projected_hours": projected_seconds / 3600,
+        "operational_budget_hours": (
+            projected_seconds * float(result.get("budget_multiplier", math.nan)) / 3600
+        ),
+    }
+
+
+def _probe_benchmark_metrics_consistent(result: Mapping[str, Any]) -> bool:
+    projection = _probe_projection(result)
+    if projection is None:
+        return False
+    try:
+        inventory = float(result["inventory_elapsed_seconds"])
+        load = float(result["load_elapsed_seconds"])
+        observed = float(result["observed_probe_report_seconds"])
+        maximum_rss = float(result["maximum_rss_mib"])
+        rss_before = float(result["rss_before_mib"])
+        rss_increment = float(result["rss_increment_upper_bound_mib"])
+        raw_bytes = result["raw_run_byte_size"]
+    except (KeyError, TypeError, ValueError):
+        return False
+    values = (
+        inventory,
+        load,
+        observed,
+        maximum_rss,
+        rss_before,
+        rss_increment,
+    )
+    return (
+        all(math.isfinite(value) and value >= 0 for value in values)
+        and maximum_rss > 0
+        and 0 < rss_before <= maximum_rss
+        and abs(rss_increment - max(0.0, maximum_rss - rss_before)) <= 0.002
+        and type(raw_bytes) is int
+        and raw_bytes > 0
+        and abs(observed - (2.0 * inventory + load)) <= 0.000005
+        and abs(
+            float(result["fixed_report_ingestion_seconds"])
+            - projection["fixed_seconds"]
+        )
+        <= 0.00001
+        and abs(
+            float(result["modeled_probe_report_seconds"])
+            - projection["modeled_probe_seconds"]
+        )
+        <= 0.00025
+        and abs(
+            float(result["residual_seconds_per_run"])
+            - projection["residual_seconds_per_run"]
+        )
+        <= 0.00001
+        and abs(
+            float(result["projected_report_ingestion_hours"])
+            - projection["projected_hours"]
+        )
+        <= 0.002
+        and abs(
+            float(result["operational_budget_hours"])
+            - projection["operational_budget_hours"]
+        )
+        <= 0.002
+    )
+
+
 def _probe_benchmark_shape(
     result: Mapping[str, Any],
     expected_artifact_root: str,
@@ -1872,6 +2314,7 @@ def _probe_benchmark_shape(
             result["artifact_root"] == expected_artifact_root,
             result["dataset_hash"] == V2_PROBE_DATASET_HASH,
             result["budget_multiplier"] == 2.0,
+            _probe_benchmark_metrics_consistent(result),
         )
     )
 
@@ -1992,6 +2435,7 @@ def _build_artifact_manifest(
             file_count += 1
             total_bytes += metadata.st_size
     return {
+        "entries": entries,
         "file_count": file_count,
         "total_bytes": total_bytes,
         "manifest_hash": scientific_hash(
@@ -2028,6 +2472,41 @@ def _open_existing_directory_nofollow(path: Path) -> int:
     except BaseException:
         os.close(descriptor)
         raise
+
+
+def _current_artifact_evidence(
+    artifact_root: Path,
+    *,
+    storage_root: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    artifact = _absolute_path(artifact_root)
+    storage = _absolute_path(storage_root)
+    if (
+        str(artifact) != str(artifact_root)
+        or str(storage) != str(storage_root)
+        or not _path_within(artifact, storage)
+    ):
+        raise ValueError("probe artifact path is not normalized qualified storage")
+    descriptor = _open_existing_directory_nofollow(artifact)
+    verification_descriptor: int | None = None
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("probe artifact root must be a directory")
+        identity = {
+            "canonical_path": str(artifact),
+            "device": metadata.st_dev,
+            "inode": metadata.st_ino,
+        }
+        manifest = _artifact_manifest_from_descriptor(descriptor)
+        verification_descriptor = _open_existing_directory_nofollow(artifact)
+        if not _same_open_directory(descriptor, verification_descriptor):
+            raise ValueError("probe artifact root changed during verification")
+        return identity, manifest
+    finally:
+        if verification_descriptor is not None:
+            os.close(verification_descriptor)
+        os.close(descriptor)
 
 
 def _open_probe_parent(
@@ -2083,6 +2562,61 @@ def _same_open_directory(left: int, right: int) -> bool:
     )
 
 
+def _current_host_resources_match(
+    host: Mapping[str, Any],
+    *,
+    proc_root: Path,
+) -> bool:
+    storage = Path(host["storage"]["storage_root"])
+    descriptor: int | None = None
+    verification_descriptor: int | None = None
+    try:
+        canonical = _absolute_path(storage)
+        if str(canonical) != str(storage):
+            return False
+        descriptor = _open_existing_directory_nofollow(canonical)
+        metadata = os.fstat(descriptor)
+        mount = _mount_for(canonical, proc_root / "self" / "mountinfo")
+        filesystem = os.statvfs(descriptor)
+        memory = _read_key_values(proc_root / "meminfo")
+        writable = os.access(
+            ".",
+            os.W_OK | os.X_OK,
+            dir_fd=descriptor,
+            follow_symlinks=False,
+        )
+        verification_descriptor = _open_existing_directory_nofollow(canonical)
+        path_stable = _same_open_directory(descriptor, verification_descriptor)
+    except (OSError, TypeError, ValueError):
+        return False
+    finally:
+        if verification_descriptor is not None:
+            os.close(verification_descriptor)
+        if descriptor is not None:
+            os.close(descriptor)
+    available_bytes = filesystem.f_bavail * filesystem.f_frsize
+    available_inodes = filesystem.f_favail
+    return all(
+        (
+            stat.S_ISDIR(metadata.st_mode),
+            metadata.st_dev == host["storage"]["directory_device_id"],
+            metadata.st_ino == host["storage"]["directory_inode"],
+            mount["device"] == host["storage"]["device"],
+            mount["mount_point"] == host["storage"]["mount_point"],
+            mount["type"] == host["storage"]["type"],
+            mount["type"] not in _NETWORK_FILESYSTEMS,
+            mount["type"] not in _NON_STORAGE_FILESYSTEMS,
+            "rw" in mount["mount_options"].split(","),
+            available_bytes >= host["storage"]["required_bytes"],
+            available_inodes >= host["storage"]["required_inodes"],
+            memory.get("MemTotal", 0) == host["host"]["physical_memory_bytes"],
+            memory.get("MemTotal", 0) >= MINIMUM_PHYSICAL_MEMORY_BYTES,
+            writable,
+            path_stable,
+        )
+    )
+
+
 def _assert_current_context(
     host: Mapping[str, Any],
     *,
@@ -2094,12 +2628,21 @@ def _assert_current_context(
         repository,
         lock=repository / "uv.lock",
         execution_python=Path(host["runtime"]["execution_python_path"]),
+        git_path=host["runtime"]["git_path"],
+        git_directory=Path(host["execution"]["git_directory"]),
     )
     if not _snapshot_matches_host(snapshot, host):
         raise ValueError("execution checkout no longer matches static qualification")
     if not _current_uv_matches_host(host):
         raise ValueError("uv executable no longer matches static qualification")
-    if _tool_identity_hash(_tool_identity()) != host["tool_identity_hash"]:
+    if not _current_git_matches_host(host):
+        raise ValueError("git executable no longer matches static qualification")
+    if not _current_execution_python_matches_host(host):
+        raise ValueError("execution Python no longer matches static qualification")
+    if (
+        _tool_identity_hash(_tool_identity(git_path=host["runtime"]["git_path"]))
+        != host["tool_identity_hash"]
+    ):
         raise ValueError("qualification tool no longer matches static qualification")
     if (
         _machine_boot_identity(
@@ -2109,6 +2652,8 @@ def _assert_current_context(
         != host["host_identity"]
     ):
         raise ValueError("host machine or boot no longer matches static qualification")
+    if not _current_host_resources_match(host, proc_root=proc_root):
+        raise ValueError("host memory or qualified storage no longer passes")
     return snapshot
 
 
@@ -2157,6 +2702,8 @@ def _bind_probe_result(
         artifact_root,
         storage_root=Path(host["storage"]["storage_root"]),
     )
+    if artifact_identity["device"] != host["storage"]["directory_device_id"]:
+        raise ValueError("probe artifact root is not on the qualified storage device")
     secure_artifact_access = artifact_directory_fd is not None
     if secure_artifact_access != (executed_command is not None):
         raise ValueError(
@@ -2393,6 +2940,10 @@ def run_probe_step(
                 os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
                 dir_fd=parent_fd,
             )
+            if os.fstat(root_fd).st_dev != host["storage"]["directory_device_id"]:
+                raise ValueError(
+                    "probe artifact root is not on the qualified storage device"
+                )
             command = _secured_probe_arguments(
                 "execution",
                 uv_path=host["runtime"]["uv_path"],
@@ -2439,6 +2990,10 @@ def run_probe_step(
                 artifact_root,
                 storage_root=storage,
             )
+            if identity["device"] != host["storage"]["directory_device_id"]:
+                raise ValueError(
+                    "probe artifact root is not on the qualified storage device"
+                )
             opened = os.fstat(root_fd)
             if (opened.st_dev, opened.st_ino) != (
                 identity["device"],
@@ -2514,6 +3069,20 @@ def _fresh_and_ordered(
     )
 
 
+def _assessment_recorded_at(
+    *,
+    host: Mapping[str, Any],
+    e192: Mapping[str, Any],
+    e768: Mapping[str, Any],
+    probe_execution: Mapping[str, Any],
+    probe_benchmark: Mapping[str, Any],
+) -> str:
+    return max(
+        _parse_timestamp(record["recorded_at"], label="input recorded_at")
+        for record in (host, e192, e768, probe_execution, probe_benchmark)
+    ).isoformat()
+
+
 def assess_qualification(
     *,
     static_record: Mapping[str, Any],
@@ -2561,6 +3130,10 @@ def assess_qualification(
         checkout_pinned = True
     except (OSError, subprocess.SubprocessError, ValueError):
         checkout_pinned = False
+    host_resources_revalidated = _current_host_resources_match(
+        host,
+        proc_root=proc_root,
+    )
     static_binding_passed = (
         e192["static_record_hash"]
         == e768["static_record_hash"]
@@ -2577,10 +3150,11 @@ def assess_qualification(
         record["tool_identity_hash"] == host["tool_identity_hash"]
         for record in (e192, e768, probe_execution, probe_benchmark)
     )
+    expected_capacity_execution = _capacity_execution_identity(host)
     execution_binding_passed = all(
         (
-            e192["execution"]["commit"] == commit,
-            e768["execution"]["commit"] == commit,
+            e192["execution"] == expected_capacity_execution,
+            e768["execution"] == expected_capacity_execution,
             probe_execution["execution_commit"] == commit,
             probe_benchmark["execution_commit"] == commit,
         )
@@ -2593,18 +3167,21 @@ def assess_qualification(
             e768["decision"]["passed"] is True,
         )
     )
-    probe_shape_passed = all(
+    expected_probe_root = host["probe_storage"]["artifact_root"]
+    probe_static_binding_passed = all(
         (
-            probe_execution["decision"]["shape_passed"],
-            probe_benchmark["decision"]["shape_passed"],
-            probe_benchmark["probe_execution_record_hash"]
-            == probe_execution["record_hash"],
-            probe_execution["artifact_storage_identity"]
-            == probe_benchmark["artifact_storage_identity"],
-            probe_execution["artifact_manifest"]
-            == probe_benchmark["artifact_manifest"],
-            probe_execution["secure_artifact_access"] is True,
-            probe_benchmark["secure_artifact_access"] is True,
+            probe_execution["expected_artifact_root"] == expected_probe_root,
+            probe_benchmark["expected_artifact_root"] == expected_probe_root,
+            probe_execution["result"]["artifact_root"] == expected_probe_root,
+            probe_benchmark["result"]["artifact_root"] == expected_probe_root,
+            probe_execution["artifact_storage_identity"]["canonical_path"]
+            == expected_probe_root,
+            probe_benchmark["artifact_storage_identity"]["canonical_path"]
+            == expected_probe_root,
+            probe_execution["artifact_storage_identity"]["device"]
+            == host["storage"]["directory_device_id"],
+            probe_benchmark["artifact_storage_identity"]["device"]
+            == host["storage"]["directory_device_id"],
             probe_execution["result"]["artifact_root"]
             == probe_benchmark["result"]["artifact_root"],
             probe_execution["probe_config_hash"]
@@ -2626,23 +3203,52 @@ def assess_qualification(
             ),
         )
     )
-    budget = probe_benchmark["result"]["operational_budget_hours"]
-    valid_budget = (
-        isinstance(budget, (int, float))
-        and not isinstance(budget, bool)
-        and math.isfinite(budget)
-        and budget > 0
+    try:
+        current_artifact_identity, current_artifact_manifest = (
+            _current_artifact_evidence(
+                Path(expected_probe_root),
+                storage_root=Path(host["storage"]["storage_root"]),
+            )
+        )
+        probe_artifacts_current = all(
+            (
+                current_artifact_identity
+                == probe_execution["artifact_storage_identity"],
+                current_artifact_identity
+                == probe_benchmark["artifact_storage_identity"],
+                current_artifact_manifest == probe_execution["artifact_manifest"],
+                current_artifact_manifest == probe_benchmark["artifact_manifest"],
+            )
+        )
+    except (OSError, ValueError):
+        probe_artifacts_current = False
+    probe_shape_passed = all(
+        (
+            probe_execution["decision"]["shape_passed"],
+            probe_benchmark["decision"]["shape_passed"],
+            probe_benchmark["probe_execution_record_hash"]
+            == probe_execution["record_hash"],
+            probe_execution["artifact_storage_identity"]
+            == probe_benchmark["artifact_storage_identity"],
+            probe_execution["artifact_manifest"]
+            == probe_benchmark["artifact_manifest"],
+            probe_execution["secure_artifact_access"] is True,
+            probe_benchmark["secure_artifact_access"] is True,
+            probe_static_binding_passed,
+            probe_artifacts_current,
+        )
     )
-    projected = probe_benchmark["result"]["projected_report_ingestion_hours"]
+    projection = _probe_projection(probe_benchmark["result"])
     consistent_budget = (
-        valid_budget
-        and isinstance(projected, (int, float))
-        and not isinstance(projected, bool)
-        and math.isfinite(projected)
-        and projected > 0
-        and abs(float(budget) - 2.0 * float(projected)) <= 0.002
+        projection is not None
+        and projection["projected_hours"] > 0
+        and projection["operational_budget_hours"] > 0
+        and _probe_benchmark_metrics_consistent(probe_benchmark["result"])
     )
-    time_passed = consistent_budget and window >= float(budget) + margin
+    budget = projection["operational_budget_hours"] if consistent_budget else None
+    time_passed = (
+        consistent_budget and budget is not None and window >= float(budget) + margin
+    )
     freshness_order_passed = _fresh_and_ordered(
         host=host,
         e192=e192,
@@ -2654,6 +3260,7 @@ def assess_qualification(
         (
             host["decision"]["static_prerequisites_passed"],
             checkout_pinned,
+            host_resources_revalidated,
             static_binding_passed,
             host_binding_passed,
             tool_binding_passed,
@@ -2667,7 +3274,13 @@ def assess_qualification(
     payload = {
         "schema_version": 1,
         "record_type": _ASSESSMENT_RECORD_TYPE,
-        "recorded_at": _utc_now(),
+        "recorded_at": _assessment_recorded_at(
+            host=host,
+            e192=e192,
+            e768=e768,
+            probe_execution=probe_execution,
+            probe_benchmark=probe_benchmark,
+        ),
         "execution_commit": commit,
         "host_identity": host["host_identity"],
         "host_identity_hash": host["host_identity_hash"],
@@ -2684,10 +3297,13 @@ def assess_qualification(
             "capacity_static_binding_passed": static_binding_passed,
             "execution_binding_passed": execution_binding_passed,
             "execution_checkout_pinned": checkout_pinned,
+            "host_resources_revalidated": host_resources_revalidated,
             "host_binding_passed": host_binding_passed,
             "input_freshness_order_passed": freshness_order_passed,
             "probe_budget_consistent": consistent_budget,
             "probe_shape_passed": probe_shape_passed,
+            "probe_static_binding_passed": probe_static_binding_passed,
+            "probe_artifacts_current": probe_artifacts_current,
             "static_prerequisites_passed": host["decision"][
                 "static_prerequisites_passed"
             ],
@@ -2699,7 +3315,9 @@ def assess_qualification(
             "measured_two_times_projection_hours": budget,
             "recovery_margin_hours": margin,
             "required_window_hours": (
-                float(budget) + margin if consistent_budget else None
+                float(budget) + margin
+                if consistent_budget and budget is not None
+                else None
             ),
         },
         "decision": {
@@ -2751,18 +3369,7 @@ def verify_assessment_bundle(
         proc_root=proc_root,
         machine_id_path=machine_id_path,
     )
-    compared_fields = (
-        "execution_commit",
-        "host_identity",
-        "host_identity_hash",
-        "tool_identity_hash",
-        "inputs",
-        "checks",
-        "runtime",
-        "decision",
-        "scientific_boundary",
-    )
-    if any(assessment[name] != recomputed[name] for name in compared_fields):
+    if assessment != recomputed:
         raise ValueError("assessment does not match its bound qualification records")
     return assessment
 
@@ -2815,14 +3422,42 @@ def _validate_tool_identity(value: object) -> dict[str, Any]:
     tool = _expect_keys(
         value,
         label="tool",
-        keys=frozenset({"repository", "commit", "worktree_clean", "source_hash"}),
+        keys=frozenset(
+            {
+                "repository",
+                "commit",
+                "worktree_clean",
+                "source_hash",
+                "git_directory",
+                "git_path",
+                "git_sha256",
+                "python_path",
+                "python_sha256",
+                "python_prefix",
+                "python_version",
+                "dependency_lock_sha256",
+                "dependency_environment_hash",
+            }
+        ),
     )
     repository = Path(_expect_string(tool["repository"], label="tool.repository"))
     if not repository.is_absolute():
         raise ValueError("tool.repository must be absolute")
     _full_git_sha(tool["commit"], label="qualification tool commit")
     _expect_bool(tool["worktree_clean"], label="tool.worktree_clean")
-    _expect_sha256(tool["source_hash"], label="tool.source_hash")
+    for name in (
+        "source_hash",
+        "git_sha256",
+        "python_sha256",
+        "dependency_lock_sha256",
+        "dependency_environment_hash",
+    ):
+        _expect_sha256(tool[name], label=f"tool.{name}")
+    for name in ("git_directory", "git_path", "python_path", "python_prefix"):
+        path = Path(_expect_string(tool[name], label=f"tool.{name}"))
+        if not path.is_absolute():
+            raise ValueError(f"tool.{name} must be absolute")
+    _expect_string(tool["python_version"], label="tool.python_version")
     return tool
 
 
@@ -2862,6 +3497,7 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
                 "expected_commit",
                 "observed_commit",
                 "repository",
+                "git_directory",
                 "status",
                 "worktree_clean",
                 "uv_lock_sha256",
@@ -2875,6 +3511,11 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
     )
     if not repository.is_absolute():
         raise ValueError("execution.repository must be absolute")
+    git_directory = Path(
+        _expect_string(execution["git_directory"], label="execution.git_directory")
+    )
+    if not git_directory.is_absolute():
+        raise ValueError("execution.git_directory must be absolute")
     status = _expect_string(
         execution["status"],
         label="execution.status",
@@ -2918,6 +3559,9 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
                 "logical_cpu_count",
                 "platform",
                 "tool_python",
+                "git",
+                "git_path",
+                "git_sha256",
                 "uv",
                 "uv_path",
                 "uv_sha256",
@@ -2950,11 +3594,21 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
         )
     _expect_string(runtime["platform"], label="runtime.platform")
     _expect_string(runtime["tool_python"], label="runtime.tool_python")
+    _expect_string(runtime["git"], label="runtime.git")
+    _expect_string(runtime["git_path"], label="runtime.git_path")
+    _expect_sha256(runtime["git_sha256"], label="runtime.git_sha256")
+    if not Path(runtime["git_path"]).is_absolute():
+        raise ValueError("runtime.git_path must be absolute")
     _expect_string(runtime["uv"], label="runtime.uv")
     _expect_string(runtime["uv_path"], label="runtime.uv_path")
     _expect_sha256(runtime["uv_sha256"], label="runtime.uv_sha256")
     if not Path(runtime["uv_path"]).is_absolute():
         raise ValueError("runtime.uv_path must be absolute")
+    if (
+        tool["git_path"] != runtime["git_path"]
+        or tool["git_sha256"] != runtime["git_sha256"]
+    ):
+        raise ValueError("tool Git identity differs from inspected Git identity")
 
     host = _expect_keys(
         record["host"],
@@ -2995,6 +3649,8 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
                 "available_inodes",
                 "additional_storage_bytes",
                 "additional_inodes",
+                "directory_device_id",
+                "directory_inode",
                 "local_filesystem",
                 "paired_raw_reference_bytes",
                 "paired_raw_reference_files",
@@ -3016,12 +3672,14 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
         "available_inodes",
         "additional_storage_bytes",
         "additional_inodes",
+        "directory_device_id",
         "paired_raw_reference_bytes",
         "paired_raw_reference_files",
         "required_bytes",
         "required_inodes",
     ):
         _expect_int(storage[name], label=f"storage.{name}", minimum=0)
+    _expect_int(storage["directory_inode"], label="storage.directory_inode", minimum=1)
     if (
         storage["paired_raw_reference_bytes"] != REFERENCE_PAIR_RAW_BYTES
         or storage["paired_raw_reference_files"] != REFERENCE_PAIR_RAW_FILES
@@ -3069,6 +3727,8 @@ def _validate_static_record(record: Mapping[str, Any]) -> None:
         probe=artifact_root,
         uv=Path(runtime["uv_path"]),
         python=python_path,
+        git=Path(runtime["git_path"]),
+        git_directory=git_directory,
     )
     if record["plan"] != expected_plan:
         raise ValueError("static exact plan does not match bound executables and paths")
@@ -3237,6 +3897,9 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
             {
                 "commit",
                 "repository",
+                "git_directory",
+                "git_path",
+                "git_sha256",
                 "uv_lock_sha256",
                 "uv_path",
                 "uv_sha256",
@@ -3246,11 +3909,22 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
         ),
     )
     _full_git_commit(execution["commit"])
-    for name in ("repository", "uv_path", "execution_python_path"):
+    for name in (
+        "repository",
+        "git_directory",
+        "git_path",
+        "uv_path",
+        "execution_python_path",
+    ):
         path = Path(_expect_string(execution[name], label=f"execution.{name}"))
         if not path.is_absolute():
             raise ValueError(f"execution.{name} must be absolute")
-    for name in ("uv_lock_sha256", "uv_sha256", "execution_python_sha256"):
+    for name in (
+        "git_sha256",
+        "uv_lock_sha256",
+        "uv_sha256",
+        "execution_python_sha256",
+    ):
         _expect_sha256(execution[name], label=f"execution.{name}")
     host_identity = _validate_host_identity(
         record["host_identity"],
@@ -3268,8 +3942,12 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
     )
     if record["command"] != expected_command:
         raise ValueError("capacity command does not match pinned executables and stage")
-    _expect_number(record["elapsed_seconds"], label="elapsed_seconds", minimum=0.0)
-    _expect_number(
+    elapsed_seconds = _expect_number(
+        record["elapsed_seconds"],
+        label="elapsed_seconds",
+        minimum=0.0,
+    )
+    timeout_seconds = _expect_number(
         record["timeout_seconds"],
         label="timeout_seconds",
         minimum=0.0,
@@ -3284,6 +3962,12 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
     result = _validate_capacity_benchmark_result(record["benchmark_result"])
     if result and (exit_code != 0 or timed_out or output_limit):
         raise ValueError("failed capacity process cannot retain a benchmark result")
+    if result:
+        child_elapsed = float(result["total_elapsed_seconds"])
+        if elapsed_seconds + 0.002 < child_elapsed:
+            raise ValueError("capacity wrapper elapsed time is below benchmark time")
+        if child_elapsed > timeout_seconds + 0.01:
+            raise ValueError("capacity benchmark time exceeds its credible timeout")
     before = _validate_checkout_snapshot(
         record["prelaunch_checkout"],
         label="prelaunch_checkout",
@@ -3345,6 +4029,8 @@ def _validate_capacity_record(record: Mapping[str, Any]) -> None:
     expected_decision = _capacity_decision(
         stage,
         result=result,
+        before_available_memory_bytes=memory["before_available_memory_bytes"],
+        after_available_memory_bytes=memory["after_available_memory_bytes"],
         minimum_available_memory_bytes=memory["minimum_available_memory_bytes"],
         process_major_faults=faults,
         swapout_delta_pages=swap["pswpout_delta_pages"],
@@ -3380,18 +4066,81 @@ def _validate_artifact_manifest(value: object) -> dict[str, Any]:
     manifest = _expect_keys(
         value,
         label="artifact_manifest",
-        keys=frozenset({"file_count", "total_bytes", "manifest_hash"}),
+        keys=frozenset({"entries", "file_count", "total_bytes", "manifest_hash"}),
     )
-    _expect_int(manifest["file_count"], label="artifact_manifest.file_count", minimum=0)
-    _expect_int(
+    entries = manifest["entries"]
+    if not isinstance(entries, list):
+        raise ValueError("artifact_manifest.entries must be a list")
+    observed_paths: set[str] = set()
+    observed_file_count = 0
+    observed_total_bytes = 0
+    for index, value in enumerate(entries):
+        if not isinstance(value, dict):
+            raise ValueError(f"artifact_manifest.entries[{index}] must be an object")
+        kind = value.get("kind")
+        keys = (
+            frozenset({"kind", "path"})
+            if kind == "directory"
+            else frozenset({"kind", "path", "sha256", "size_bytes"})
+            if kind == "file"
+            else frozenset()
+        )
+        if not keys:
+            raise ValueError(
+                f"artifact_manifest.entries[{index}].kind must be file or directory"
+            )
+        entry = _expect_keys(
+            value,
+            label=f"artifact_manifest.entries[{index}]",
+            keys=keys,
+        )
+        path_text = _expect_string(
+            entry["path"],
+            label=f"artifact_manifest.entries[{index}].path",
+        )
+        path = Path(path_text)
+        if (
+            path.is_absolute()
+            or path.as_posix() != path_text
+            or path_text in {".", ".."}
+            or any(part in {"", ".", ".."} for part in path.parts)
+        ):
+            raise ValueError("artifact manifest paths must be normalized and relative")
+        if path_text in observed_paths:
+            raise ValueError("artifact manifest paths must be unique")
+        observed_paths.add(path_text)
+        if kind == "file":
+            _expect_sha256(
+                entry["sha256"],
+                label=f"artifact_manifest.entries[{index}].sha256",
+            )
+            observed_total_bytes += _expect_int(
+                entry["size_bytes"],
+                label=f"artifact_manifest.entries[{index}].size_bytes",
+                minimum=0,
+            )
+            observed_file_count += 1
+    file_count = _expect_int(
+        manifest["file_count"],
+        label="artifact_manifest.file_count",
+        minimum=0,
+    )
+    total_bytes = _expect_int(
         manifest["total_bytes"],
         label="artifact_manifest.total_bytes",
         minimum=0,
     )
-    _expect_sha256(
+    manifest_hash = _expect_sha256(
         manifest["manifest_hash"],
         label="artifact_manifest.manifest_hash",
     )
+    if file_count != observed_file_count or total_bytes != observed_total_bytes:
+        raise ValueError("artifact manifest aggregates do not match detailed entries")
+    if manifest_hash != scientific_hash(
+        entries,
+        domain="operations.v2-probe-artifact-manifest.v1",
+    ):
+        raise ValueError("artifact manifest hash does not match detailed entries")
     return manifest
 
 
@@ -3577,6 +4326,8 @@ def _validate_assessment_record(record: Mapping[str, Any]) -> None:
         ),
     )
     _parse_timestamp(record["recorded_at"], label="assessment recorded_at")
+    if not _record_is_fresh(record):
+        raise ValueError("assessment is stale or future-dated")
     _full_git_commit(record["execution_commit"])
     _validate_host_identity(record["host_identity"], label="assessment host_identity")
     _expect_sha256(record["host_identity_hash"], label="host_identity_hash")
@@ -3602,10 +4353,13 @@ def _validate_assessment_record(record: Mapping[str, Any]) -> None:
             "capacity_static_binding_passed",
             "execution_binding_passed",
             "execution_checkout_pinned",
+            "host_resources_revalidated",
             "host_binding_passed",
             "input_freshness_order_passed",
+            "probe_artifacts_current",
             "probe_budget_consistent",
             "probe_shape_passed",
+            "probe_static_binding_passed",
             "static_prerequisites_passed",
             "time_window_passed",
             "tool_binding_passed",
@@ -3632,12 +4386,14 @@ def _validate_assessment_record(record: Mapping[str, Any]) -> None:
         minimum=0.0,
         strict_minimum=True,
     )
-    _expect_number(
-        runtime["measured_two_times_projection_hours"],
-        label="measured_two_times_projection_hours",
-        minimum=0.0,
-        strict_minimum=True,
-    )
+    measured = runtime["measured_two_times_projection_hours"]
+    if measured is not None:
+        _expect_number(
+            measured,
+            label="measured_two_times_projection_hours",
+            minimum=0.0,
+            strict_minimum=True,
+        )
     _expect_number(
         runtime["recovery_margin_hours"],
         label="recovery_margin_hours",
@@ -3651,15 +4407,17 @@ def _validate_assessment_record(record: Mapping[str, Any]) -> None:
             strict_minimum=True,
         )
     expected_required_window = (
-        float(runtime["measured_two_times_projection_hours"])
-        + float(runtime["recovery_margin_hours"])
-        if checks["probe_budget_consistent"]
+        float(measured) + float(runtime["recovery_margin_hours"])
+        if checks["probe_budget_consistent"] and measured is not None
         else None
     )
+    if checks["probe_budget_consistent"] != (measured is not None):
+        raise ValueError("assessment budget consistency disagrees with projection")
     if runtime["required_window_hours"] != expected_required_window:
         raise ValueError("assessment required window does not match runtime values")
     expected_time_passed = (
         checks["probe_budget_consistent"]
+        and expected_required_window is not None
         and float(runtime["available_window_hours"]) >= expected_required_window
     )
     if checks["time_window_passed"] != expected_time_passed:

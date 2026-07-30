@@ -31,10 +31,14 @@ disjoint-seed ingestion probe; it hashes artifact bytes and paths for identity
 without interpreting metrics or scientific outcomes. E768 additionally
 requires an explicit memory-pressure acknowledgement. Capacity commands
 require the same fresh static record and recheck the approved commit, clean
-tree, lockfile, checkout Python, absolute `uv` executable, tool source,
-machine, and boot before launch, plus the checkout snapshot after the detached
-process. Any process-monitoring exception terminates and reaps the entire
-process group.
+tree, lockfile, executable checkout Python, absolute hashed `uv` and Git
+executables, tool checkout/interpreter/lock/installed dependency bytes,
+machine, boot, physical memory, and qualified storage before launch, plus the
+checkout snapshot after the detached process. Git identity commands use
+explicit Git-directory and work-tree arguments in a fixed environment that
+does not inherit `GIT_*`, `PYTHON*`, `UV_*`, loader, or caller `PATH` settings.
+Any process-monitoring exception terminates and reaps the entire process
+group.
 
 Linux `MemTotal` can be below installed capacity because of firmware and kernel
 reservations. The 64-GiB check is deliberately fail-closed on visible physical
@@ -53,9 +57,11 @@ execution SHA. Run the qualification tool from its own reviewed public
 checkout so adding operational tooling does not change the approved scientific
 execution tree.
 
-Keep operational records outside both Git worktrees and outside the qualified
-storage/probe tree. Record writes reject protected roots and symlinked path
-components and install complete files without following the final path:
+Keep operational records outside both Git worktrees and their Git metadata
+directories, and outside the qualified storage/probe tree. Record writes
+reject protected roots and symlinked path components, install complete files
+without following the final path, refuse replacement, and set created records
+to mode `0400`:
 
 ```bash
 export IRB_EXECUTION_SHA="c9b6297b63b572d9e6d106de4add1dae436c00d3"
@@ -92,7 +98,10 @@ cd "${IRB_TOOL_REPOSITORY}"
 
 The static record is valid for at most 24 hours and only on the same machine
 and boot. All later records must use the same tool-source identity and static
-record hash.
+record hash. Mode `0400` is an accidental-edit guard, not a security boundary:
+the file owner or a privileged process can change permissions, edit a record,
+and compute a new unkeyed hash. Preserve reviewed copies in an independently
+controlled append-only or immutable store if stronger provenance is required.
 
 ## 2. Declare storage and time reservations
 
@@ -162,12 +171,16 @@ uv run python scripts/qualify_symbolic_v2_host.py run-capacity \
   --output "${IRB_OPERATIONS_ROOT}/e768.json"
 ```
 
-Each record binds the exact static record, tool source, machine and boot,
-absolute `uv`, checkout Python, lockfile, and pre/post checkout snapshots. It
+Each record binds the exact static record, tool identity, machine and boot,
+execution repository and Git directory, absolute hashed Git and `uv`
+executables, checkout Python, lockfile, and pre/post checkout snapshots. It
 checks the exact registered shape and deterministic synthetic dataset hash.
 Passing requires:
 
 - the exact expected observations, pools, metrics, and replica count;
+- internally consistent dataset/pooling/total timing, wrapper/child timing,
+  timeout, and RSS measurements;
+- positive before, after, and minimum memory readings in the correct order;
 - no process major faults and no host swap-outs during the benchmark; and
 - at least the measured peak RSS remaining again as physical `MemAvailable`.
 
@@ -207,7 +220,10 @@ uv run python scripts/qualify_symbolic_v2_host.py run-probe \
 Do not open run payloads, plot conditions, compare agents, or use probe metrics
 for protocol decisions. `run-probe` records the no-symlink device/inode
 identity, hashes every regular artifact file through the open directory
-descriptor, and requires the execution and benchmark manifests to match. It
+descriptor, stores the normalized path, byte size, and SHA-256 of every file
+in a detailed manifest, and requires the execution and benchmark manifests to
+match. The probe device must equal the statically qualified storage device
+before either child is launched and again during assessment. It
 binds the benchmark to the execution-record hash, expected config/command,
 approved checkout, tool source, machine, and boot. A plain or manually bound
 probe JSON object cannot pass assessment. Each record distinguishes the
@@ -246,11 +262,23 @@ uv run python scripts/qualify_symbolic_v2_host.py verify-assessment \
 The assessment requires the static, E192, E768, probe-execution, and
 probe-benchmark records to be ordered, no more than 24 hours old, and bound to
 the same approved execution SHA, static-record hash, tool source, host, boot,
-and artifact directory. The reserved window must cover that host's newly
-measured two-times ingestion projection plus the separately declared recovery
-margin. A record checksum alone is not an authenticity mechanism; reviewers
-must use `verify-assessment` with the five immutable input records rather than
-trusting stored check booleans. Preserve the operational JSON for review,
+and artifact directory. Assessment rechecks current physical memory, mount,
+device, storage-directory inode, free bytes, free inodes, and the live detailed
+artifact manifest through one no-follow directory descriptor, then confirms
+that the path still names that inode. It recomputes fixed, marginal, residual,
+projected, and two-times budget values from the recorded primitive timings
+using the same registered projection formula; claimed projected or budget
+fields are never trusted directly. Its timestamp is deterministically the
+latest bound input timestamp, and `verify-assessment` rejects a coherently
+rehashed redating. The reserved window must cover that recomputed two-times
+ingestion projection plus the separately declared recovery margin.
+
+These SHA-256 and scientific hashes provide content-integrity checks, not
+authenticity, signatures, ownership, or resistance to a party that can replace
+every record and recompute every unkeyed hash. Reviewers must use
+`verify-assessment` with the five write-once input records, compare them with
+independently preserved copies and the reviewed public Git history, and never
+trust stored check booleans alone. Preserve the operational JSON for review,
 quarantine the probe root
 outside all study, evidence, result, and raw-release paths, and do not invoke
 calibration until the review is complete.

@@ -6,6 +6,7 @@ import math
 import os
 import runpy
 import signal
+import stat
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -90,15 +91,11 @@ def _mock_static_environment(
 
     def run_text(arguments, *, cwd=None):
         current = repository if cwd is None else Path(cwd)
-        if tuple(arguments[:3]) == ("git", "rev-parse", "HEAD"):
+        if "rev-parse" in arguments and arguments[-1] == "HEAD":
             return COMMIT
-        if tuple(arguments[:3]) == (
-            "git",
-            "status",
-            "--porcelain=v2",
-        ):
+        if "status" in arguments and "--porcelain=v2" in arguments:
             return f"# branch.oid {COMMIT}\n# branch.head (detached)"
-        if tuple(arguments[:2]) == ("git", "status"):
+        if "status" in arguments and "--porcelain" in arguments:
             return ""
         if arguments[-1] == "--version":
             return "uv 0.8.0"
@@ -116,6 +113,11 @@ def _mock_static_environment(
     monkeypatch.setattr(qualification, "_run_text", run_text)
     monkeypatch.setattr(qualification.shutil, "which", lambda _: str(fake_uv))
     monkeypatch.setattr(
+        qualification,
+        "_dependency_environment_hash",
+        lambda: "9" * 64,
+    )
+    monkeypatch.setattr(
         qualification.os,
         "statvfs",
         lambda _: SimpleNamespace(
@@ -124,7 +126,11 @@ def _mock_static_environment(
             f_favail=available_inodes,
         ),
     )
-    monkeypatch.setattr(qualification.os, "access", lambda *_: True)
+    monkeypatch.setattr(
+        qualification.os,
+        "access",
+        lambda *_args, **_kwargs: True,
+    )
 
 
 def _inspect(
@@ -188,7 +194,15 @@ def _benchmark_result(stage: str) -> dict[str, object]:
 
 
 def _write_fake_process_output(process, stdout, stderr):
-    stdout.write(json.dumps(_benchmark_result("e192")))
+    result = _benchmark_result("e192")
+    result.update(
+        {
+            "dataset_elapsed_seconds": 0.001,
+            "pool_elapsed_seconds": 0.0,
+            "total_elapsed_seconds": 0.001,
+        }
+    )
+    stdout.write(json.dumps(result))
     stdout.flush()
     stderr.flush()
     return process
@@ -213,20 +227,14 @@ def _capacity_record(
     decision = qualification._capacity_decision(
         stage,
         result=result,
-        minimum_available_memory_bytes=80 * GIB,
+        before_available_memory_bytes=80 * GIB,
+        after_available_memory_bytes=79 * GIB,
+        minimum_available_memory_bytes=79 * GIB,
         process_major_faults=faults,
         swapout_delta_pages=0,
         checkout_unchanged=True,
     )
-    execution = {
-        "commit": COMMIT,
-        "repository": host["execution"]["repository"],
-        "uv_lock_sha256": host["execution"]["uv_lock_sha256"],
-        "uv_path": host["runtime"]["uv_path"],
-        "uv_sha256": host["runtime"]["uv_sha256"],
-        "execution_python_path": host["runtime"]["execution_python_path"],
-        "execution_python_sha256": host["runtime"]["execution_python_sha256"],
-    }
+    execution = qualification._capacity_execution_identity(host)
     timestamp = qualification._utc_now() if recorded_at is None else recorded_at
     return qualification._signed(
         {
@@ -247,7 +255,7 @@ def _capacity_record(
                 )
             ),
             "started_at": timestamp,
-            "elapsed_seconds": 1.0,
+            "elapsed_seconds": 2.0,
             "timeout_seconds": qualification.DEFAULT_CAPACITY_TIMEOUT_SECONDS,
             "exit_code": 0,
             "timed_out": False,
@@ -294,26 +302,26 @@ def _probe_benchmark_result(host: dict[str, object]) -> dict[str, object]:
         "artifact_root": host["probe_storage"]["artifact_root"],
         "budget_multiplier": 2.0,
         "dataset_hash": V2_PROBE_DATASET_HASH,
-        "fixed_frontier_cache_copy_seconds": 1.0,
-        "fixed_frontier_raw_hash_seconds": 1.0,
-        "fixed_frontier_validation_seconds": 1.0,
-        "fixed_report_ingestion_seconds": 1.0,
+        "fixed_frontier_cache_copy_seconds": 0.0,
+        "fixed_frontier_raw_hash_seconds": 0.0,
+        "fixed_frontier_validation_seconds": 0.0,
+        "fixed_report_ingestion_seconds": 0.0,
         "frontier_tree_count": 4,
-        "inventory_elapsed_seconds": 1.0,
-        "load_elapsed_seconds": 1.0,
+        "inventory_elapsed_seconds": 10.0,
+        "load_elapsed_seconds": 3.437488,
         "maximum_rss_mib": 100.0,
-        "modeled_probe_report_seconds": 1.0,
-        "marginal_run_load_seconds_per_run": 1.0,
-        "marginal_run_raw_hash_seconds_per_run": 1.0,
-        "marginal_run_validation_seconds_per_run": 1.0,
+        "modeled_probe_report_seconds": 23.437488,
+        "marginal_run_load_seconds_per_run": 0.488281,
+        "marginal_run_raw_hash_seconds_per_run": 0.0,
+        "marginal_run_validation_seconds_per_run": 0.0,
         "observation_count": 624,
-        "observed_probe_report_seconds": 1.0,
+        "observed_probe_report_seconds": 23.437488,
         "operational_budget_hours": 80.0,
         "projected_report_ingestion_hours": 40.0,
         "projected_runs_per_root": 294_912,
         "raw_run_byte_size": 1,
         "raw_run_file_count": 1_392,
-        "residual_seconds_per_run": 1.0,
+        "residual_seconds_per_run": 0.0,
         "rss_before_mib": 50.0,
         "rss_increment_upper_bound_mib": 50.0,
         "run_count": 48,
@@ -386,6 +394,7 @@ def test_exact_plan_is_print_only_and_excludes_registered_runner(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    (repo_root / ".git").mkdir()
     plan = build_exact_plan(
         repo_root=repo_root,
         execution_commit=COMMIT,
@@ -525,6 +534,11 @@ def test_capacity_runner_captures_synthetic_evidence_with_mocked_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        qualification,
+        "_current_host_resources_match",
+        lambda *_args, **_kwargs: True,
+    )
     readings = iter(
         (
             {"MemAvailable": 80 * GIB},
@@ -604,7 +618,9 @@ def test_capacity_decision_rejects_nonpositive_rss(
     decision = qualification._capacity_decision(
         "e192",
         result=result,
-        minimum_available_memory_bytes=80 * GIB,
+        before_available_memory_bytes=80 * GIB,
+        after_available_memory_bytes=79 * GIB,
+        minimum_available_memory_bytes=79 * GIB,
         process_major_faults=0,
         swapout_delta_pages=0,
     )
@@ -620,7 +636,9 @@ def test_capacity_decision_rejects_integral_float_shape_counts() -> None:
     decision = qualification._capacity_decision(
         "e192",
         result=result,
-        minimum_available_memory_bytes=80 * GIB,
+        before_available_memory_bytes=80 * GIB,
+        after_available_memory_bytes=79 * GIB,
+        minimum_available_memory_bytes=79 * GIB,
         process_major_faults=0,
         swapout_delta_pages=0,
     )
@@ -725,7 +743,7 @@ def test_assessment_bundle_rejects_rehashed_checks_for_different_input(
         verify_record(_resign(inconsistent_runtime))
 
 
-def test_records_are_immutable(
+def test_records_are_write_once_and_owner_read_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -733,6 +751,7 @@ def test_records_are_immutable(
     payload = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
 
     write_record(path, payload)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o400
     write_record(path, payload)
     changed = copy.deepcopy(payload)
     changed["recorded_at"] = qualification._utc_now()
@@ -965,6 +984,11 @@ def test_capacity_runner_terminates_and_reaps_on_sampling_base_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        qualification,
+        "_current_host_resources_match",
+        lambda *_args, **_kwargs: True,
+    )
     calls = 0
 
     def read_values(_path):
@@ -1039,6 +1063,11 @@ def test_capacity_record_fails_when_checkout_changes_after_completed_process(
     postrun_change: dict[str, object],
 ) -> None:
     host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        qualification,
+        "_current_host_resources_match",
+        lambda *_args, **_kwargs: True,
+    )
     clean_snapshot = {
         "commit": COMMIT,
         "clean": True,
@@ -1460,3 +1489,567 @@ def test_record_write_validates_first_and_leaves_no_partial_target(
         write_record(failed_path, host)
     assert not failed_path.exists()
     assert not tuple(failed_path.parent.iterdir())
+
+
+def test_assessment_rejects_coherently_forged_capacity_execution_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    e192 = _capacity_record("e192", host)
+    e768 = _capacity_record("e768", host)
+    execution, benchmark = _bound_probe_records(host, tmp_path)
+
+    forged = copy.deepcopy(e192)
+    forged["execution"].update(
+        {
+            "repository": "/forged/execution",
+            "git_directory": "/forged/execution.git",
+            "git_path": "/forged/bin/git",
+            "git_sha256": "1" * 64,
+            "uv_lock_sha256": "2" * 64,
+            "uv_path": "/forged/bin/uv",
+            "uv_sha256": "3" * 64,
+            "execution_python_path": "/forged/bin/python",
+            "execution_python_sha256": "4" * 64,
+        }
+    )
+    for snapshot_name in ("prelaunch_checkout", "postrun_checkout"):
+        forged[snapshot_name]["uv_lock_sha256"] = "2" * 64
+        forged[snapshot_name]["execution_python_sha256"] = "4" * 64
+    forged["command"] = qualification._command(
+        qualification._capacity_arguments(
+            "e192",
+            uv_path="/forged/bin/uv",
+            execution_python="/forged/bin/python",
+        )
+    )
+    forged = _resign(forged)
+
+    assert verify_record(forged) == forged
+    assessment = assess_qualification(
+        static_record=host,
+        e192_record=forged,
+        e768_record=e768,
+        probe_execution_result=execution,
+        probe_benchmark_result=benchmark,
+        available_window_hours=96.0,
+        recovery_margin_hours=12.0,
+        proc_root=tmp_path / "proc",
+        machine_id_path=tmp_path / "machine-id",
+    )
+    assert not assessment["checks"]["execution_binding_passed"]
+    assert not assessment["decision"]["qualification_passed"]
+
+
+def test_assessment_rejects_coherently_forged_probe_static_bindings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    e192 = _capacity_record("e192", host)
+    e768 = _capacity_record("e768", host)
+    execution, benchmark = _bound_probe_records(host, tmp_path)
+    forged_root = str(tmp_path / "forged-probe")
+
+    forged_execution = copy.deepcopy(execution)
+    forged_execution["expected_artifact_root"] = forged_root
+    forged_execution["artifact_storage_identity"].update(
+        {
+            "canonical_path": forged_root,
+            "device": host["storage"]["directory_device_id"] + 1,
+        }
+    )
+    forged_execution["probe_config_hash"] = "5" * 64
+    forged_execution["planned_command"] = "forged execution plan"
+    forged_execution["executed_command"] = "forged execution argv"
+    forged_execution["result"]["artifact_root"] = forged_root
+    forged_execution["source_result_hash"] = qualification.scientific_hash(
+        forged_execution["result"],
+        domain="operations.v2-probe-execution-result.v1",
+    )
+    forged_execution = _resign(forged_execution)
+
+    forged_benchmark = copy.deepcopy(benchmark)
+    forged_benchmark["expected_artifact_root"] = forged_root
+    forged_benchmark["artifact_storage_identity"].update(
+        {
+            "canonical_path": forged_root,
+            "device": host["storage"]["directory_device_id"] + 1,
+        }
+    )
+    forged_benchmark["probe_config_hash"] = "5" * 64
+    forged_benchmark["planned_command"] = "forged benchmark plan"
+    forged_benchmark["executed_command"] = "forged benchmark argv"
+    forged_benchmark["probe_execution_record_hash"] = forged_execution["record_hash"]
+    forged_benchmark["result"]["artifact_root"] = forged_root
+    forged_benchmark["source_result_hash"] = qualification.scientific_hash(
+        forged_benchmark["result"],
+        domain="operations.v2-probe-benchmark-result.v1",
+    )
+    forged_benchmark = _resign(forged_benchmark)
+
+    assert verify_record(forged_execution) == forged_execution
+    assert verify_record(forged_benchmark) == forged_benchmark
+    assessment = assess_qualification(
+        static_record=host,
+        e192_record=e192,
+        e768_record=e768,
+        probe_execution_result=forged_execution,
+        probe_benchmark_result=forged_benchmark,
+        available_window_hours=96.0,
+        recovery_margin_hours=12.0,
+        proc_root=tmp_path / "proc",
+        machine_id_path=tmp_path / "machine-id",
+    )
+    assert not assessment["checks"]["probe_static_binding_passed"]
+    assert not assessment["checks"]["probe_artifacts_current"]
+    assert not assessment["decision"]["qualification_passed"]
+
+
+def test_probe_projection_is_recomputed_instead_of_trusting_claimed_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    _, benchmark = _bound_probe_records(host, tmp_path)
+    forged = copy.deepcopy(benchmark)
+    forged["result"]["projected_report_ingestion_hours"] = 0.001
+    forged["result"]["operational_budget_hours"] = 0.002
+    forged["source_result_hash"] = qualification.scientific_hash(
+        forged["result"],
+        domain="operations.v2-probe-benchmark-result.v1",
+    )
+
+    with pytest.raises(ValueError, match="decision does not match"):
+        verify_record(_resign(forged))
+
+    zero_pre_rss = copy.deepcopy(benchmark)
+    zero_pre_rss["result"]["rss_before_mib"] = 0.0
+    zero_pre_rss["result"]["rss_increment_upper_bound_mib"] = zero_pre_rss["result"][
+        "maximum_rss_mib"
+    ]
+    zero_pre_rss["source_result_hash"] = qualification.scientific_hash(
+        zero_pre_rss["result"],
+        domain="operations.v2-probe-benchmark-result.v1",
+    )
+    with pytest.raises(ValueError, match="decision does not match"):
+        verify_record(_resign(zero_pre_rss))
+
+
+def test_git_identity_commands_ignore_inherited_repository_redirects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "attacker.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "attacker-tree"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "attacker-config"))
+    monkeypatch.setenv("PATH", str(tmp_path / "attacker-bin"))
+    assert qualification._sanitized_environment() == {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+    }
+
+    repository = tmp_path / "qualified"
+    repository.mkdir()
+    lock = repository / "uv.lock"
+    python = repository / "python"
+    lock.write_text("lock", encoding="utf-8")
+    python.write_text("python", encoding="utf-8")
+    git_directory = tmp_path / "qualified.git"
+    git_directory.mkdir()
+    captured: list[tuple[str, ...]] = []
+
+    def run_text(arguments, *, cwd=None):
+        assert cwd == repository
+        captured.append(tuple(arguments))
+        return f"# branch.oid {COMMIT}\n# branch.head (detached)"
+
+    monkeypatch.setattr(qualification, "_run_text", run_text)
+    qualification._repository_snapshot(
+        repository,
+        lock=lock,
+        execution_python=python,
+        git_path="/trusted/bin/git",
+        git_directory=git_directory,
+    )
+
+    assert captured == [
+        (
+            "/trusted/bin/git",
+            "--no-optional-locks",
+            f"--git-dir={git_directory}",
+            f"--work-tree={repository}",
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=normal",
+        )
+    ]
+
+
+def test_capacity_decision_rejects_metric_timing_and_memory_forgery() -> None:
+    wrong_metrics = _benchmark_result("e192")
+    wrong_metrics["metric_count"] = 999
+    decision = qualification._capacity_decision(
+        "e192",
+        result=wrong_metrics,
+        before_available_memory_bytes=80 * GIB,
+        after_available_memory_bytes=79 * GIB,
+        minimum_available_memory_bytes=79 * GIB,
+        process_major_faults=0,
+        swapout_delta_pages=0,
+    )
+    assert not decision["exact_shape_passed"]
+    assert not decision["passed"]
+
+    bad_memory = qualification._capacity_decision(
+        "e192",
+        result=_benchmark_result("e192"),
+        before_available_memory_bytes=0,
+        after_available_memory_bytes=0,
+        minimum_available_memory_bytes=79 * GIB,
+        process_major_faults=0,
+        swapout_delta_pages=0,
+    )
+    assert not bad_memory["memory_measurements_consistent_passed"]
+    assert not bad_memory["passed"]
+
+    bad_timing_result = _benchmark_result("e192")
+    bad_timing_result["total_elapsed_seconds"] = 1.0
+    bad_timing = qualification._capacity_decision(
+        "e192",
+        result=bad_timing_result,
+        before_available_memory_bytes=80 * GIB,
+        after_available_memory_bytes=79 * GIB,
+        minimum_available_memory_bytes=79 * GIB,
+        process_major_faults=0,
+        swapout_delta_pages=0,
+    )
+    assert not bad_timing["benchmark_metrics_consistent_passed"]
+    assert not bad_timing["passed"]
+
+    zero_pre_rss_result = _benchmark_result("e192")
+    zero_pre_rss_result["rss_before_mib"] = 0.0
+    zero_pre_rss_result["rss_increment_upper_bound_mib"] = zero_pre_rss_result[
+        "maximum_rss_mib"
+    ]
+    zero_pre_rss = qualification._capacity_decision(
+        "e192",
+        result=zero_pre_rss_result,
+        before_available_memory_bytes=80 * GIB,
+        after_available_memory_bytes=79 * GIB,
+        minimum_available_memory_bytes=79 * GIB,
+        process_major_faults=0,
+        swapout_delta_pages=0,
+    )
+    assert not zero_pre_rss["benchmark_metrics_consistent_passed"]
+    assert not zero_pre_rss["passed"]
+
+
+def test_capacity_record_rejects_impossible_wrapper_and_child_timing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    forged = _capacity_record("e192", host)
+    forged["elapsed_seconds"] = 0.0
+    forged["timeout_seconds"] = 0.001
+
+    with pytest.raises(ValueError, match="wrapper elapsed time"):
+        verify_record(_resign(forged))
+
+    forged["elapsed_seconds"] = 2.0
+    with pytest.raises(ValueError, match="credible timeout"):
+        verify_record(_resign(forged))
+
+
+def test_installed_dependency_hash_binds_file_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed = tmp_path / "package.py"
+    installed.write_text("VALUE = 1\n", encoding="utf-8")
+    distribution = SimpleNamespace(
+        metadata={"Name": "example"},
+        version="1.0",
+        files=(Path("package.py"),),
+        locate_file=lambda declared: tmp_path / declared,
+    )
+    monkeypatch.setattr(
+        qualification.importlib_metadata,
+        "distributions",
+        lambda: (distribution,),
+    )
+
+    before = qualification._dependency_environment_hash()
+    installed.write_text("VALUE = 2\n", encoding="utf-8")
+    after = qualification._dependency_environment_hash()
+    assert before != after
+
+
+def test_current_execution_python_requires_executable_bound_bytes(
+    tmp_path: Path,
+) -> None:
+    python = tmp_path / "python"
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o600)
+    host = {
+        "runtime": {
+            "execution_python_path": str(python),
+            "execution_python_sha256": qualification._sha256_file(python),
+        }
+    }
+    assert not qualification._current_execution_python_matches_host(host)
+
+    python.chmod(0o700)
+    assert qualification._current_execution_python_matches_host(host)
+
+
+def test_current_resource_revalidation_checks_storage_mount_and_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    proc = tmp_path / "proc"
+    assert qualification._current_host_resources_match(host, proc_root=proc)
+
+    wrong_inode = copy.deepcopy(host)
+    wrong_inode["storage"]["directory_inode"] += 1
+    assert not qualification._current_host_resources_match(
+        wrong_inode,
+        proc_root=proc,
+    )
+
+    mountinfo = proc / "self" / "mountinfo"
+    original_mount = mountinfo.read_text(encoding="utf-8")
+    mountinfo.write_text(
+        original_mount.replace("/dev/nvme0n1p1", "/dev/nvme9n9p9"),
+        encoding="utf-8",
+    )
+    assert not qualification._current_host_resources_match(host, proc_root=proc)
+    mountinfo.write_text(original_mount, encoding="utf-8")
+
+    original_statvfs = qualification.os.statvfs
+    monkeypatch.setattr(
+        qualification.os,
+        "statvfs",
+        lambda _: SimpleNamespace(f_bavail=1, f_frsize=1, f_favail=1),
+    )
+    assert not qualification._current_host_resources_match(host, proc_root=proc)
+    monkeypatch.setattr(qualification.os, "statvfs", original_statvfs)
+
+    meminfo = proc / "meminfo"
+    original_memory = meminfo.read_text(encoding="utf-8")
+    meminfo.write_text(
+        original_memory.replace(
+            f"MemTotal: {96 * GIB // 1024} kB",
+            f"MemTotal: {32 * GIB // 1024} kB",
+        ),
+        encoding="utf-8",
+    )
+    assert not qualification._current_host_resources_match(host, proc_root=proc)
+
+
+def test_assessment_wires_current_resource_revalidation_into_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    e192 = _capacity_record("e192", host)
+    e768 = _capacity_record("e768", host)
+    execution, benchmark = _bound_probe_records(host, tmp_path)
+    monkeypatch.setattr(
+        qualification.os,
+        "statvfs",
+        lambda _: SimpleNamespace(f_bavail=1, f_frsize=1, f_favail=1),
+    )
+
+    assessment = assess_qualification(
+        static_record=host,
+        e192_record=e192,
+        e768_record=e768,
+        probe_execution_result=execution,
+        probe_benchmark_result=benchmark,
+        available_window_hours=96.0,
+        recovery_margin_hours=12.0,
+        proc_root=tmp_path / "proc",
+        machine_id_path=tmp_path / "machine-id",
+    )
+    assert not assessment["checks"]["host_resources_revalidated"]
+    assert not assessment["decision"]["qualification_passed"]
+
+
+def test_assessment_timestamp_is_deterministic_fresh_and_not_redatable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    e192 = _capacity_record("e192", host)
+    e768 = _capacity_record("e768", host)
+    execution, benchmark = _bound_probe_records(host, tmp_path)
+    arguments = {
+        "static_record": host,
+        "e192_record": e192,
+        "e768_record": e768,
+        "probe_execution_result": execution,
+        "probe_benchmark_result": benchmark,
+        "available_window_hours": 96.0,
+        "recovery_margin_hours": 12.0,
+        "proc_root": tmp_path / "proc",
+        "machine_id_path": tmp_path / "machine-id",
+    }
+    assessment = assess_qualification(**arguments)
+    repeated = assess_qualification(**arguments)
+    assert repeated == assessment
+    assert assessment["recorded_at"] == max(
+        record["recorded_at"] for record in (host, e192, e768, execution, benchmark)
+    )
+
+    redated = copy.deepcopy(assessment)
+    redated["recorded_at"] = (
+        datetime.fromisoformat(assessment["recorded_at"]) + timedelta(seconds=1)
+    ).isoformat()
+    redated = _resign(redated)
+    assert verify_record(redated) == redated
+    with pytest.raises(ValueError, match="does not match its bound"):
+        verify_assessment_bundle(
+            assessment_record=redated,
+            static_record=host,
+            e192_record=e192,
+            e768_record=e768,
+            probe_execution_record=execution,
+            probe_benchmark_record=benchmark,
+            proc_root=tmp_path / "proc",
+            machine_id_path=tmp_path / "machine-id",
+        )
+
+    for timestamp in (
+        datetime.now(UTC) - timedelta(hours=25),
+        datetime.now(UTC) + timedelta(minutes=6),
+    ):
+        invalid = copy.deepcopy(assessment)
+        invalid["recorded_at"] = timestamp.isoformat()
+        with pytest.raises(ValueError, match="stale or future-dated"):
+            verify_record(_resign(invalid))
+
+
+def test_detailed_probe_manifest_is_validated_and_rechecked_live(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _inspect(Path(__file__).parents[1], tmp_path, monkeypatch)
+    e192 = _capacity_record("e192", host)
+    e768 = _capacity_record("e768", host)
+    execution, benchmark = _bound_probe_records(host, tmp_path)
+    manifest = execution["artifact_manifest"]
+    assert manifest["entries"] == [
+        {
+            "kind": "file",
+            "path": "synthetic-artifact.json",
+            "sha256": qualification._sha256_file(
+                Path(host["probe_storage"]["artifact_root"]) / "synthetic-artifact.json"
+            ),
+            "size_bytes": 19,
+        }
+    ]
+
+    inconsistent = copy.deepcopy(execution)
+    inconsistent["artifact_manifest"]["file_count"] = 2
+    with pytest.raises(ValueError, match="aggregates do not match"):
+        verify_record(_resign(inconsistent))
+
+    assessment = assess_qualification(
+        static_record=host,
+        e192_record=e192,
+        e768_record=e768,
+        probe_execution_result=execution,
+        probe_benchmark_result=benchmark,
+        available_window_hours=96.0,
+        recovery_margin_hours=12.0,
+        proc_root=tmp_path / "proc",
+        machine_id_path=tmp_path / "machine-id",
+    )
+    artifact = Path(host["probe_storage"]["artifact_root"]) / "synthetic-artifact.json"
+    artifact.write_text('{"synthetic":false}\n', encoding="utf-8")
+    changed = assess_qualification(
+        static_record=host,
+        e192_record=e192,
+        e768_record=e768,
+        probe_execution_result=execution,
+        probe_benchmark_result=benchmark,
+        available_window_hours=96.0,
+        recovery_margin_hours=12.0,
+        proc_root=tmp_path / "proc",
+        machine_id_path=tmp_path / "machine-id",
+    )
+    assert not changed["checks"]["probe_artifacts_current"]
+    assert not changed["decision"]["qualification_passed"]
+    with pytest.raises(ValueError, match="does not match its bound"):
+        verify_assessment_bundle(
+            assessment_record=assessment,
+            static_record=host,
+            e192_record=e192,
+            e768_record=e768,
+            probe_execution_record=execution,
+            probe_benchmark_record=benchmark,
+            proc_root=tmp_path / "proc",
+            machine_id_path=tmp_path / "machine-id",
+        )
+
+
+def test_live_probe_verification_keeps_one_descriptor_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = tmp_path / "storage"
+    root = storage / "probe"
+    root.mkdir(parents=True)
+    (root / "original.json").write_text("{}", encoding="utf-8")
+    displaced = storage / "displaced"
+    original_manifest = qualification._artifact_manifest_from_descriptor
+
+    def replace_root_after_open(descriptor):
+        root.rename(displaced)
+        root.mkdir()
+        (root / "replacement.json").write_text("{}", encoding="utf-8")
+        return original_manifest(descriptor)
+
+    monkeypatch.setattr(
+        qualification,
+        "_artifact_manifest_from_descriptor",
+        replace_root_after_open,
+    )
+    with pytest.raises(ValueError, match="changed during verification"):
+        qualification._current_artifact_evidence(
+            root,
+            storage_root=storage,
+        )
+
+
+def test_cli_protects_separate_tool_repository_outputs(tmp_path: Path) -> None:
+    tool_repository = tmp_path / "tool"
+    tool_git_directory = tmp_path / "git" / "tool"
+    host = {
+        "execution": {
+            "repository": str(tmp_path / "execution"),
+            "git_directory": str(tmp_path / "git" / "execution"),
+        },
+        "tool": {
+            "repository": str(tool_repository),
+            "git_directory": str(tool_git_directory),
+        },
+        "storage": {"storage_root": str(tmp_path / "storage")},
+        "probe_storage": {"artifact_root": str(tmp_path / "storage" / "probe")},
+    }
+
+    roots = qualification_cli._protected_roots(host)
+    assert tool_repository in roots
+    assert tool_git_directory in roots
+    for protected in (tool_repository, tool_git_directory):
+        with pytest.raises(ValueError, match="outside protected root"):
+            validate_output_path(
+                protected / "qualification.json",
+                forbidden_roots=roots,
+            )

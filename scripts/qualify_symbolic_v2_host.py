@@ -165,6 +165,9 @@ def _parser() -> argparse.ArgumentParser:
 def _protected_roots(host: dict[str, object]) -> tuple[Path, ...]:
     return (
         Path(host["execution"]["repository"]),  # type: ignore[index]
+        Path(host["execution"]["git_directory"]),  # type: ignore[index]
+        Path(host["tool"]["repository"]),  # type: ignore[index]
+        Path(host["tool"]["git_directory"]),  # type: ignore[index]
         Path(host["storage"]["storage_root"]),  # type: ignore[index]
         Path(host["probe_storage"]["artifact_root"]),  # type: ignore[index]
     )
