@@ -285,8 +285,9 @@ the preregistered distribution-free split-sample certification selects a
 finite candidate environment count. The 10,000 paired-cluster bootstrap runs
 are conditional diagnostics and never select or rescue a candidate. Calibration
 superiority and equivalence p-values are descriptive, not continuation gates.
-The calibration and confirmatory phase masters are distinct, while the three
-algorithm seeds are a fixed preregistered nuisance block shared across phases.
+The calibration and confirmatory phase masters are distinct, while each
+study's algorithm seeds form one fixed preregistered nuisance bank shared
+across phases: three replicas in v1 and eight in v2.
 Any post-freeze source, dependency-lock, or execution-environment change
 invalidates confirmatory execution instead of silently creating a new study.
 
@@ -350,7 +351,10 @@ and frontier records as the real loader does while retaining per-checkpoint
 metric tuples. It does not measure raw-inventory traversal, filesystem/JSON
 I/O, artifact authentication, `load_run_trees`, bootstrap/statistical
 reporting, or output writes, so it is an in-memory analysis benchmark rather
-than an end-to-end runtime estimate.
+than an end-to-end runtime estimate. It also does not execute deterministic
+canaries or supplemental evidence, including the transient per-gate
+trajectory/comparison and residual objects used by the legacy base-canary
+evaluator while producing v2 compact evidence.
 
 The largest v1 confirmation candidate, 512 environment replicas,
 contains 718,848 observations. The measured maximum-shape run constructed and
@@ -366,13 +370,23 @@ authenticated post-query reward and its cumulative mean. The compact-canary
 inventory contains exactly \(992EA\) detail records: 1,523,712 at calibration
 and 6,094,848 at the largest candidate.
 
-The production v2 evaluator writes each canonical 4,096-record detail chunk
-directly into the transactional report directory and retains only the bounded
-buffer, report summaries, and chunk references. It also derives the aggregate
-metric one exact group at a time instead of indexing all 48 groups
-simultaneously. This removes the projected 0.92-GiB calibration and 3.68-GiB
-maximum detail JSON from the Python heap; those bytes still require output
-disk. The retained observation dataset remains the dominant memory cost.
+The production v2 compact-detail writer sends each canonical 4,096-record
+detail chunk directly into the transactional report directory and retains only
+that bounded detail buffer, report summaries, and chunk references. The
+aggregate gate is likewise derived one exact group at a time instead of
+indexing all 48 groups simultaneously. This removes the projected 0.92-GiB
+calibration and 3.68-GiB maximum retained detail JSON from the Python heap;
+those bytes still require output disk.
+
+That bounded retention guarantee applies to compact detail artifacts, not to
+every transient object in the current evaluator. Each legacy base-canary
+adapter evaluates one registered gate at a time and can temporarily
+materialize that gate's trajectory comparisons or residual records before
+they are compacted and spooled. The exact-shape analysis benchmark above
+measures dataset construction, hashing, and pooling; it does not measure this
+per-gate canary working set, supplemental evaluation, raw loading, or report
+serialization. The 64-GiB pre-measurement requirement and equal-free-RAM gate
+therefore remain conservative requirements for the complete reporting host.
 
 Before the first v2 calibration run, and again before executing a selected
 confirmation count, the intended reporting host must complete both exact-shape

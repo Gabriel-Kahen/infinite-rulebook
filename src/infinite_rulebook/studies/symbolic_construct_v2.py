@@ -72,7 +72,7 @@ SYMBOLIC_V2_DESIGN_HASH = (
     "a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114"
 )
 SYMBOLIC_V2_COMPONENT_HASH = (
-    "b5ff912ecf7d1c070dccf433d605566d5db9bbc962f524a2409077094f1d8986"
+    "5f56c6fa65c0598d9cfa35d7425479b6fd21f0ab18f1f5330a101274a34a730f"
 )
 
 PAIRED_PATH_ABSOLUTE_TOLERANCE = 1e-12
@@ -105,6 +105,7 @@ MINIMUM_JOINT_POWER = 0.80
 MAXIMUM_GLOBAL_NULL_FWER = 0.05
 S5_REWARD_EQUIVALENCE_MARGIN = 0.25
 S5_BOOTSTRAP_DIAGNOSTIC_LOCATION = 0.0
+POWER_SELECTION_RULE = "smallest-candidate-meeting-every-certified-target"
 COMPACT_CANARY_DETAIL_CHUNK_RECORDS = 4096
 
 S1 = "scheduled-over-fixed-hidden-reward"
@@ -139,6 +140,27 @@ S5_REWARD_MARGIN_PROVENANCE_HASH = scientific_hash(
     },
     domain="symbolic-equivalence-margin-registration",
 )
+
+
+def _registered_confirmatory_tolerances(
+    config: ExperimentConfig,
+) -> dict[str, float]:
+    """Return freeze tolerances without recursively verifying the component hash."""
+
+    return {
+        "aggregate_metric_absolute_error": AGGREGATE_METRIC_ABSOLUTE_TOLERANCE,
+        "artifact_completion_fraction": ARTIFACT_COMPLETION_FRACTION,
+        "frontier_bound_tolerance_nats": config.solver.bound_tolerance,
+        "ledger_reconciliation_nats": LEDGER_RECONCILIATION_TOLERANCE,
+        "paired_path_absolute_error": PAIRED_PATH_ABSOLUTE_TOLERANCE,
+    }
+
+
+def _registered_confirmatory_margins() -> dict[str, float]:
+    return {
+        **PRIMARY_MINIMUM_EFFECTS,
+        S5_EQUIVALENCE: S5_REWARD_EQUIVALENCE_MARGIN,
+    }
 
 
 def expected_analysis_groups(config: ExperimentConfig) -> tuple[ExpectedGroup, ...]:
@@ -527,9 +549,38 @@ def registration_component_payload(config: ExperimentConfig) -> dict[str, object
             "may_rescue_compound_s2": False,
         },
         "power": {
+            "candidate_environment_counts": list(POWER_CANDIDATE_ENVIRONMENTS),
+            "calibration_environment_count": (
+                SYMBOLIC_V2_CALIBRATION_ENVIRONMENT_REPLICAS
+            ),
+            "center_environment_count": POWER_CENTER_ENVIRONMENTS,
+            "probability_environment_count": POWER_PROBABILITY_ENVIRONMENTS,
+            "simulations": POWER_SIMULATIONS,
             "seed": POWER_SEED,
             "rng_stream": POWER_RNG_STREAM,
-            "candidate_environment_counts": list(POWER_CANDIDATE_ENVIRONMENTS),
+            "alpha": POWER_ALPHA,
+            "simulation_error_alpha": POWER_SIMULATION_ERROR_ALPHA,
+            "design_confidence_alpha": POWER_DESIGN_CONFIDENCE_ALPHA,
+            "minimum_individual_power": MINIMUM_INDIVIDUAL_POWER,
+            "minimum_equivalence_power": MINIMUM_EQUIVALENCE_POWER,
+            "minimum_joint_power": MINIMUM_JOINT_POWER,
+            "maximum_global_null_fwer": MAXIMUM_GLOBAL_NULL_FWER,
+            "maximum_false_equivalence_boundary_error": MAXIMUM_GLOBAL_NULL_FWER,
+            "primary_minimum_effects": {
+                name: PRIMARY_MINIMUM_EFFECTS[name]
+                for name in sorted(PRIMARY_MINIMUM_EFFECTS)
+            },
+            "s5_equivalence": {
+                "name": S5_EQUIVALENCE,
+                "margin": S5_REWARD_EQUIVALENCE_MARGIN,
+                "margin_provenance_hash": S5_REWARD_MARGIN_PROVENANCE_HASH,
+                "diagnostic_location": S5_BOOTSTRAP_DIAGNOSTIC_LOCATION,
+            },
+            "selection_rule": POWER_SELECTION_RULE,
+        },
+        "confirmatory_freeze": {
+            "tolerances": _registered_confirmatory_tolerances(config),
+            "margins": _registered_confirmatory_margins(),
         },
         "stage_0_prerequisite": {
             "role": "operational-not-inferential",
@@ -819,20 +870,11 @@ def expected_confirmatory_tolerances(
     config: ExperimentConfig,
 ) -> dict[str, float]:
     _verify_scientific_design(config)
-    return {
-        "aggregate_metric_absolute_error": AGGREGATE_METRIC_ABSOLUTE_TOLERANCE,
-        "artifact_completion_fraction": ARTIFACT_COMPLETION_FRACTION,
-        "frontier_bound_tolerance_nats": config.solver.bound_tolerance,
-        "ledger_reconciliation_nats": LEDGER_RECONCILIATION_TOLERANCE,
-        "paired_path_absolute_error": PAIRED_PATH_ABSOLUTE_TOLERANCE,
-    }
+    return _registered_confirmatory_tolerances(config)
 
 
 def expected_confirmatory_margins() -> dict[str, float]:
-    return {
-        **PRIMARY_MINIMUM_EFFECTS,
-        S5_EQUIVALENCE: S5_REWARD_EQUIVALENCE_MARGIN,
-    }
+    return _registered_confirmatory_margins()
 
 
 def expected_confirmatory_registration(config: ExperimentConfig) -> str:
@@ -1104,6 +1146,7 @@ __all__ = [
     "POWER_PROBABILITY_ENVIRONMENTS",
     "POWER_RNG_STREAM",
     "POWER_SEED",
+    "POWER_SELECTION_RULE",
     "POWER_SIMULATIONS",
     "POWER_SIMULATION_ERROR_ALPHA",
     "PRIMARY_MINIMUM_EFFECTS",

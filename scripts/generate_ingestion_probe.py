@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from infinite_rulebook.orchestration.config import (
+    SYMBOLIC_V2_INGESTION_PROBE_EXPERIMENT_NAME,
     ExperimentConfig,
     load_experiment_config,
 )
@@ -23,7 +24,7 @@ _PROBE_IDENTITIES = {
         "irb-symbolic-artifact-ingestion-probe-algorithm-v1",
     ),
     2: (
-        "symbolic-artifact-ingestion-probe-v2",
+        SYMBOLIC_V2_INGESTION_PROBE_EXPERIMENT_NAME,
         "irb-symbolic-artifact-ingestion-probe-v2",
         "irb-symbolic-artifact-ingestion-probe-algorithm-v2",
     ),

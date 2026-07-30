@@ -68,15 +68,23 @@ from infinite_rulebook.studies.symbolic_registry import (
 # Backward-compatible module constants for callers that inspected the v1 CLI.
 POWER_SIMULATIONS = SYMBOLIC_STUDY_V1.power.simulations
 POWER_CANDIDATE_ENVIRONMENTS = SYMBOLIC_STUDY_V1.power.candidate_environment_counts
+POWER_CENTER_ENVIRONMENTS = SYMBOLIC_STUDY_V1.power.center_environment_count
+POWER_PROBABILITY_ENVIRONMENTS = SYMBOLIC_STUDY_V1.power.probability_environment_count
 POWER_SEED = SYMBOLIC_STUDY_V1.power.seed
 POWER_ALPHA = SYMBOLIC_STUDY_V1.power.alpha
 POWER_SIMULATION_ERROR_ALPHA = SYMBOLIC_STUDY_V1.power.simulation_error_alpha
+POWER_DESIGN_CONFIDENCE_ALPHA = SYMBOLIC_STUDY_V1.power.design_confidence_alpha
 MINIMUM_INDIVIDUAL_POWER = SYMBOLIC_STUDY_V1.power.minimum_individual_power
 MINIMUM_EQUIVALENCE_POWER = SYMBOLIC_STUDY_V1.power.minimum_equivalence_power
 MINIMUM_JOINT_POWER = SYMBOLIC_STUDY_V1.power.minimum_joint_power
 MAXIMUM_GLOBAL_NULL_FWER = SYMBOLIC_STUDY_V1.power.maximum_global_null_fwer
 PRIMARY_MINIMUM_EFFECTS = SYMBOLIC_STUDY_V1.power.minimum_effects
+S5_BOOTSTRAP_DIAGNOSTIC_LOCATION = (
+    SYMBOLIC_STUDY_V1.power.equivalence_diagnostic_location
+)
 S5_REWARD_EQUIVALENCE_MARGIN = SYMBOLIC_STUDY_V1.power.equivalence_margin
+SYMBOLIC_V1_CONFIRMATORY_MASTER_SEED = SYMBOLIC_STUDY_V1.confirmatory_master_seed
+SYMBOLIC_V1_CONFIRMATORY_NAME = SYMBOLIC_STUDY_V1.confirmatory_name
 
 
 def _parser() -> argparse.ArgumentParser:

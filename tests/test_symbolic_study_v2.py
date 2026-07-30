@@ -22,6 +22,7 @@ from infinite_rulebook.orchestration.freeze import (
     SeedBankIdentities,
     freeze_experiment_config,
 )
+from infinite_rulebook.studies import symbolic_construct_v2 as v2
 from infinite_rulebook.studies.symbolic_construct_v2 import (
     LEGACY_D6_REPLICATION,
     POWER_CANDIDATE_ENVIRONMENTS,
@@ -133,10 +134,10 @@ def test_v2_plan_has_six_exact_primaries_and_no_scope_reduction() -> None:
         PRIMARY_MINIMUM_EFFECTS
     )
     assert plan.scientific_hash == (
-        "8ae60a635d6ee10921daa396800892024ce81f11413d5c6f967650bf6bb8e279"
+        "aef2100b60636a86f73f871a2b9f99346b2207762b872ec8262a512226a1f6fc"
     )
     assert plan.registration_hash == (
-        "bbc4151bd6dc8171f9343911f9ad047ad02d213976b42d3f92edbea4f79af615"
+        "747b53dc6fafbf354c595e20d57269270230a5f9d05a655a7df9da0e4903a1d0"
     )
     by_name = {contrast.name: contrast for contrast in plan.contrasts}
     assert by_name[S2_EARLY].metric == ("post_query_mean_hidden_expected_reward")
@@ -214,6 +215,108 @@ def test_v2_component_binds_compound_non_rescue_and_compact_evidence() -> None:
         "evidence_hash": SYMBOLIC_V2_SMOKE_PREREQUISITE_HASH,
         "does_not_replace_v2_adapter_validation": True,
     }
+
+
+def test_v2_component_binds_complete_power_and_freeze_decision_contract() -> None:
+    config = load_experiment_config(_CONFIG)
+    component = registration_component_payload(config)
+
+    assert component["power"] == {
+        "candidate_environment_counts": list(v2.POWER_CANDIDATE_ENVIRONMENTS),
+        "calibration_environment_count": 192,
+        "center_environment_count": 64,
+        "probability_environment_count": 128,
+        "simulations": 10_000,
+        "seed": "bounded-symbolic-power-v2",
+        "rng_stream": "analysis.cluster-power.v2",
+        "alpha": 0.05,
+        "simulation_error_alpha": v2.POWER_SIMULATION_ERROR_ALPHA,
+        "design_confidence_alpha": v2.POWER_DESIGN_CONFIDENCE_ALPHA,
+        "minimum_individual_power": 0.90,
+        "minimum_equivalence_power": 0.90,
+        "minimum_joint_power": 0.80,
+        "maximum_global_null_fwer": 0.05,
+        "maximum_false_equivalence_boundary_error": 0.05,
+        "primary_minimum_effects": {
+            name: v2.PRIMARY_MINIMUM_EFFECTS[name]
+            for name in sorted(v2.PRIMARY_MINIMUM_EFFECTS)
+        },
+        "s5_equivalence": {
+            "name": v2.S5_EQUIVALENCE,
+            "margin": 0.25,
+            "margin_provenance_hash": v2.S5_REWARD_MARGIN_PROVENANCE_HASH,
+            "diagnostic_location": 0.0,
+        },
+        "selection_rule": "smallest-candidate-meeting-every-certified-target",
+    }
+    assert component["confirmatory_freeze"] == {
+        "tolerances": {
+            "aggregate_metric_absolute_error": 1e-12,
+            "artifact_completion_fraction": 1.0,
+            "frontier_bound_tolerance_nats": config.solver.bound_tolerance,
+            "ledger_reconciliation_nats": 1e-12,
+            "paired_path_absolute_error": 1e-12,
+        },
+        "margins": {
+            **v2.PRIMARY_MINIMUM_EFFECTS,
+            v2.S5_EQUIVALENCE: 0.25,
+        },
+    }
+
+
+def test_v2_component_hash_changes_with_every_decision_parameter_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_experiment_config(_CONFIG)
+    baseline = registration_component_hash(config)
+    mutations = (
+        {
+            "POWER_CANDIDATE_ENVIRONMENTS": (
+                *v2.POWER_CANDIDATE_ENVIRONMENTS,
+                1024,
+            )
+        },
+        {"SYMBOLIC_V2_CALIBRATION_ENVIRONMENT_REPLICAS": 193},
+        {"POWER_CENTER_ENVIRONMENTS": 63},
+        {"POWER_PROBABILITY_ENVIRONMENTS": 129},
+        {"POWER_SIMULATIONS": 9_999},
+        {"POWER_SEED": "changed-power-seed"},
+        {"POWER_RNG_STREAM": "analysis.cluster-power.changed"},
+        {"POWER_ALPHA": 0.04},
+        {"POWER_SIMULATION_ERROR_ALPHA": 0.02},
+        {"POWER_DESIGN_CONFIDENCE_ALPHA": 0.02},
+        {"MINIMUM_INDIVIDUAL_POWER": 0.89},
+        {"MINIMUM_EQUIVALENCE_POWER": 0.89},
+        {"MINIMUM_JOINT_POWER": 0.79},
+        {"MAXIMUM_GLOBAL_NULL_FWER": 0.04},
+        {
+            "PRIMARY_MINIMUM_EFFECTS": {
+                **v2.PRIMARY_MINIMUM_EFFECTS,
+                v2.S2_EARLY: 0.24,
+            }
+        },
+        {"S5_REWARD_EQUIVALENCE_MARGIN": 0.24},
+        {"S5_REWARD_MARGIN_PROVENANCE_HASH": "0" * 64},
+        {"S5_BOOTSTRAP_DIAGNOSTIC_LOCATION": 0.01},
+        {"POWER_SELECTION_RULE": "changed-selection-rule"},
+        {"AGGREGATE_METRIC_ABSOLUTE_TOLERANCE": 1e-11},
+        {"ARTIFACT_COMPLETION_FRACTION": 0.99},
+        {"LEDGER_RECONCILIATION_TOLERANCE": 1e-11},
+        {"PAIRED_PATH_ABSOLUTE_TOLERANCE": 1e-11},
+    )
+    for mutation in mutations:
+        with monkeypatch.context() as context:
+            for name, value in mutation.items():
+                context.setattr(v2, name, value)
+            assert registration_component_hash(config) != baseline, mutation
+
+    changed_solver = replace(
+        config.solver,
+        bound_tolerance=config.solver.bound_tolerance * 2.0,
+    )
+    assert (
+        registration_component_hash(replace(config, solver=changed_solver)) != baseline
+    )
 
 
 def test_v2_evidence_plans_are_exact_and_registration_bound() -> None:

@@ -24,20 +24,32 @@ SYMBOLIC_ADAPTER_CONTRACT_V2 = "exact-symbolic-adapter.v2"
 SYMBOLIC_ADAPTER_CONTRACT_VERSION = SYMBOLIC_ADAPTER_CONTRACT_V1
 SYMBOLIC_V2_CALIBRATION_EXPERIMENT_NAME = "symbolic-construct-calibration-v2"
 SYMBOLIC_V2_CONFIRMATORY_EXPERIMENT_NAME = "symbolic-construct-confirmatory-v2"
+SYMBOLIC_V2_INGESTION_PROBE_EXPERIMENT_NAME = "symbolic-artifact-ingestion-probe-v2"
 REPRODUCIBILITY_OPERATIONAL_DIRECTORY = ".infinite-rulebook-reproducibility"
 RESERVED_EXPERIMENT_NAMES = frozenset(
     {"_frontiers", REPRODUCIBILITY_OPERATIONAL_DIRECTORY}
 )
 
+_SYMBOLIC_V2_STUDY_PHASES = {
+    SYMBOLIC_V2_CALIBRATION_EXPERIMENT_NAME: "calibration",
+    SYMBOLIC_V2_CONFIRMATORY_EXPERIMENT_NAME: "confirmatory",
+}
+_SYMBOLIC_V2_OPERATIONAL_PHASES = {
+    SYMBOLIC_V2_INGESTION_PROBE_EXPERIMENT_NAME: "calibration",
+}
+_SYMBOLIC_V2_EXECUTION_PHASES = {
+    **_SYMBOLIC_V2_STUDY_PHASES,
+    **_SYMBOLIC_V2_OPERATIONAL_PHASES,
+}
+
 
 def registered_symbolic_v2_phase(name: str) -> str | None:
-    """Return the phase bound to an exact registered v2 experiment name."""
+    """Return the phase bound to an exact v2 adapter execution identity.
 
-    if name == SYMBOLIC_V2_CALIBRATION_EXPERIMENT_NAME:
-        return "calibration"
-    if name == SYMBOLIC_V2_CONFIRMATORY_EXPERIMENT_NAME:
-        return "confirmatory"
-    return None
+    Operational identities are not entries in the scientific study registry.
+    """
+
+    return _SYMBOLIC_V2_EXECUTION_PHASES.get(name)
 
 
 def symbolic_adapter_contract(name: str) -> str:

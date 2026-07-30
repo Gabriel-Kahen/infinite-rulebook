@@ -67,11 +67,11 @@ broader research program in `docs/research-plan.md`.
 - phase-independent scientific-design hash:
   `a7d38ff66ff113f0c4a1aaae89e73a39df95294ede8c073b04437de064f88114`
 - registration-component hash:
-  `b5ff912ecf7d1c070dccf433d605566d5db9bbc962f524a2409077094f1d8986`
+  `5f56c6fa65c0598d9cfa35d7425479b6fd21f0ab18f1f5330a101274a34a730f`
 - calibration analysis-plan hash:
-  `8ae60a635d6ee10921daa396800892024ce81f11413d5c6f967650bf6bb8e279`
+  `aef2100b60636a86f73f871a2b9f99346b2207762b872ec8262a512226a1f6fc`
 - calibration analysis-registration hash:
-  `bbc4151bd6dc8171f9343911f9ad047ad02d213976b42d3f92edbea4f79af615`
+  `747b53dc6fafbf354c595e20d57269270230a5f9d05a655a7df9da0e4903a1d0`
 - calibration compact-canary-plan hash:
   `645a509da5f3c66563df8d88796a7a10ca87e817fd0e4549536fd68095e06a9a`
 - calibration supplemental-plan hash:
@@ -79,8 +79,9 @@ broader research program in `docs/research-plan.md`.
 
 The registration component transitively binds the aggregate metric definition,
 compound-S2 rule, D12 role, legacy replication, expanded compact-canary
-inventory, power seed, RNG stream, and candidate grid into the ordinary
-analysis registration without changing v1 schemas or hashes.
+inventory, complete power-selection design, confirmatory tolerances, and
+confirmatory margins into the ordinary analysis registration without changing
+v1 schemas or hashes.
 
 ## Registered matrix
 

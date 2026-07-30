@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import infinite_rulebook.cli as cli
 from infinite_rulebook.analysis import AnalysisPhase, load_analysis_plan
 from infinite_rulebook.cli import (
     _completed_run_roots,
@@ -39,7 +40,31 @@ from infinite_rulebook.studies.symbolic_construct import (
     build_symbolic_analysis_plan,
     build_symbolic_canary_plan,
 )
-from infinite_rulebook.studies.symbolic_registry import SYMBOLIC_STUDY_V2
+from infinite_rulebook.studies.symbolic_registry import (
+    SYMBOLIC_STUDY_V1,
+    SYMBOLIC_STUDY_V2,
+)
+
+
+def test_v1_cli_module_constants_remain_backward_compatible() -> None:
+    expected = {
+        "POWER_CENTER_ENVIRONMENTS": SYMBOLIC_STUDY_V1.power.center_environment_count,
+        "POWER_PROBABILITY_ENVIRONMENTS": (
+            SYMBOLIC_STUDY_V1.power.probability_environment_count
+        ),
+        "POWER_DESIGN_CONFIDENCE_ALPHA": (
+            SYMBOLIC_STUDY_V1.power.design_confidence_alpha
+        ),
+        "S5_BOOTSTRAP_DIAGNOSTIC_LOCATION": (
+            SYMBOLIC_STUDY_V1.power.equivalence_diagnostic_location
+        ),
+        "SYMBOLIC_V1_CONFIRMATORY_MASTER_SEED": (
+            SYMBOLIC_STUDY_V1.confirmatory_master_seed
+        ),
+        "SYMBOLIC_V1_CONFIRMATORY_NAME": SYMBOLIC_STUDY_V1.confirmatory_name,
+    }
+
+    assert expected == {name: getattr(cli, name) for name in expected}
 
 
 def test_json_output_is_verified_before_publication(tmp_path: Path) -> None:
