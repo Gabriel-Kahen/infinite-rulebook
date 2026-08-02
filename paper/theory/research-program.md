@@ -2,7 +2,7 @@
 
 ## Working title
 
-**When Does Reward Require Information? Invariances and Degeneracies of the
+**When Does Reward Require Information? Foundations and Failure Modes of the
 Bit-Equivalent**
 
 ## Central question

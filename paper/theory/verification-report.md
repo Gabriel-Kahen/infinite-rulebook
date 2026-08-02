@@ -1,7 +1,8 @@
-# Pre-writing verification report
+# Theory-paper verification report
 
-**Status:** Internal verification complete enough to support continued drafting;
-external mathematical review has not yet occurred.
+**Status:** Canonical manuscript and rendered preprint complete; all internal
+mathematical, citation, artifact, and repository gates pass. External human
+mathematical review has not yet occurred.
 
 **Date:** 2026-08-01
 
@@ -31,6 +32,7 @@ counterexamples obtained by removing assumptions are in
 | Gate | Evidence | Result | Residual limitation |
 | --- | --- | --- | --- |
 | Executable theorem checks | Eleven deterministic tests in [`../../tests/test_theory_foundations.py`](../../tests/test_theory_foundations.py) | Passed | Representative finite instances and analytic truncations, not proofs |
+| Canonical paper artifact | Typst source, complete proof appendix, bibliography, 25-page PDF, and three integrity checks | Passed | Typesetting and executable checks do not replace peer review |
 | Assumption removal | Constructive counterexamples and boundary cases in [`assumption-stress-tests.md`](assumption-stress-tests.md) | No core theorem refuted inside its stated contract | Standard-Borel extensions remain conditional on measurable kernels and lifts |
 | Claim/proof audit | Claim-by-claim ledger in [`theorem-ledger.md`](theorem-ledger.md) | No known disqualifying error | Internal adversarial review is not independent peer review |
 | Literature/novelty audit | Primary-source comparison in [`systematic-literature-audit.md`](systematic-literature-audit.md) | Classical ingredients separated from intended application-level contributions | Absence of a located antecedent is not proof of novelty |
@@ -116,19 +118,22 @@ limit argument in the countable proof.
 
 ## Repository validation
 
-The integrated change passed the complete local gate:
+The completed paper change passed the complete local gate:
 
 ```text
-uv run pytest -q tests/test_theory_foundations.py  11 passed
-uv run pytest -q                             830 passed in 277.46s
+uv run pytest -q tests/test_theory_foundations.py tests/test_theory_paper.py  14 passed
+uv run pytest -q                             833 passed in 385.31s
 uv run ruff check .                          passed
-uv run ruff format --check .                 158 files formatted
+uv run ruff format --check .                 162 files formatted
 git diff --check                             passed
 uv build                                     sdist and wheel built
+typst compile paper/theory/paper.typ ...      25-page PDF built
 ```
 
 The full suite was run serially to keep memory use modest. The build produced
-both the source archive and the pure-Python wheel.
+both the source archive and the pure-Python wheel. PDF inspection found no
+blank pages, clipping, overflow, missing glyphs, unresolved citations, or
+unembedded fonts; all 25 rendered pages were inspected visually.
 
 ## Adversarial proof audit
 
@@ -175,12 +180,15 @@ The audit fixes the scope of the paper more sharply:
 
 ## Readiness judgment
 
-The theorem package is ready for continued paper drafting: each main claim has
-a proof draft, an explicit assumption contract, at least one hostile boundary
-case, and an executable sanity check where computation is informative. The
-draft is **not submission-ready** until an external information theorist or
-mathematical decision theorist reviews the packet and any resulting revisions
-are closed. Literature positioning should remain conservative: several core
-operations are classical, while the defensible contribution is their
-foundations-level synthesis and the specific consequences for the
+The canonical preprint is internally circulation-ready: each main claim has a
+complete proof, an explicit assumption contract, hostile boundary cases, and
+an executable sanity check where computation is informative. Two independent
+final internal passes found no remaining mathematical or layout defect, and a
+separate citation audit found no unresolved or materially unsupported
+reference. The paper is **not externally peer-reviewed**; before journal or
+conference submission, an information theorist or mathematical decision
+theorist should review the packet and any resulting revisions should be
+closed. Literature positioning remains conservative: several core operations
+are classical, while the paper-specific contribution is their foundations
+synthesis and the cubic classification-reversal consequence for the
 bit-equivalent definition.

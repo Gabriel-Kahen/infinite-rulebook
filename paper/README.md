@@ -5,7 +5,14 @@
 The active paper is a foundations study of the bit-equivalent. It does not
 depend on an empirical result.
 
-- [`theory/manuscript.md`](theory/manuscript.md) is the new manuscript draft.
+- [`theory/paper.typ`](theory/paper.typ) is the canonical, typeset manuscript.
+- [`../output/pdf/when-does-reward-require-information.pdf`](../output/pdf/when-does-reward-require-information.pdf)
+  is the compiled preprint.
+- [`theory/proofs.typ`](theory/proofs.typ) contains the complete proof appendix,
+  and [`theory/references.bib`](theory/references.bib) is the bibliography.
+- [`theory/README.md`](theory/README.md) gives the reproducible build command.
+- [`theory/manuscript.md`](theory/manuscript.md) is the earlier Markdown drafting
+  surface retained for traceability.
 - [`theory/research-program.md`](theory/research-program.md) fixes the four-part
   theorem program and its decision gates.
 - [`theory/literature-notes.md`](theory/literature-notes.md) tracks classical

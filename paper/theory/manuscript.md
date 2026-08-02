@@ -1,9 +1,10 @@
 # When Does Reward Require Information?
-## Invariances and Degeneracies of the Bit-Equivalent
+## Foundations and Failure Modes of the Bit-Equivalent
 
-**Status:** Theory manuscript draft. Internal proof, assumption, numerical, and
-literature audits are complete; theorem numbering and priority claims remain
-provisional pending external mathematical review.
+**Status:** Earlier Markdown drafting surface retained for traceability. The
+canonical typeset manuscript is [`paper.typ`](paper.typ), with complete proofs
+in [`proofs.typ`](proofs.typ). Priority claims remain provisional pending
+external mathematical review.
 
 ## Abstract
 
