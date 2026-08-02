@@ -1,8 +1,25 @@
-# Manuscript workspace
+# Paper workspaces
 
-This directory is the result-safe writing workspace for the Infinite Rulebook
-paper. It deliberately separates claims that already have public evidence from
-registered analyses whose outcomes do not yet exist.
+## Active theory paper
+
+The active paper is a foundations study of the bit-equivalent. It does not
+depend on an empirical result.
+
+- [`theory/manuscript.md`](theory/manuscript.md) is the new manuscript draft.
+- [`theory/research-program.md`](theory/research-program.md) fixes the four-part
+  theorem program and its decision gates.
+- [`theory/literature-notes.md`](theory/literature-notes.md) tracks classical
+  antecedents and provisional novelty boundaries.
+
+The technical theorem and proof draft lives in
+[`docs/bit-equivalent-foundations.md`](../docs/bit-equivalent-foundations.md).
+
+## Archived experimental scaffold
+
+The earlier Infinite Rulebook manuscript remains in the repository as a
+result-safe historical scaffold. It is not the active theory paper. It
+deliberately separates claims that already have public evidence from registered
+analyses whose outcomes do not yet exist.
 
 The current manuscript may report:
 
@@ -16,7 +33,7 @@ It may not report or imply v2 pilot, calibration, confirmatory, or outcome
 results. Those sections remain explicitly marked `PRE-DATA` until authenticated
 registered evidence is released.
 
-## Files
+### Files
 
 - [`manuscript.md`](manuscript.md) is the paper scaffold.
 - [`evidence-map.md`](evidence-map.md) maps the manuscript's principal claim
