@@ -73,16 +73,23 @@ well defined, nondegenerate, and compositional.
   adaptive learning-target algorithms remain separate projects unless the
   four-part theorem package becomes too small after the novelty audit.
 
-## Decision gates
+## Decision gates and status
 
-Before drafting the full manuscript:
+Pre-writing gates:
 
-1. Complete proof-level statements for the finite setting.
-2. Determine which results are standard rate--distortion corollaries and which
-   are new in the open-ended-learning setting.
-3. Produce at least one classification-changing nonlinear reward
+1. **Complete internally:** proof-level statements are present for the finite
+   setting, with the infinite constructions isolated under separate contracts.
+2. **Complete internally:** the systematic literature audit identifies the
+   static rate--utility frontier and finite product law as classical and the
+   classification reversal as the strongest apparently new result.
+3. **Complete:** produce at least one classification-changing nonlinear reward
    counterexample and one nonattained zero-frontier example. The prefix-query
-   construction with the cubic reward transform currently supplies the first.
-4. Generalize at least one result beyond identical independent coordinates;
-   otherwise the composition contribution is too narrow.
-5. Obtain an adversarial mathematical review of every theorem.
+   construction with the cubic reward transform supplies the first; both
+   boundary and positive-gap nonattainment examples supply the second.
+4. **Complete under an explicit contract:** the finite infimal-convolution law
+   handles nonidentical components, and the countable iid theorem identifies
+   the component frontier's local slope.
+5. **Internal review complete; external review pending:** every theorem has an
+   assumption ledger, hostile counterexamples, and an adversarial internal
+   review. The external-review packet still needs an independent human
+   information theorist or mathematical decision theorist.

@@ -510,18 +510,6 @@ then \(B_{\mathsf D}(\rho)=0\) for every finite \(\rho>b\). Choose
 \(d_n=(\rho-b)/(R_n-b)\). This is the general mechanism behind increasingly
 valuable behavior used with increasingly small probability.
 
-The unrestricted redundant construction realizes this failure. Let
-\(Z=s(\Theta)\) be a finite reward-sufficient core with \(H(Z)<\infty\).
-Reveal \(Z\) with probability \(d=\rho/(Mu)\), deploy \(M\) correct surface
-rules when it is revealed, and abstain otherwise. Its reward remains
-\(\rho\), while source reduction gives
-\(I(\Theta;A)=I(Z;A)\leq dH(Z)\to0\). The reward
-mass escapes to increasingly rare events of increasing magnitude.
-
-Finite expected support does not block this witness:
-\(\mathbb E\lVert A\rVert_0=dM=\rho/u\). A hard support cap, summable reward,
-or a uniform superlinear support moment can do so.
-
 #### Strict-margin example
 
 Let \(\Theta\) be uniform on \([q]\). The actions are abstention and pairs
@@ -540,6 +528,12 @@ Thus strict negative uninformed reward does not by itself prevent collapse
 when informed payoff magnitude is unbounded. The reward family is not
 uniformly integrable: for every fixed cutoff \(K\), its upper tail retains
 expectation \(\rho\) once \(Mu>K\).
+
+If \((M,j)\) is interpreted as deploying \(M\) identical copies of rule
+\(j\), then the activated witness has expected deployment count
+\(d_M M=\rho/u\). Thus finite expected support alone does not block this
+collapse mechanism. A hard support cap or a uniform superlinear support
+moment can do so.
 
 Collapse need not use rare activation. With a fair sign
 \(\Theta\in\{-1,+1\}\), actions \((n,s)\), and reward

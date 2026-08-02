@@ -10,6 +10,15 @@ depend on an empirical result.
   theorem program and its decision gates.
 - [`theory/literature-notes.md`](theory/literature-notes.md) tracks classical
   antecedents and provisional novelty boundaries.
+- [`theory/verification-report.md`](theory/verification-report.md) records the
+  pre-writing numerical, assumption, proof, and literature gates.
+- [`theory/theorem-ledger.md`](theory/theorem-ledger.md) and
+  [`theory/assumption-stress-tests.md`](theory/assumption-stress-tests.md)
+  make every theorem's assumptions and failure modes explicit.
+- [`theory/systematic-literature-audit.md`](theory/systematic-literature-audit.md)
+  gives the primary-source novelty audit and safe positioning language.
+- [`theory/external-review-brief.md`](theory/external-review-brief.md) is a
+  reviewer-ready packet; it does not imply that external review has occurred.
 
 The technical theorem and proof draft lives in
 [`docs/bit-equivalent-foundations.md`](../docs/bit-equivalent-foundations.md).

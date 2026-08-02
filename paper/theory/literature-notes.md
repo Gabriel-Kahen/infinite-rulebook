@@ -33,6 +33,9 @@ presented as wholly new information theory.
 The same mutual-information/expected-utility optimization also appears in
 rational inattention and information-theoretic bounded rationality.
 
+- T. Genewein, F. Leibfried, J. Grau-Moya, and D. A. Braun, “Bounded
+  Rationality, Abstraction, and Hierarchical Decision-Making,” 2015:
+  <https://doi.org/10.3389/frobt.2015.00027>
 - C. Sims, “Implications of Rational Inattention,” 2003:
   <https://pages.stern.nyu.edu/~dbackus/Exotic/1Robustness/Sims%20inattention%20JME%2003.pdf>
 - F. Matějka and A. McKay, “Rational Inattention to Discrete Choices,” 2015:
@@ -105,8 +108,8 @@ Potentially substantive when assembled and strengthened:
 - positive-affine maps as the maximal *universal frontier-invariance* class;
 - an invertible monotone reward transform that flips open-endedness while
   preserving feedback information;
-- a taxonomy separating attained zero information, nonattained collapse, and
-  infeasibility;
+- a taxonomy separating attained zero information, boundary nonattainment,
+  positive-gap collapse, and infeasibility;
 - the necessity of uncontrolled tails for vanishing-information sequences at
   a fixed positive reward gap, interpreted for the bit-equivalent;
 - strict-margin counterexamples showing that a negative uninformed baseline
@@ -119,5 +122,7 @@ Potentially substantive when assembled and strengthened:
 The safest positioning is a synthesis of classical rate--distortion,
 expected-utility, and statistical-experiment theory that exposes previously
 unreported robustness failures of the 2026 bit-equivalent/open-endedness
-definition. This list remains provisional pending a systematic literature
-review and expert mathematical review.
+definition. The completed primary-source search and claim-level risk assessment
+are in [`systematic-literature-audit.md`](systematic-literature-audit.md).
+Priority claims remain provisional pending expert mathematical review and
+citation chaining.

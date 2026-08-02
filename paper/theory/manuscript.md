@@ -1,19 +1,22 @@
 # When Does Reward Require Information?
 ## Invariances and Degeneracies of the Bit-Equivalent
 
-**Status:** Theory manuscript draft. All theorem numbering and novelty claims
-are provisional pending full proofs and literature review.
+**Status:** Theory manuscript draft. Internal proof, assumption, numerical, and
+literature audits are complete; theorem numbering and priority claims remain
+provisional pending external mathematical review.
 
 ## Abstract
 
 The bit-equivalent of a reward level is the infimum mutual information between
 an unknown environment and an action required to attain that reward in
 expectation. It has recently been proposed as the basis of an
-information-theoretic definition of open-ended learning. We study the
-foundations of this quantity as a Bayesian reward--information frontier. First,
-we prove that positive-affine reward transformations preserve the frontier and
-average bit-equivalent exactly, and that they are the only pointwise
-transformations with this property uniformly over finite decision problems.
+information-theoretic definition of open-ended learning. Mathematically, this
+quantity is the classical rate--utility frontier, but its new use as an
+open-endedness criterion raises semantic and limiting questions not settled by
+that identification. We study those foundations. First, we record that
+positive-affine reward transformations preserve the frontier and average
+bit-equivalent exactly, and give a frontier-level formulation of their
+classical universal maximality.
 We then construct an environment whose open-endedness classification is
 reversed by an invertible monotone reward transformation despite unchanged
 feedback information. Second, for finite Bayesian decision problems we prove
@@ -23,15 +26,15 @@ source-independent admissible lift. Third, we give a
 quantitative lower bound preventing zero-information collapse strictly above
 the best source-independent reward when reward has bounded oscillation, and we
 show that any vanishing-information sequence maintaining a fixed positive
-reward gap must lose uniform integrability. Finally, we derive an
-infimal-convolution law for finite independent additive decision problems,
-recover identical finite tensorization, and prove a countable-product
-local-slope formula under an explicit finite-expected-support contract.
-Together, these
-results clarify when reward-relevant information is invariant, when it is
-nondegenerate, and when local decision demands compose into an open-ended
-frontier. They also show that the resulting notion of open-endedness is
-cardinal rather than ordinal and requires explicit control of reward tails.
+reward gap must lose uniform integrability. Finally, we translate Shannon's
+finite product-source law into reward coordinates and derive a
+countable-product local-slope formula under an explicit
+finite-expected-support contract. Together, these results clarify when
+reward-relevant information is invariant, when it is nondegenerate, and when
+local decision demands compose into a countable information-demand frontier.
+They also show that the resulting notion of
+open-endedness is cardinal rather than ordinal and requires explicit control
+of reward tails.
 
 ## 1. Introduction
 
@@ -51,6 +54,13 @@ which prices a reward target by the least information that successful behavior
 must contain about the environment. Xu, Zhu, and Van Roy (2026) then call an
 environment open-ended when some interacting agent sustains linear growth in
 the average bit-equivalent of its rewards.
+
+The static optimization itself is established. It is Shannon's
+rate--distortion function after setting distortion to a constant minus reward,
+and Genewein et al. (2015) explicitly study the same constrained
+mutual-information problem as a *rate--utility function*. The new issue is what
+happens when this familiar object is promoted from a coding or
+bounded-rationality tradeoff to a semantic criterion for open-ended capability.
 
 This definition raises foundational questions before questions of measurement
 or algorithm design. Does the quantity depend on irrelevant coordinates in
@@ -74,23 +84,26 @@ definition rather than failures of a numerical estimator.
 
 ### 1.1 Contributions
 
-Our target contributions are:
+Our results and synthesis are:
 
-1. **Reward relativity.** We prove exact positive-affine invariance and a
-   universal maximality theorem. We give an explicit infinite decision problem
+1. **Reward relativity.** We formulate exact positive-affine invariance and
+   universal maximality at the frontier level. More importantly, we give an
+   explicit infinite decision problem
    that is open-ended under reward \(r\) and non-open-ended under the
    invertible transformation \(r^3\), while its feedback remains recoverable.
-2. **Representation invariance.** We prove exact reduction to
+2. **Representation invariance.** We specialize sufficiency and data
+   processing to obtain exact reduction to
    reward-sufficient environment statistics and exact quotienting of
    behaviorally equivalent actions whenever a source-independent admissible
    lift exists.
-3. **Nondegeneracy.** We lower-bound the frontier above the best uninformed
-   reward whenever reward has bounded oscillation. We show that any
+3. **Nondegeneracy.** We use Pinsker's inequality to lower-bound the frontier
+   above the best uninformed reward whenever reward has bounded oscillation.
+   We show that any
    vanishing-information sequence maintaining reward a fixed positive amount
    above that baseline must lose uniform integrability.
-4. **Composition.** We prove an infimal-convolution identity for finite
-   independent additive decision problems and recover identical-coordinate
-   finite tensorization. Under a pointwise null action and a
+4. **Composition.** We translate Shannon's finite product-source
+   infimal-convolution identity into reward coordinates. Under a pointwise
+   null action and a
    finite-expected-support contract, we prove that the countable frontier is
    linear with slope equal to the component frontier's local slope at zero.
 
@@ -137,9 +150,10 @@ that an independent action actually attains \(\rho\), or only that a sequence
 of increasingly extreme channels approaches zero information.
 
 The finite frontier is nondecreasing and convex. Mathematically it is a
-reward-sign version of Shannon's classical rate--distortion function. Our claims are
-therefore not that this static optimization is new, but that its use as a
-definition of open-endedness creates unresolved semantic and limiting
+reward-sign version of Shannon's classical rate--distortion function, also
+called a rate--utility function in information-constrained decision making.
+Our claim is therefore not that this static optimization is new, but that its
+use as a definition of open-endedness creates unresolved semantic and limiting
 questions.
 
 ## 3. Reward semantics
@@ -179,7 +193,7 @@ The proof uses one-action lotteries. Constant lotteries identify the threshold
 relabeling with \(g\); arbitrary two-point lotteries then force
 \(\mathbb E[g(X)]=g(\mathbb E[X])\), hence Jensen equality and affinity. This
 is the frontier analogue of the classical cardinal character of expected
-utility.
+utility (Herstein and Milnor, 1953).
 
 The universal conclusion is sharp. A nonlinear map may be harmless on one
 finite payoff support, but no larger pointwise class works for all problems.
@@ -311,21 +325,27 @@ It follows that a vanishing-information sequence maintaining reward a fixed
 positive amount above \(R_0\) must violate uniform integrability. Boundedness
 is one sufficient tail contract, but not the only one.
 
-This yields a useful three-way distinction:
+This yields a useful four-way distinction:
 
 1. **Attained zero information:** a source-independent action distribution
    actually reaches the threshold.
-2. **Nonattained collapse:** every feasible channel has positive information,
-   but a tail-escaping sequence drives the infimum to zero.
-3. **Infeasibility:** no channel reaches the threshold.
+2. **Boundary nonattainment:** at \(\rho=R_0\), every feasible channel can have
+   positive information while a noncompact sequence drives the infimum to
+   zero, even with bounded reward.
+3. **Positive-gap collapse:** at \(\rho>R_0\), every feasible channel has
+   positive information while a sequence drives the infimum to zero; Theorem 7
+   says such a sequence must violate the stated uniform-integrability
+   condition.
+4. **Infeasibility:** no channel reaches the threshold.
 
-The second case is easy to miss if an infimum is casually called a minimum.
-It admits an on--off or flash-signaling-like construction: use increasingly
-valuable informed behavior with a vanishing activation probability. Even a
-strictly negative uninformed payoff for every nontrivial action does not stop
-collapse when informed payoff magnitude is unbounded. Collapse can also arise
-without rare activation, by combining vanishing source--action correlation
-with increasing reward leverage.
+The two nonattainment cases are easy to miss if an infimum is casually called
+a minimum, but their mechanisms differ. Positive-gap collapse admits an
+on--off or flash-signaling-like construction: use increasingly valuable
+informed behavior with a vanishing activation probability. Even a strictly
+negative uninformed payoff for every nontrivial action does not stop collapse
+when informed payoff magnitude is unbounded. Positive-gap collapse can also
+arise without rare activation, by combining vanishing source--action
+correlation with increasing reward leverage.
 
 Compactness closes the boundary loophole. With a Polish source, compact metric
 action space, all Borel kernels, and bounded continuous reward, the frontier
@@ -401,8 +421,9 @@ bit-equivalent as a capability price:
    not belong in the semantic target, even if they affect acquisition.
 3. **Price behavioral actions.** Raw representations should be quotiented only
    when a measurable, feasible, source-independent lift exists.
-4. **Control tails and admissibility.** A bounded, uniformly integrable, or
-   compact-continuous contract is needed to rule out unintended collapse.
+4. **Control tails and admissibility.** Boundedness or the stated uniform-
+   integrability contract rules out positive-gap collapse; compact-continuous
+   structure also closes the boundary nonattainment loophole.
 5. **Separate frontier geometry from learnability.** Tensorization says what
    successful behavior must encode. It does not show that an interaction
    protocol lets an agent discover that behavior.
@@ -436,9 +457,21 @@ sound before those programs begin.
   Approach,” 2021. <https://proceedings.mlr.press/v139/arumugam21a.html>
 - D. Blackwell, “Equivalent Comparisons of Experiments,” 1953.
   <https://projecteuclid.org/euclid.aoms/1177729032>
+- R. L. Dobrushin and B. S. Tsybakov, “Information Transmission With
+  Additional Noise,” 1962. <https://doi.org/10.1109/TIT.1962.1057738>
+- E. A. Feinberg, P. O. Kasyanov, and Y. Liang, “Fatou's Lemma for Weakly
+  Converging Measures Under the Uniform Integrability Condition,” 2018.
+  <https://arxiv.org/abs/1807.07931>
 - T. Genewein, F. Leibfried, J. Grau-Moya, and D. A. Braun, “Bounded
   Rationality, Abstraction, and Hierarchical Decision-Making,” 2015.
   <https://doi.org/10.3389/frobt.2015.00027>
+- I. N. Herstein and J. Milnor, “An Axiomatic Approach to Measurable Utility,”
+  1953. <https://doi.org/10.2307/1905540>
+- F. Matějka and A. McKay, “Rational Inattention to Discrete Choices,” 2015.
+  <https://doi.org/10.1257/aer.20130047>
+- M. S. Pinsker, *Information and Information Stability of Random Variables
+  and Processes*, 1964.
+  <https://openlibrary.org/books/OL5912677M/Information_and_information_stability_of_random_variables_and_processes>
 - C. E. Shannon, “Coding Theorems for a Discrete Source With a Fidelity
   Criterion,” 1959.
   <https://gwern.net/doc/cs/algorithm/information/1959-shannon.pdf>
@@ -446,5 +479,7 @@ sound before those programs begin.
   <https://doi.org/10.1109/18.57201>
 - J. von Neumann and O. Morgenstern, *Theory of Games and Economic Behavior*,
   1944. <https://www.jstor.org/stable/j.ctt1r2gkx>
+- H. S. Witsenhausen, “Indirect Rate Distortion Problems,” 1980.
+  <https://doi.org/10.1109/TIT.1980.1056251>
 - W. Xu, Y. Zhu, and B. Van Roy, “An Information-Theoretic Definition for
   Open-Ended Learning,” 2026. <https://arxiv.org/abs/2606.08369>
